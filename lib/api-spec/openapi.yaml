@@ -189,6 +189,8 @@ components:
           enum: [pending, extracted, reviewed, submitted]
         valuerName:
           type: ["string", "null"]
+        valuerPercentage:
+          type: ["number", "null"]
         licenseNumber:
           type: ["string", "null"]
         licenseDate:
@@ -196,6 +198,16 @@ components:
         membershipNumber:
           type: ["string", "null"]
         membershipType:
+          type: ["string", "null"]
+        secondValuerName:
+          type: ["string", "null"]
+        secondValuerPercentage:
+          type: ["number", "null"]
+        secondValuerLicenseNumber:
+          type: ["string", "null"]
+        secondValuerMembershipNumber:
+          type: ["string", "null"]
+        taqeemReportNumber:
           type: ["string", "null"]
         clientName:
           type: ["string", "null"]
@@ -310,6 +322,8 @@ components:
           type: ["string", "null"]
         valuerName:
           type: ["string", "null"]
+        valuerPercentage:
+          type: ["number", "null"]
         licenseNumber:
           type: ["string", "null"]
         licenseDate:
@@ -317,6 +331,16 @@ components:
         membershipNumber:
           type: ["string", "null"]
         membershipType:
+          type: ["string", "null"]
+        secondValuerName:
+          type: ["string", "null"]
+        secondValuerPercentage:
+          type: ["number", "null"]
+        secondValuerLicenseNumber:
+          type: ["string", "null"]
+        secondValuerMembershipNumber:
+          type: ["string", "null"]
+        taqeemReportNumber:
           type: ["string", "null"]
         clientName:
           type: ["string", "null"]

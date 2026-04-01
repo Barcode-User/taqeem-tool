@@ -123,6 +123,11 @@ router.post("/reports/upload", upload.single("pdf"), async (req, res) => {
   "costValue": "القيمة بأسلوب التكلفة (رقم فقط)",
   "finalValue": "القيمة المرجحة النهائية (رقم فقط)",
   "pricePerMeter": "سعر المتر المربع (رقم فقط)",
+  "valuerPercentage": "نسبة مشاركة المقيم الأول في التقرير (رقم من 0 إلى 100، مثل: 85 أو 15)",
+  "secondValuerName": "اسم المقيم الثاني المشارك في التقرير (إن وجد، وإلا null)",
+  "secondValuerLicenseNumber": "رقم ترخيص المقيم الثاني",
+  "secondValuerMembershipNumber": "رقم عضوية المقيم الثاني",
+  "secondValuerPercentage": "نسبة مشاركة المقيم الثاني (رقم من 0 إلى 100)",
   "companyName": "اسم شركة التقييم",
   "commercialRegNumber": "رقم السجل التجاري"
 }
@@ -186,6 +191,11 @@ ${pdfText.slice(0, 15000)}`;
       costValue: extracted.costValue ? Number(extracted.costValue) : null,
       finalValue: extracted.finalValue ? Number(extracted.finalValue) : null,
       pricePerMeter: extracted.pricePerMeter ? Number(extracted.pricePerMeter) : null,
+      valuerPercentage: extracted.valuerPercentage ? Number(extracted.valuerPercentage) : null,
+      secondValuerName: extracted.secondValuerName ?? null,
+      secondValuerLicenseNumber: extracted.secondValuerLicenseNumber ?? null,
+      secondValuerMembershipNumber: extracted.secondValuerMembershipNumber ?? null,
+      secondValuerPercentage: extracted.secondValuerPercentage ? Number(extracted.secondValuerPercentage) : null,
       companyName: extracted.companyName ?? null,
       commercialRegNumber: extracted.commercialRegNumber ?? null,
       pdfFileName: req.file.originalname,

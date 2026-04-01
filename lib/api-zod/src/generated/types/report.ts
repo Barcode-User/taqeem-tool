@@ -25,6 +25,8 @@ export interface Report {
   /** @nullable */
   valuerName?: string | null;
   /** @nullable */
+  valuerPercentage?: number | null;
+  /** @nullable */
   licenseNumber?: string | null;
   /** @nullable */
   licenseDate?: string | null;
@@ -32,6 +34,16 @@ export interface Report {
   membershipNumber?: string | null;
   /** @nullable */
   membershipType?: string | null;
+  /** @nullable */
+  secondValuerName?: string | null;
+  /** @nullable */
+  secondValuerPercentage?: number | null;
+  /** @nullable */
+  secondValuerLicenseNumber?: string | null;
+  /** @nullable */
+  secondValuerMembershipNumber?: string | null;
+  /** @nullable */
+  taqeemReportNumber?: string | null;
   /** @nullable */
   clientName?: string | null;
   /** @nullable */

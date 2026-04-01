@@ -36,6 +36,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { Textarea } from "@/components/ui/textarea";
 
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
 import { 
   Save, 
   ArrowRight, 
@@ -47,7 +49,10 @@ import {
   Building,
   MapPin,
   Calculator,
-  Briefcase
+  Briefcase,
+  Copy,
+  ExternalLink,
+  Check
 } from "lucide-react";
 
 // Helper to handle dates and numbers properly
@@ -109,7 +114,14 @@ const reportFormSchema = z.object({
   costValue: numberOrNull,
   finalValue: numberOrNull,
   pricePerMeter: numberOrNull,
-  
+
+  valuerPercentage: numberOrNull,
+  secondValuerName: stringOrNull,
+  secondValuerLicenseNumber: stringOrNull,
+  secondValuerMembershipNumber: stringOrNull,
+  secondValuerPercentage: numberOrNull,
+
+  taqeemReportNumber: stringOrNull,
   notes: stringOrNull,
 });
 
@@ -121,6 +133,41 @@ const statusMap: Record<string, { label: string, color: string, next: string | n
   reviewed: { label: "تمت المراجعة", color: "bg-purple-100 text-purple-800 border-purple-200", next: "submitted", action: "رفع لتقييم" },
   submitted: { label: "تم الرفع", color: "bg-green-100 text-green-800 border-green-200", next: null, action: "" },
 };
+
+function CopyField({ label, value }: { label: string; value: string | number | null | undefined }) {
+  const [copied, setCopied] = useState(false);
+  const text = value != null ? String(value) : "";
+
+  const handleCopy = () => {
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-xs text-muted-foreground font-medium">{label}</span>
+      <div className="flex items-center gap-2 min-h-[36px]">
+        <span className={`flex-1 text-sm font-semibold px-3 py-1.5 rounded-md border ${text ? "bg-background border-border" : "bg-muted/40 border-dashed text-muted-foreground italic"}`}>
+          {text || "غير محدد"}
+        </span>
+        {text && (
+          <button
+            type="button"
+            onClick={handleCopy}
+            className="shrink-0 p-1.5 rounded-md border border-border hover:bg-muted transition-colors"
+            title="نسخ"
+            data-testid={`copy-${label}`}
+          >
+            {copied ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5 text-muted-foreground" />}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default function ReportDetails() {
   const [, params] = useRoute("/reports/:id");
@@ -284,6 +331,194 @@ export default function ReportDetails() {
         </div>
       </div>
 
+      <Tabs defaultValue="edit" className="space-y-6">
+        <TabsList className="bg-muted">
+          <TabsTrigger value="edit" className="gap-2">
+            <FileText className="h-4 w-4" />
+            بيانات التقرير
+          </TabsTrigger>
+          <TabsTrigger value="taqeem" className="gap-2">
+            <ExternalLink className="h-4 w-4" />
+            جاهز للرفع على تقييم
+          </TabsTrigger>
+        </TabsList>
+
+        {/* TAQEEM Submission Tab */}
+        <TabsContent value="taqeem" className="space-y-6">
+          <div className="rounded-xl border border-green-200 bg-green-50 dark:bg-green-950/30 dark:border-green-900 p-4 flex flex-col sm:flex-row items-start sm:items-center gap-3">
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-green-800 dark:text-green-300">انسخ هذه البيانات وادخلها في منصة تقييم للحصول على QR Code</p>
+              <p className="text-xs text-green-700 dark:text-green-400 mt-0.5">بعد اعتماد التقرير على المنصة، احفظ رقم التقرير في الحقل أدناه</p>
+            </div>
+            <a
+              href="https://qima.taqeem.gov.sa"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-green-700 text-white text-sm font-medium hover:bg-green-800 transition-colors shrink-0"
+              data-testid="link-taqeem-platform"
+            >
+              <ExternalLink className="h-4 w-4" />
+              فتح منصة تقييم
+            </a>
+          </div>
+
+          {/* Taqeem report number save field */}
+          <Card className="border-primary/30">
+            <CardHeader className="bg-primary/5 border-b pb-3">
+              <CardTitle className="text-sm flex items-center gap-2 text-primary">
+                <CheckSquare className="h-4 w-4" />
+                بعد الرفع — حفظ رقم التقرير من منصة تقييم
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-4">
+              <Form {...form}>
+                <form onSubmit={form.handleSubmit(onSubmit)}>
+                  <div className="flex gap-3 items-end">
+                    <FormField control={form.control} name="taqeemReportNumber" render={({ field }) => (
+                      <FormItem className="flex-1">
+                        <FormLabel>رقم التقرير على منصة تقييم</FormLabel>
+                        <FormControl>
+                          <Input
+                            {...field}
+                            value={field.value || ""}
+                            placeholder="مثال: 1684622"
+                            dir="ltr"
+                            className="text-left"
+                            data-testid="input-taqeem-report-number"
+                          />
+                        </FormControl>
+                      </FormItem>
+                    )} />
+                    <Button
+                      type="submit"
+                      size="default"
+                      disabled={updateReport.isPending}
+                      data-testid="button-save-taqeem-number"
+                    >
+                      <Save className="h-4 w-4 ml-2" />
+                      حفظ
+                    </Button>
+                  </div>
+                </form>
+              </Form>
+            </CardContent>
+          </Card>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Page 1: Report Info */}
+            <Card>
+              <CardHeader className="bg-muted/40 border-b pb-3">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <FileCheck className="h-4 w-4 text-primary" />
+                  معلومات التقرير (الصفحة الأولى في المنصة)
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <CopyField label="رقم التقرير" value={report.reportNumber} />
+                <CopyField label="تاريخ إصدار التقرير" value={report.reportDate} />
+                <CopyField label="تاريخ التقييم" value={report.valuationDate} />
+                <CopyField label="تاريخ المعاينة" value={report.inspectionDate} />
+                <CopyField label="نوع التقرير" value={report.reportType} />
+                <CopyField label="غرض التقييم" value={report.valuationPurpose} />
+                <CopyField label="أساس القيمة" value={report.valuationBasis} />
+                <CopyField label="أسلوب التقييم" value={report.valuationMethod} />
+              </CardContent>
+            </Card>
+
+            {/* Valuers */}
+            <Card>
+              <CardHeader className="bg-muted/40 border-b pb-3">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <User className="h-4 w-4 text-primary" />
+                  بيانات المقيّمين
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-4 space-y-4">
+                <div>
+                  <p className="text-xs font-bold text-muted-foreground mb-2 uppercase tracking-wide">المقيّم الأول</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <CopyField label="الاسم" value={report.valuerName} />
+                    <CopyField label="نسبة المشاركة %" value={(report as any).valuerPercentage} />
+                    <CopyField label="رقم الترخيص" value={report.licenseNumber} />
+                    <CopyField label="رقم العضوية" value={report.membershipNumber} />
+                  </div>
+                </div>
+                {(report as any).secondValuerName && (
+                  <div className="border-t pt-4">
+                    <p className="text-xs font-bold text-muted-foreground mb-2 uppercase tracking-wide">المقيّم الثاني</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <CopyField label="الاسم" value={(report as any).secondValuerName} />
+                      <CopyField label="نسبة المشاركة %" value={(report as any).secondValuerPercentage} />
+                      <CopyField label="رقم الترخيص" value={(report as any).secondValuerLicenseNumber} />
+                      <CopyField label="رقم العضوية" value={(report as any).secondValuerMembershipNumber} />
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Valuation Result */}
+            <Card className="md:col-span-2 border-primary/20">
+              <CardHeader className="bg-primary/5 border-b pb-3">
+                <CardTitle className="text-sm flex items-center gap-2 text-primary">
+                  <Calculator className="h-4 w-4" />
+                  الرأي النهائي في التقييم
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-4 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="sm:col-span-2">
+                  <CopyField
+                    label={`الرأي النهائي في ${report.propertyType || "العقار"} (ريال سعودي)`}
+                    value={report.finalValue ? report.finalValue.toLocaleString("ar-SA") : null}
+                  />
+                </div>
+                <CopyField label="سعر المتر (ريال)" value={report.pricePerMeter ? report.pricePerMeter.toLocaleString("ar-SA") : null} />
+                <CopyField label="قيمة أسلوب السوق" value={report.marketValue ? report.marketValue.toLocaleString("ar-SA") : null} />
+                <CopyField label="قيمة أسلوب الدخل" value={report.incomeValue ? report.incomeValue.toLocaleString("ar-SA") : null} />
+                <CopyField label="قيمة أسلوب التكلفة" value={report.costValue ? report.costValue.toLocaleString("ar-SA") : null} />
+              </CardContent>
+            </Card>
+
+            {/* Property & Location */}
+            <Card>
+              <CardHeader className="bg-muted/40 border-b pb-3">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <MapPin className="h-4 w-4 text-primary" />
+                  موقع العقار وتفاصيله
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <CopyField label="نوع العقار" value={report.propertyType} />
+                <CopyField label="النوع الفرعي" value={report.propertySubType} />
+                <CopyField label="المنطقة" value={report.region} />
+                <CopyField label="المدينة" value={report.city} />
+                <CopyField label="الحي" value={report.district} />
+                <CopyField label="الشارع" value={report.street} />
+                <CopyField label="رقم الصك" value={report.deedNumber} />
+                <CopyField label="مساحة الأرض (م²)" value={report.landArea} />
+              </CardContent>
+            </Card>
+
+            {/* Client */}
+            <Card>
+              <CardHeader className="bg-muted/40 border-b pb-3">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Briefcase className="h-4 w-4 text-primary" />
+                  بيانات العميل
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-4 grid grid-cols-1 gap-3">
+                <CopyField label="اسم العميل" value={report.clientName} />
+                <CopyField label="المستخدم المعتمد" value={report.intendedUser} />
+                <CopyField label="اسم الشركة" value={report.companyName} />
+                <CopyField label="رقم السجل التجاري" value={report.commercialRegNumber} />
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        {/* Edit Tab */}
+        <TabsContent value="edit">
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
           
@@ -482,29 +717,58 @@ export default function ReportDetails() {
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="xl:col-span-2">
               <CardHeader className="bg-muted/30 border-b pb-4">
                 <CardTitle className="text-base flex items-center gap-2">
                   <User className="h-5 w-5 text-primary" />
-                  معلومات المقيّم
+                  معلومات المقيّمين
                 </CardTitle>
+                <CardDescription>يمكن أن يشارك أكثر من مقيم في إعداد التقرير</CardDescription>
               </CardHeader>
-              <CardContent className="pt-6 grid grid-cols-2 gap-4">
-                <FormField control={form.control} name="valuerName" render={({ field }) => (
-                  <FormItem className="col-span-2"><FormLabel>اسم المقيّم</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
-                )} />
-                <FormField control={form.control} name="licenseNumber" render={({ field }) => (
-                  <FormItem><FormLabel>رقم الترخيص</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
-                )} />
-                <FormField control={form.control} name="licenseDate" render={({ field }) => (
-                  <FormItem><FormLabel>تاريخ الترخيص</FormLabel><FormControl><Input type="date" {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
-                )} />
-                <FormField control={form.control} name="membershipNumber" render={({ field }) => (
-                  <FormItem><FormLabel>رقم العضوية</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
-                )} />
-                <FormField control={form.control} name="membershipType" render={({ field }) => (
-                  <FormItem><FormLabel>نوع العضوية</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
-                )} />
+              <CardContent className="pt-6 grid grid-cols-1 md:grid-cols-2 gap-8">
+                {/* First Valuer */}
+                <div className="space-y-4">
+                  <p className="text-sm font-semibold text-muted-foreground border-b pb-2">المقيّم الأول</p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <FormField control={form.control} name="valuerName" render={({ field }) => (
+                      <FormItem className="col-span-2"><FormLabel>اسم المقيّم</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                    )} />
+                    <FormField control={form.control} name="valuerPercentage" render={({ field }) => (
+                      <FormItem><FormLabel>نسبة المشاركة %</FormLabel><FormControl><Input type="number" min="0" max="100" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
+                    )} />
+                    <FormField control={form.control} name="licenseNumber" render={({ field }) => (
+                      <FormItem><FormLabel>رقم الترخيص</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                    )} />
+                    <FormField control={form.control} name="licenseDate" render={({ field }) => (
+                      <FormItem><FormLabel>تاريخ الترخيص</FormLabel><FormControl><Input type="date" {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                    )} />
+                    <FormField control={form.control} name="membershipNumber" render={({ field }) => (
+                      <FormItem><FormLabel>رقم العضوية</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                    )} />
+                    <FormField control={form.control} name="membershipType" render={({ field }) => (
+                      <FormItem><FormLabel>نوع العضوية</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                    )} />
+                  </div>
+                </div>
+
+                {/* Second Valuer */}
+                <div className="space-y-4">
+                  <p className="text-sm font-semibold text-muted-foreground border-b pb-2">المقيّم الثاني (اختياري)</p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <FormField control={form.control} name="secondValuerName" render={({ field }) => (
+                      <FormItem className="col-span-2"><FormLabel>اسم المقيّم الثاني</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} placeholder="إن وجد..." /></FormControl></FormItem>
+                    )} />
+                    <FormField control={form.control} name="secondValuerPercentage" render={({ field }) => (
+                      <FormItem><FormLabel>نسبة المشاركة %</FormLabel><FormControl><Input type="number" min="0" max="100" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
+                    )} />
+                    <FormField control={form.control} name="secondValuerLicenseNumber" render={({ field }) => (
+                      <FormItem><FormLabel>رقم الترخيص</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                    )} />
+                    <FormField control={form.control} name="secondValuerMembershipNumber" render={({ field }) => (
+                      <FormItem className="col-span-2"><FormLabel>رقم العضوية</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                    )} />
+                  </div>
+                </div>
               </CardContent>
             </Card>
 
@@ -531,6 +795,8 @@ export default function ReportDetails() {
           </div>
         </form>
       </Form>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

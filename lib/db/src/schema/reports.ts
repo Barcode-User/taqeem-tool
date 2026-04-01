@@ -13,10 +13,18 @@ export const reportsTable = pgTable("reports", {
   status: text("status").notNull().default("pending"),
 
   valuerName: text("valuer_name"),
+  valuerPercentage: real("valuer_percentage"),
   licenseNumber: text("license_number"),
   licenseDate: text("license_date"),
   membershipNumber: text("membership_number"),
   membershipType: text("membership_type"),
+
+  secondValuerName: text("second_valuer_name"),
+  secondValuerPercentage: real("second_valuer_percentage"),
+  secondValuerLicenseNumber: text("second_valuer_license_number"),
+  secondValuerMembershipNumber: text("second_valuer_membership_number"),
+
+  taqeemReportNumber: text("taqeem_report_number"),
 
   clientName: text("client_name"),
   intendedUser: text("intended_user"),
