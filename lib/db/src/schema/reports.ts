@@ -27,6 +27,8 @@ export const reportsTable = pgTable("reports", {
   taqeemReportNumber: text("taqeem_report_number"),
 
   clientName: text("client_name"),
+  clientEmail: text("client_email"),
+  clientPhone: text("client_phone"),
   intendedUser: text("intended_user"),
   reportType: text("report_type"),
   valuationPurpose: text("valuation_purpose"),
@@ -55,6 +57,11 @@ export const reportsTable = pgTable("reports", {
   basementArea: real("basement_area"),
   annexArea: real("annex_area"),
   floorsCount: integer("floors_count"),
+  permittedFloorsCount: integer("permitted_floors_count"),
+  permittedBuildingRatio: real("permitted_building_ratio"),
+  streetWidth: real("street_width"),
+  streetFacades: text("street_facades"),
+  utilities: text("utilities"),
   coordinates: text("coordinates"),
 
   valuationMethod: text("valuation_method"),

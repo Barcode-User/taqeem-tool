@@ -47,6 +47,10 @@ export interface Report {
   /** @nullable */
   clientName?: string | null;
   /** @nullable */
+  clientEmail?: string | null;
+  /** @nullable */
+  clientPhone?: string | null;
+  /** @nullable */
   intendedUser?: string | null;
   /** @nullable */
   reportType?: string | null;
@@ -98,6 +102,16 @@ export interface Report {
   annexArea?: number | null;
   /** @nullable */
   floorsCount?: number | null;
+  /** @nullable */
+  permittedFloorsCount?: number | null;
+  /** @nullable */
+  permittedBuildingRatio?: number | null;
+  /** @nullable */
+  streetWidth?: number | null;
+  /** @nullable */
+  streetFacades?: string | null;
+  /** @nullable */
+  utilities?: string | null;
   /** @nullable */
   coordinates?: string | null;
   /** @nullable */

@@ -74,6 +74,8 @@ const reportFormSchema = z.object({
   membershipType: stringOrNull,
   
   clientName: stringOrNull,
+  clientEmail: stringOrNull,
+  clientPhone: stringOrNull,
   intendedUser: stringOrNull,
   companyName: stringOrNull,
   commercialRegNumber: stringOrNull,
@@ -106,6 +108,11 @@ const reportFormSchema = z.object({
   basementArea: numberOrNull,
   annexArea: numberOrNull,
   floorsCount: numberOrNull,
+  permittedFloorsCount: numberOrNull,
+  permittedBuildingRatio: numberOrNull,
+  streetWidth: numberOrNull,
+  streetFacades: stringOrNull,
+  utilities: stringOrNull,
   coordinates: stringOrNull,
   
   valuationMethod: stringOrNull,
@@ -496,6 +503,11 @@ export default function ReportDetails() {
                 <CopyField label="الشارع" value={report.street} />
                 <CopyField label="رقم الصك" value={report.deedNumber} />
                 <CopyField label="مساحة الأرض (م²)" value={report.landArea} />
+                <CopyField label="الواجهات على الشارع" value={(report as any).streetFacades} />
+                <CopyField label="عرض الشارع (م)" value={(report as any).streetWidth} />
+                <CopyField label="المرافق" value={(report as any).utilities} />
+                <CopyField label="عدد الأدوار المصرح به" value={(report as any).permittedFloorsCount} />
+                <CopyField label="نسبة البناء المصرح بها %" value={(report as any).permittedBuildingRatio} />
               </CardContent>
             </Card>
 
@@ -509,6 +521,8 @@ export default function ReportDetails() {
               </CardHeader>
               <CardContent className="pt-4 grid grid-cols-1 gap-3">
                 <CopyField label="اسم العميل" value={report.clientName} />
+                <CopyField label="البريد الإلكتروني" value={(report as any).clientEmail} />
+                <CopyField label="رقم الهاتف" value={(report as any).clientPhone} />
                 <CopyField label="المستخدم المعتمد" value={report.intendedUser} />
                 <CopyField label="اسم الشركة" value={report.companyName} />
                 <CopyField label="رقم السجل التجاري" value={report.commercialRegNumber} />
@@ -638,7 +652,22 @@ export default function ReportDetails() {
                   <FormItem><FormLabel>عمر البناء</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="floorsCount" render={({ field }) => (
-                  <FormItem><FormLabel>عدد الأدوار</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem><FormLabel>عدد الأدوار الفعلية</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
+                )} />
+                <FormField control={form.control} name="permittedFloorsCount" render={({ field }) => (
+                  <FormItem><FormLabel>عدد الأدوار المصرح به</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
+                )} />
+                <FormField control={form.control} name="permittedBuildingRatio" render={({ field }) => (
+                  <FormItem><FormLabel>نسبة البناء المصرح بها %</FormLabel><FormControl><Input type="number" min="0" max="100" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
+                )} />
+                <FormField control={form.control} name="streetWidth" render={({ field }) => (
+                  <FormItem><FormLabel>عرض الشارع (م)</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
+                )} />
+                <FormField control={form.control} name="streetFacades" render={({ field }) => (
+                  <FormItem><FormLabel>الواجهات المطلة على الشارع</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} placeholder="مثال: واجهة واحدة، واجهتان" /></FormControl></FormItem>
+                )} />
+                <FormField control={form.control} name="utilities" render={({ field }) => (
+                  <FormItem><FormLabel>المرافق المتاحة</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} placeholder="كهرباء، ماء، صرف صحي" /></FormControl></FormItem>
                 )} />
                 
                 <FormField control={form.control} name="landArea" render={({ field }) => (
@@ -704,6 +733,12 @@ export default function ReportDetails() {
               <CardContent className="pt-6 grid grid-cols-2 gap-4">
                 <FormField control={form.control} name="clientName" render={({ field }) => (
                   <FormItem className="col-span-2"><FormLabel>اسم العميل</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                )} />
+                <FormField control={form.control} name="clientEmail" render={({ field }) => (
+                  <FormItem><FormLabel>البريد الإلكتروني للعميل</FormLabel><FormControl><Input type="email" {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                )} />
+                <FormField control={form.control} name="clientPhone" render={({ field }) => (
+                  <FormItem><FormLabel>رقم هاتف العميل</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="intendedUser" render={({ field }) => (
                   <FormItem className="col-span-2"><FormLabel>المستخدم المعتمد</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>

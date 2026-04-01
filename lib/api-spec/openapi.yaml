@@ -211,6 +211,10 @@ components:
           type: ["string", "null"]
         clientName:
           type: ["string", "null"]
+        clientEmail:
+          type: ["string", "null"]
+        clientPhone:
+          type: ["string", "null"]
         intendedUser:
           type: ["string", "null"]
         reportType:
@@ -263,6 +267,16 @@ components:
           type: ["number", "null"]
         floorsCount:
           type: ["integer", "null"]
+        permittedFloorsCount:
+          type: ["integer", "null"]
+        permittedBuildingRatio:
+          type: ["number", "null"]
+        streetWidth:
+          type: ["number", "null"]
+        streetFacades:
+          type: ["string", "null"]
+        utilities:
+          type: ["string", "null"]
         coordinates:
           type: ["string", "null"]
         valuationMethod:
@@ -344,6 +358,10 @@ components:
           type: ["string", "null"]
         clientName:
           type: ["string", "null"]
+        clientEmail:
+          type: ["string", "null"]
+        clientPhone:
+          type: ["string", "null"]
         intendedUser:
           type: ["string", "null"]
         reportType:
@@ -396,6 +414,16 @@ components:
           type: ["number", "null"]
         floorsCount:
           type: ["integer", "null"]
+        permittedFloorsCount:
+          type: ["integer", "null"]
+        permittedBuildingRatio:
+          type: ["number", "null"]
+        streetWidth:
+          type: ["number", "null"]
+        streetFacades:
+          type: ["string", "null"]
+        utilities:
+          type: ["string", "null"]
         coordinates:
           type: ["string", "null"]
         valuationMethod:
