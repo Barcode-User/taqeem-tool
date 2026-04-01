@@ -1,15 +1,16 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: API specification for Taqeem Reports Tool
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: reports
+    description: Valuation report operations
 paths:
   /healthz:
     get:
@@ -24,6 +25,138 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /reports:
+    get:
+      operationId: listReports
+      tags: [reports]
+      summary: List all reports
+      responses:
+        "200":
+          description: List of reports
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Report"
+    post:
+      operationId: createReport
+      tags: [reports]
+      summary: Create a new report manually
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateReportBody"
+      responses:
+        "201":
+          description: Created report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Report"
+
+  /reports/stats:
+    get:
+      operationId: getReportStats
+      tags: [reports]
+      summary: Get dashboard statistics
+      responses:
+        "200":
+          description: Stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportStats"
+
+  /reports/{id}:
+    get:
+      operationId: getReport
+      tags: [reports]
+      summary: Get a single report
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Report"
+        "404":
+          description: Not found
+    patch:
+      operationId: updateReport
+      tags: [reports]
+      summary: Update report fields
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateReportBody"
+      responses:
+        "200":
+          description: Updated report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Report"
+        "404":
+          description: Not found
+    delete:
+      operationId: deleteReport
+      tags: [reports]
+      summary: Delete a report
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /reports/{id}/status:
+    patch:
+      operationId: updateReportStatus
+      tags: [reports]
+      summary: Update report submission status
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateReportStatusBody"
+      responses:
+        "200":
+          description: Updated report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Report"
+        "404":
+          description: Not found
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +167,257 @@ components:
       required:
         - status
 
+    Report:
+      type: object
+      properties:
+        id:
+          type: integer
+        reportNumber:
+          type: ["string", "null"]
+        reportDate:
+          type: ["string", "null"]
+        valuationDate:
+          type: ["string", "null"]
+        inspectionDate:
+          type: ["string", "null"]
+        commissionDate:
+          type: ["string", "null"]
+        requestNumber:
+          type: ["string", "null"]
+        status:
+          type: string
+          enum: [pending, extracted, reviewed, submitted]
+        valuerName:
+          type: ["string", "null"]
+        licenseNumber:
+          type: ["string", "null"]
+        licenseDate:
+          type: ["string", "null"]
+        membershipNumber:
+          type: ["string", "null"]
+        membershipType:
+          type: ["string", "null"]
+        clientName:
+          type: ["string", "null"]
+        intendedUser:
+          type: ["string", "null"]
+        reportType:
+          type: ["string", "null"]
+        valuationPurpose:
+          type: ["string", "null"]
+        valuationBasis:
+          type: ["string", "null"]
+        propertyType:
+          type: ["string", "null"]
+        propertySubType:
+          type: ["string", "null"]
+        region:
+          type: ["string", "null"]
+        city:
+          type: ["string", "null"]
+        district:
+          type: ["string", "null"]
+        street:
+          type: ["string", "null"]
+        blockNumber:
+          type: ["string", "null"]
+        plotNumber:
+          type: ["string", "null"]
+        planNumber:
+          type: ["string", "null"]
+        propertyUse:
+          type: ["string", "null"]
+        deedNumber:
+          type: ["string", "null"]
+        deedDate:
+          type: ["string", "null"]
+        ownerName:
+          type: ["string", "null"]
+        ownershipType:
+          type: ["string", "null"]
+        buildingPermitNumber:
+          type: ["string", "null"]
+        buildingStatus:
+          type: ["string", "null"]
+        buildingAge:
+          type: ["string", "null"]
+        landArea:
+          type: ["number", "null"]
+        buildingArea:
+          type: ["number", "null"]
+        basementArea:
+          type: ["number", "null"]
+        annexArea:
+          type: ["number", "null"]
+        floorsCount:
+          type: ["integer", "null"]
+        coordinates:
+          type: ["string", "null"]
+        valuationMethod:
+          type: ["string", "null"]
+        marketValue:
+          type: ["number", "null"]
+        incomeValue:
+          type: ["number", "null"]
+        costValue:
+          type: ["number", "null"]
+        finalValue:
+          type: ["number", "null"]
+        pricePerMeter:
+          type: ["number", "null"]
+        companyName:
+          type: ["string", "null"]
+        commercialRegNumber:
+          type: ["string", "null"]
+        pdfFileName:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required:
+        - id
+        - status
+        - createdAt
+        - updatedAt
+
+    CreateReportBody:
+      type: object
+      properties:
+        reportNumber:
+          type: ["string", "null"]
+        status:
+          type: string
+          enum: [pending, extracted, reviewed, submitted]
+          default: pending
+
+    UpdateReportBody:
+      type: object
+      properties:
+        reportNumber:
+          type: ["string", "null"]
+        reportDate:
+          type: ["string", "null"]
+        valuationDate:
+          type: ["string", "null"]
+        inspectionDate:
+          type: ["string", "null"]
+        commissionDate:
+          type: ["string", "null"]
+        requestNumber:
+          type: ["string", "null"]
+        valuerName:
+          type: ["string", "null"]
+        licenseNumber:
+          type: ["string", "null"]
+        licenseDate:
+          type: ["string", "null"]
+        membershipNumber:
+          type: ["string", "null"]
+        membershipType:
+          type: ["string", "null"]
+        clientName:
+          type: ["string", "null"]
+        intendedUser:
+          type: ["string", "null"]
+        reportType:
+          type: ["string", "null"]
+        valuationPurpose:
+          type: ["string", "null"]
+        valuationBasis:
+          type: ["string", "null"]
+        propertyType:
+          type: ["string", "null"]
+        propertySubType:
+          type: ["string", "null"]
+        region:
+          type: ["string", "null"]
+        city:
+          type: ["string", "null"]
+        district:
+          type: ["string", "null"]
+        street:
+          type: ["string", "null"]
+        blockNumber:
+          type: ["string", "null"]
+        plotNumber:
+          type: ["string", "null"]
+        planNumber:
+          type: ["string", "null"]
+        propertyUse:
+          type: ["string", "null"]
+        deedNumber:
+          type: ["string", "null"]
+        deedDate:
+          type: ["string", "null"]
+        ownerName:
+          type: ["string", "null"]
+        ownershipType:
+          type: ["string", "null"]
+        buildingPermitNumber:
+          type: ["string", "null"]
+        buildingStatus:
+          type: ["string", "null"]
+        buildingAge:
+          type: ["string", "null"]
+        landArea:
+          type: ["number", "null"]
+        buildingArea:
+          type: ["number", "null"]
+        basementArea:
+          type: ["number", "null"]
+        annexArea:
+          type: ["number", "null"]
+        floorsCount:
+          type: ["integer", "null"]
+        coordinates:
+          type: ["string", "null"]
+        valuationMethod:
+          type: ["string", "null"]
+        marketValue:
+          type: ["number", "null"]
+        incomeValue:
+          type: ["number", "null"]
+        costValue:
+          type: ["number", "null"]
+        finalValue:
+          type: ["number", "null"]
+        pricePerMeter:
+          type: ["number", "null"]
+        companyName:
+          type: ["string", "null"]
+        commercialRegNumber:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+
+    UpdateReportStatusBody:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum: [pending, extracted, reviewed, submitted]
+
+    ReportStats:
+      type: object
+      required:
+        - total
+        - pending
+        - extracted
+        - reviewed
+        - submitted
+      properties:
+        total:
+          type: integer
+        pending:
+          type: integer
+        extracted:
+          type: integer
+        reviewed:
+          type: integer
+        submitted:
+          type: integer

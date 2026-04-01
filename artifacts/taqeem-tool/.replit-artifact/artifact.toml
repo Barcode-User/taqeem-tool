@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "أداة تقارير التقييم"
+version = "1.0.0"
+id = "artifacts/taqeem-tool"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 22126
+
+[services.development]
+run = "pnpm --filter @workspace/taqeem-tool run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/taqeem-tool", "run", "build" ]
+publicDir = "artifacts/taqeem-tool/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22126"
+BASE_PATH = "/"
