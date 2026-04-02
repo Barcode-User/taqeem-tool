@@ -4,7 +4,7 @@ export type AutomationSession = {
   sessionId: string;
   reportId: number;
   status: "running" | "waiting_otp" | "completed" | "failed";
-  browser: Browser;
+  browser: Browser | null;
   context: BrowserContext;
   page: Page;
   otpResolver: ((otp: string) => void) | null;
@@ -18,7 +18,7 @@ const reportSessions = new Map<number, string>();
 export function createSession(
   sessionId: string,
   reportId: number,
-  browser: Browser,
+  browser: Browser | null,
   context: BrowserContext,
   page: Page,
 ): AutomationSession {
@@ -48,12 +48,11 @@ export function getSessionByReportId(reportId: number): AutomationSession | unde
   return sessions.get(sessionId);
 }
 
-export async function closeSession(sessionId: string): Promise<void> {
+export function closeSession(sessionId: string): void {
   const session = sessions.get(sessionId);
   if (!session) return;
-  try {
-    await session.browser.close();
-  } catch {}
+  // NOTE: We do NOT close the browser here because it's the shared session browser
+  // The page is closed by the caller after the automation finishes
   reportSessions.delete(session.reportId);
   sessions.delete(sessionId);
 }
