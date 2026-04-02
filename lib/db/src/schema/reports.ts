@@ -74,7 +74,15 @@ export const reportsTable = pgTable("reports", {
   companyName: text("company_name"),
   commercialRegNumber: text("commercial_reg_number"),
   pdfFileName: text("pdf_file_name"),
+  pdfFilePath: text("pdf_file_path"),
   notes: text("notes"),
+
+  automationStatus: text("automation_status").default("idle"),
+  automationError: text("automation_error"),
+  automationSessionId: text("automation_session_id"),
+  qrCodeBase64: text("qr_code_base64"),
+  certificatePath: text("certificate_path"),
+  taqeemSubmittedAt: text("taqeem_submitted_at"),
 
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),

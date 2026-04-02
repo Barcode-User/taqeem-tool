@@ -1,0 +1,110 @@
+I want you to build a complete automation system (agent-based) for submitting valuation reports from our internal system to an external government platform (Saudi Authority for Accredited Valuers).
+
+### 🧩 Context
+We are a valuation company. Before delivering any report to clients, we must:
+1. Enter report data into the authority platform
+2. Upload the PDF report
+3. Receive a QR code and certificate
+4. Attach them back to our internal system
+
+Currently, this is done manually by an employee. I want full automation.
+
+---
+
+### 🎯 Goal
+Build an automated agent that:
+- Fetches reports from our internal system
+- Extracts required data
+- Logs into the authority platform
+- Fills all required fields
+- Uploads the PDF
+- Retrieves QR code / certificate
+- Sends them back to our system
+
+---
+
+### 🔐 Authentication Constraint
+The external platform requires:
+- Username/password login
+- OTP (2FA)
+
+The system should:
+- Pause and wait for OTP input
+- Resume automatically after OTP is entered
+
+---
+
+### 📊 Data Sources
+The system must support two modes:
+
+1) Database mode (preferred)
+- Fetch structured data directly via API
+
+2) PDF mode
+- Extract data from PDF reports
+
+Important:
+- Field positions in PDF are NOT fixed
+- Field labels are consistent
+- Use intelligent parsing (AI or pattern-based)
+
+---
+
+### 🖼️ Process Understanding
+I will provide numbered screenshots showing:
+- Internal system steps
+- External platform steps
+
+You must:
+- Design the automation flow based on these steps
+- Allow mapping between steps and actions
+
+---
+
+### 🧠 System Requirements
+- Modular architecture
+- Error handling and retry logic
+- Logging system
+- Batch processing (multiple reports sequentially)
+- Scalable design
+
+---
+
+### 🛠️ Technical Requirements
+Use the best stack for this, such as:
+- Python or Node.js
+- Browser automation (Playwright or Puppeteer)
+- Optional: FastAPI or Express for backend
+- PDF parsing libraries (like pdfplumber, PyMuPDF, or similar)
+- Optional AI extraction for flexible parsing
+
+---
+
+### 🧪 Deliverables
+1. Full working code
+2. Clear project structure
+3. Setup instructions
+4. Example config file (credentials, endpoints, etc.)
+5. Function to:
+   - Start process
+   - Process one report
+   - Process multiple reports
+
+---
+
+### ⚙️ Bonus (if possible)
+- Simple dashboard or CLI to monitor status
+- Ability to reprocess failed reports
+- Configurable field mapping
+
+---
+
+### 📌 Notes
+- Accuracy is critical
+- The automation must mimic real user behavior on the platform
+- The system should be robust to UI changes as much as possible
+
+Start by:
+1. Designing the architecture
+2. Then implement step-by-step
+3. Ask me if you need clarification about screenshots or fields

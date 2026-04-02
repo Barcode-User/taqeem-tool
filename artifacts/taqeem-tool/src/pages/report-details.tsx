@@ -52,8 +52,17 @@ import {
   Briefcase,
   Copy,
   ExternalLink,
-  Check
+  Check,
+  Bot,
+  Loader2,
+  AlertCircle,
+  Download,
+  KeyRound,
+  RefreshCw,
+  Terminal
 } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 
 // Helper to handle dates and numbers properly
 const stringOrNull = z.string().nullable().optional();
@@ -193,10 +202,87 @@ export default function ReportDetails() {
   const updateReport = useUpdateReport();
   const updateStatus = useUpdateReportStatus();
 
+  // Automation state
+  const [showCredentialsModal, setShowCredentialsModal] = useState(false);
+  const [showOtpModal, setShowOtpModal] = useState(false);
+  const [taqeemUsername, setTaqeemUsername] = useState("");
+  const [taqeemPassword, setTaqeemPassword] = useState("");
+  const [otpValue, setOtpValue] = useState("");
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [automationData, setAutomationData] = useState<any>(null);
+  const [automationLoading, setAutomationLoading] = useState(false);
+  const apiBase = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
+
   const form = useForm<ReportFormValues>({
     resolver: zodResolver(reportFormSchema),
     defaultValues: {},
   });
+
+  const automationPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const fetchAutomationStatus = async () => {
+    if (!id) return;
+    try {
+      const resp = await fetch(`${apiBase}/api/automation/status/${id}`);
+      if (resp.ok) {
+        const data = await resp.json();
+        setAutomationData(data);
+        if (data.automationStatus === "waiting_otp") setShowOtpModal(true);
+        if (data.automationStatus === "completed" || data.automationStatus === "failed") {
+          if (automationPollRef.current) clearInterval(automationPollRef.current);
+          setAutomationLoading(false);
+        }
+      }
+    } catch {}
+  };
+
+  useEffect(() => {
+    if (id) fetchAutomationStatus();
+  }, [id]);
+
+  const startAutomation = async () => {
+    if (!id || !taqeemUsername || !taqeemPassword) return;
+    setAutomationLoading(true);
+    setShowCredentialsModal(false);
+    try {
+      const resp = await fetch(`${apiBase}/api/automation/start/${id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: taqeemUsername, password: taqeemPassword }),
+      });
+      const data = await resp.json();
+      if (resp.ok) {
+        setCurrentSessionId(data.sessionId);
+        automationPollRef.current = setInterval(fetchAutomationStatus, 2000);
+        toast({ title: "بدأت عملية الرفع الآلي", description: "جارٍ تسجيل الدخول..." });
+      } else {
+        toast({ variant: "destructive", title: "خطأ", description: data.error || "فشل بدء الأتمتة" });
+        setAutomationLoading(false);
+      }
+    } catch (e) {
+      toast({ variant: "destructive", title: "خطأ في الاتصال", description: "تعذر الاتصال بالخادم" });
+      setAutomationLoading(false);
+    }
+  };
+
+  const submitOtp = async () => {
+    if (!currentSessionId || !otpValue) return;
+    try {
+      const resp = await fetch(`${apiBase}/api/automation/otp/${currentSessionId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ otp: otpValue }),
+      });
+      if (resp.ok) {
+        setShowOtpModal(false);
+        setOtpValue("");
+        toast({ title: "تم إرسال رمز OTP", description: "جارٍ استكمال عملية الرفع..." });
+        if (!automationPollRef.current) {
+          automationPollRef.current = setInterval(fetchAutomationStatus, 2000);
+        }
+      }
+    } catch {}
+  };
 
   const initializedForId = useRef<number | null>(null);
 
@@ -347,6 +433,10 @@ export default function ReportDetails() {
           <TabsTrigger value="taqeem" className="gap-2">
             <ExternalLink className="h-4 w-4" />
             جاهز للرفع على تقييم
+          </TabsTrigger>
+          <TabsTrigger value="automation" className="gap-2">
+            <Bot className="h-4 w-4" />
+            رفع آلي
           </TabsTrigger>
         </TabsList>
 
@@ -529,6 +619,199 @@ export default function ReportDetails() {
               </CardContent>
             </Card>
           </div>
+        </TabsContent>
+
+        {/* Automation Tab */}
+        <TabsContent value="automation" className="space-y-6">
+          <Card>
+            <CardHeader className="bg-muted/40 border-b pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Bot className="h-5 w-5 text-primary" />
+                الرفع الآلي على منصة تقييم
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-6 space-y-6">
+              {/* Status Banner */}
+              {automationData && (
+                <div className={`rounded-lg p-4 flex items-center gap-3 ${
+                  automationData.automationStatus === "completed" ? "bg-green-50 border border-green-200 text-green-800" :
+                  automationData.automationStatus === "failed" ? "bg-red-50 border border-red-200 text-red-800" :
+                  automationData.automationStatus === "waiting_otp" ? "bg-yellow-50 border border-yellow-200 text-yellow-800" :
+                  automationData.automationStatus === "running" ? "bg-blue-50 border border-blue-200 text-blue-800" :
+                  "bg-muted border"
+                }`}>
+                  {(automationData.automationStatus === "running" || automationLoading) && <Loader2 className="h-5 w-5 animate-spin shrink-0" />}
+                  {automationData.automationStatus === "completed" && <Check className="h-5 w-5 shrink-0" />}
+                  {automationData.automationStatus === "failed" && <AlertCircle className="h-5 w-5 shrink-0" />}
+                  {automationData.automationStatus === "waiting_otp" && <KeyRound className="h-5 w-5 shrink-0" />}
+                  <div>
+                    <p className="font-semibold text-sm">
+                      {automationData.automationStatus === "idle" && "لم تبدأ العملية بعد"}
+                      {automationData.automationStatus === "running" && "جارٍ الرفع الآلي..."}
+                      {automationData.automationStatus === "waiting_otp" && "في انتظار رمز OTP"}
+                      {automationData.automationStatus === "completed" && "✅ اكتملت العملية بنجاح!"}
+                      {automationData.automationStatus === "failed" && "❌ فشلت العملية"}
+                    </p>
+                    {automationData.automationError && (
+                      <p className="text-xs mt-1 opacity-80">{automationData.automationError}</p>
+                    )}
+                    {automationData.taqeemSubmittedAt && (
+                      <p className="text-xs mt-1 opacity-70">وقت الإرسال: {new Date(automationData.taqeemSubmittedAt).toLocaleString("ar-SA")}</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="flex flex-wrap gap-3">
+                <Button
+                  onClick={() => setShowCredentialsModal(true)}
+                  disabled={automationLoading || automationData?.automationStatus === "running" || automationData?.automationStatus === "waiting_otp"}
+                  className="gap-2"
+                >
+                  {automationLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />}
+                  {automationData?.automationStatus === "completed" ? "إعادة الرفع" : "ابدأ الرفع الآلي"}
+                </Button>
+
+                {(automationData?.automationStatus === "running" || automationData?.automationStatus === "waiting_otp") && (
+                  <Button variant="outline" onClick={() => setShowOtpModal(true)} className="gap-2">
+                    <KeyRound className="h-4 w-4" />
+                    إدخال OTP
+                  </Button>
+                )}
+
+                {automationData?.automationStatus === "failed" && (
+                  <Button variant="outline" onClick={() => setShowCredentialsModal(true)} className="gap-2">
+                    <RefreshCw className="h-4 w-4" />
+                    إعادة المحاولة
+                  </Button>
+                )}
+
+                <Button variant="ghost" size="sm" onClick={fetchAutomationStatus} className="gap-2">
+                  <RefreshCw className="h-4 w-4" />
+                  تحديث
+                </Button>
+              </div>
+
+              {/* QR Code */}
+              {automationData?.qrCodeBase64 && (
+                <div className="space-y-2">
+                  <p className="text-sm font-semibold flex items-center gap-2">
+                    <Check className="h-4 w-4 text-green-600" />
+                    QR Code المستخرج من المنصة
+                  </p>
+                  <div className="inline-block border-2 border-green-200 rounded-xl p-3 bg-white">
+                    <img src={automationData.qrCodeBase64} alt="QR Code" className="w-48 h-48 object-contain" />
+                  </div>
+                </div>
+              )}
+
+              {/* Certificate Download */}
+              {automationData?.hasCertificate && (
+                <div>
+                  <a
+                    href={`${apiBase}/api/automation/certificate/${id}`}
+                    download
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+                  >
+                    <Download className="h-4 w-4" />
+                    تحميل الشهادة (PDF)
+                  </a>
+                </div>
+              )}
+
+              {/* Logs */}
+              {automationData?.logs?.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-sm font-semibold flex items-center gap-2">
+                    <Terminal className="h-4 w-4" />
+                    سجل العمليات
+                  </p>
+                  <div className="bg-slate-950 text-green-400 rounded-lg p-4 font-mono text-xs space-y-1 max-h-48 overflow-y-auto" dir="ltr">
+                    {automationData.logs.map((log: string, i: number) => (
+                      <div key={i}>{log}</div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Credentials Modal */}
+          <Dialog open={showCredentialsModal} onOpenChange={setShowCredentialsModal}>
+            <DialogContent className="sm:max-w-md" dir="rtl">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <KeyRound className="h-5 w-5" />
+                  بيانات الدخول لمنصة تقييم
+                </DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 py-2">
+                <div className="space-y-2">
+                  <Label>اسم المستخدم</Label>
+                  <Input
+                    value={taqeemUsername}
+                    onChange={(e) => setTaqeemUsername(e.target.value)}
+                    placeholder="اسم المستخدم في منصة تقييم"
+                    dir="ltr"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>كلمة المرور</Label>
+                  <Input
+                    type="password"
+                    value={taqeemPassword}
+                    onChange={(e) => setTaqeemPassword(e.target.value)}
+                    placeholder="كلمة المرور"
+                    dir="ltr"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  بياناتك لا تُحفظ، تُستخدم فقط لجلسة الرفع الحالية.
+                </p>
+              </div>
+              <DialogFooter className="gap-2 sm:gap-0">
+                <Button variant="outline" onClick={() => setShowCredentialsModal(false)}>إلغاء</Button>
+                <Button onClick={startAutomation} disabled={!taqeemUsername || !taqeemPassword} className="gap-2">
+                  <Bot className="h-4 w-4" />
+                  ابدأ الرفع
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* OTP Modal */}
+          <Dialog open={showOtpModal} onOpenChange={setShowOtpModal}>
+            <DialogContent className="sm:max-w-sm" dir="rtl">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <KeyRound className="h-5 w-5 text-yellow-600" />
+                  أدخل رمز التحقق OTP
+                </DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 py-2">
+                <p className="text-sm text-muted-foreground">
+                  تم إرسال رمز التحقق إلى هاتفك المرتبط بحساب منصة تقييم.
+                </p>
+                <Input
+                  value={otpValue}
+                  onChange={(e) => setOtpValue(e.target.value)}
+                  placeholder="أدخل الرمز هنا"
+                  dir="ltr"
+                  className="text-center text-lg tracking-widest"
+                  maxLength={6}
+                  onKeyDown={(e) => e.key === "Enter" && submitOtp()}
+                />
+              </div>
+              <DialogFooter className="gap-2 sm:gap-0">
+                <Button variant="outline" onClick={() => setShowOtpModal(false)}>لاحقاً</Button>
+                <Button onClick={submitOtp} disabled={otpValue.length < 4} className="gap-2">
+                  <Check className="h-4 w-4" />
+                  تأكيد
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </TabsContent>
 
         {/* Edit Tab */}

@@ -1,6 +1,8 @@
 import { Router, type IRouter } from "express";
 import multer from "multer";
 import pdfParse from "pdf-parse";
+import * as fs from "fs";
+import * as path from "path";
 import { eq } from "drizzle-orm";
 import { db, reportsTable } from "@workspace/db";
 import { openai } from "@workspace/integrations-openai-ai-server";
@@ -17,8 +19,19 @@ import {
   UpdateReportStatusParams,
 } from "@workspace/api-zod";
 
+const UPLOADS_DIR = path.join(process.cwd(), "uploads");
+if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
+const diskStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
+  filename: (_req, file, cb) => {
+    const unique = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    cb(null, `${unique}_${file.originalname}`);
+  },
+});
+
 const router: IRouter = Router();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+const upload = multer({ storage: diskStorage, limits: { fileSize: 20 * 1024 * 1024 } });
 
 router.get("/reports/stats", async (req, res) => {
   try {
@@ -68,7 +81,8 @@ router.post("/reports/upload", upload.single("pdf"), async (req, res) => {
       return;
     }
 
-    const parsed = await pdfParse(req.file.buffer);
+    const pdfBuffer = fs.readFileSync(req.file.path);
+    const parsed = await pdfParse(pdfBuffer);
     const pdfText = parsed.text;
 
     const prompt = `أنت مساعد متخصص في استخراج بيانات تقارير التقييم العقاري السعودية.
@@ -213,6 +227,7 @@ ${pdfText.slice(0, 15000)}`;
       companyName: extracted.companyName ?? null,
       commercialRegNumber: extracted.commercialRegNumber ?? null,
       pdfFileName: req.file.originalname,
+      pdfFilePath: req.file.path,
     }).returning();
 
     res.status(201).json(GetReportResponse.parse(report));
