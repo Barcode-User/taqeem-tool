@@ -1,0 +1,6 @@
+@TaqeemApi_HostAddress = http://localhost:5209
+
+GET {{TaqeemApi_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

@@ -76,6 +76,34 @@ pnpm --filter @workspace/db run push
 pnpm --filter @workspace/api-spec run codegen
 ```
 
+## .NET 10 API (SQL Server)
+
+مسار الإصدار المتوازي بتقنية .NET 10 + SQL Server:
+
+```
+artifacts/dotnet-api/
+  Program.cs                → نقطة بداية التطبيق، CORS، EF migrations تلقائياً
+  TaqeemApi.csproj          → حزم NuGet: EF Core SQL Server، Playwright، itext7، OpenAI
+  appsettings.json          → ConnectionStrings:SqlServer (يحتاج تعديلاً)
+  Controllers/
+    ReportsController.cs    → CRUD للتقارير
+    AutomationController.cs → جلسة TAQEEM + رفع آلي
+  Data/
+    AppDbContext.cs          → EF Core DbContext
+    Migrations/             → Migration يدوي (InitialCreate)
+  Models/Report.cs          → نموذج قاعدة البيانات
+  Services/
+    OpenAiService.cs        → استخراج البيانات من PDF
+    PdfService.cs           → قراءة PDF عبر itext7
+  Automation/
+    SessionStore.cs         → حفظ جلسة TAQEEM على الديسك
+    TaqeemBot.cs            → أتمتة Playwright (selectors تحتاج تحديثاً)
+```
+
+**للتشغيل:** أعدّل `ConnectionStrings:SqlServer` في `appsettings.json` ثم ابدأ الـ workflow "artifacts/dotnet-api: .NET API Server"
+
+**المنفذ:** 8099
+
 ## Relevant Files
 
 - `lib/api-spec/openapi.yaml` — API spec (source of truth for hooks/schemas)
