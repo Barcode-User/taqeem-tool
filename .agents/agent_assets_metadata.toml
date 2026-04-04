@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "gR2o_og8j9c7t77hx5uVF"
+uri = "file://taqeem-tool-code.tar.gz"
+type = "unspecified"
+title = "كود أداة تقارير التقييم - taqeem-code.tar.gz"
