@@ -112,19 +112,20 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     addLog(session, "استخراج QR Code والشهادة...");
     const result = await extractQrAndCertificate(session, reportId);
 
-    // ─── STEP 6: Update DB ──────────────────────────────────────────
+    // ─── STEP 6: Update DB — مكتمل ─────────────────────────────────
     await db
       .update(reportsTable)
       .set({
-        automationStatus: "completed",
-        qrCodeBase64: result.qrCodeBase64 ?? null,
-        certificatePath: result.certificatePath ?? null,
-        taqeemSubmittedAt: new Date().toISOString(),
-        taqeemReportNumber: result.taqeemReportNumber ?? report.taqeemReportNumber,
+        status:           "submitted",   // مكتمل ← تم الرفع على تقييم
+        automationStatus: "completed",   // مكتمل ← انتهت الأتمتة
+        qrCodeBase64:     result.qrCodeBase64    ?? null,
+        certificatePath:  result.certificatePath ?? null,
+        taqeemSubmittedAt:   new Date().toISOString(),
+        taqeemReportNumber:  result.taqeemReportNumber ?? report.taqeemReportNumber,
       })
       .where(eq(reportsTable.id, reportId));
 
-    addLog(session, "✅ اكتملت العملية بنجاح!");
+    addLog(session, "✅ اكتملت العملية بنجاح! — تم الرفع على منصة تقييم");
   } catch (err: any) {
     addLog(session, `❌ خطأ: ${err.message}`);
     await db

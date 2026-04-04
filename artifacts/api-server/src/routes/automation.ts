@@ -186,30 +186,28 @@ router.post("/automation/submit-external", upload.single("pdf"), async (req, res
     const sessionContext = await getAuthenticatedContext();
 
     if (sessionContext) {
-      // ✅ جلسة نشطة — رفع فوري
-      await db
-        .update(reportsTable)
-        .set({ automationStatus: "idle" })
-        .where(eq(reportsTable.id, report.id));
-
-      const sessionId = await startAutomation(report.id);
-
+      // ✅ جلسة نشطة — رفع فوري (يبقى في الطابور حتى يكمل startAutomation)
       console.log(`[ExternalSubmit] ✅ تقرير #${report.id} — رفع فوري (جلسة نشطة)`);
 
-      res.status(202).json({
-        status: "processing",
-        reportId: report.id,
-        sessionId,
-        message: "الجلسة نشطة — جارٍ الرفع الفوري على منصة تقييم",
-      });
-    } else {
-      // 🕐 جلسة منتهية — يبقى في الطابور
-      console.log(`[ExternalSubmit] 🕐 تقرير #${report.id} — تم حفظه في الطابور (لا توجد جلسة)`);
+      // startAutomation سيُغيّر automationStatus من queued → running تلقائياً
+      const sessionId = await startAutomation(report.id);
 
       res.status(202).json({
-        status: "queued",
-        reportId: report.id,
-        message: "لا توجد جلسة نشطة — تم حفظ الطلب وسيُرفع تلقائياً عند تسجيل الدخول",
+        status:    "processing",
+        reportId:  report.id,
+        sessionId,
+        draftSaved: true,
+        message:   "تم حفظ الطلب وجارٍ رفعه فوراً على منصة تقييم (الجلسة نشطة)",
+      });
+    } else {
+      // 🕐 جلسة منتهية — يبقى مسودة حتى تسجيل الدخول
+      console.log(`[ExternalSubmit] 🕐 تقرير #${report.id} — محفوظ كمسودة (لا توجد جلسة)`);
+
+      res.status(202).json({
+        status:    "queued",
+        reportId:  report.id,
+        draftSaved: true,
+        message:   "تم حفظ الطلب كمسودة وسيُرفع تلقائياً عند تسجيل الدخول التالي",
       });
     }
 
