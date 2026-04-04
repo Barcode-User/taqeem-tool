@@ -214,6 +214,13 @@ async function runLoginFlow(flow: ActiveLoginFlow, username: string, password: s
     setSharedContext(flow.browser, flow.context);
 
     addFlowLog("✅ الجلسة محفوظة — يمكنك الآن رفع أي عدد من التقارير بدون إعادة تسجيل الدخول.");
+
+    // تشغيل معالج الطابور في الخلفية
+    import("./queue-processor").then(({ processQueue }) => {
+      processQueue().catch((err) =>
+        console.error("[TaqeemLogin] خطأ في معالج الطابور:", err)
+      );
+    });
   } catch (err: any) {
     try { await page.close(); } catch {}
     throw err;

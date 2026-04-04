@@ -1,4 +1,7 @@
 import { Router } from "express";
+import multer from "multer";
+import * as fs from "fs";
+import * as path from "path";
 import { db, reportsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { startAutomation } from "../automation/taqeem-bot";
@@ -8,20 +11,37 @@ import {
   submitLoginOtp,
   getLoginStatus,
   logout,
+  getAuthenticatedContext,
 } from "../automation/taqeem-session-store";
+import { hasPendingQueue } from "../automation/queue-processor";
 
 const router = Router();
 
+// ─── إعداد رفع الملفات ────────────────────────────────────────────────────────
+const UPLOADS_DIR = path.join(process.cwd(), "uploads");
+if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
+const diskStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
+  filename: (_req, file, cb) => {
+    const unique = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    cb(null, `${unique}_${file.originalname}`);
+  },
+});
+const upload = multer({ storage: diskStorage, limits: { fileSize: 20 * 1024 * 1024 } });
+
 // ─────────────────────────────────────────────────────────────────────────────
-// SESSION MANAGEMENT (login once, reuse all day)
+// SESSION MANAGEMENT
 // ─────────────────────────────────────────────────────────────────────────────
 
 // GET /api/automation/session-status
-router.get("/automation/session-status", (_req, res) => {
-  res.json(getLoginStatus());
+router.get("/automation/session-status", async (_req, res) => {
+  const status = getLoginStatus();
+  const pendingCount = await hasPendingQueue().catch(() => 0);
+  res.json({ ...status, pendingQueueCount: pendingCount });
 });
 
-// POST /api/automation/login  — start login flow (username + password)
+// POST /api/automation/login
 router.post("/automation/login", async (req, res) => {
   try {
     const { username, password } = req.body;
@@ -37,7 +57,7 @@ router.post("/automation/login", async (req, res) => {
   }
 });
 
-// POST /api/automation/login-otp  — submit OTP for login
+// POST /api/automation/login-otp
 router.post("/automation/login-otp", (req, res) => {
   const { loginId, otp } = req.body;
   if (!loginId || !otp) {
@@ -49,13 +69,154 @@ router.post("/automation/login-otp", (req, res) => {
     res.status(400).json({ error: "جلسة تسجيل الدخول غير موجودة أو انتهت" });
     return;
   }
-  res.json({ message: "تم إرسال OTP — جارٍ إكمال تسجيل الدخول..." });
+  res.json({ message: "تم إرسال OTP — جارٍ إكمال تسجيل الدخول وسيبدأ معالجة الطابور تلقائياً..." });
 });
 
 // POST /api/automation/logout
 router.post("/automation/logout", async (_req, res) => {
   await logout();
   res.json({ message: "تم تسجيل الخروج وحذف الجلسة." });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EXTERNAL SUBMIT — يُستدعى من النظام الخارجي
+// POST /api/automation/submit-external
+//
+// الطلب: multipart/form-data
+//   • data  → JSON string لبيانات التقرير
+//   • pdf   → ملف PDF (stream)
+//
+// الاستجابة عند الجلسة نشطة:   { status: "processing", reportId, sessionId }
+// الاستجابة عند الجلسة منتهية: { status: "queued",     reportId }
+// ─────────────────────────────────────────────────────────────────────────────
+router.post("/automation/submit-external", upload.single("pdf"), async (req, res) => {
+  try {
+    // ─── التحقق من وجود الملف ───────────────────────────────────────────────
+    if (!req.file) {
+      res.status(400).json({ error: "يجب إرسال ملف PDF في الحقل 'pdf'" });
+      return;
+    }
+
+    // ─── تحليل بيانات JSON ──────────────────────────────────────────────────
+    let reportData: Record<string, any> = {};
+    if (req.body.data) {
+      try {
+        reportData = JSON.parse(req.body.data);
+      } catch {
+        res.status(400).json({ error: "حقل 'data' يجب أن يكون JSON صالحاً" });
+        return;
+      }
+    }
+
+    // ─── حفظ التقرير في قاعدة البيانات ────────────────────────────────────
+    const [report] = await db
+      .insert(reportsTable)
+      .values({
+        // بيانات التقرير من النظام الخارجي
+        reportNumber:             reportData.reportNumber             ?? null,
+        reportDate:               reportData.reportDate               ?? null,
+        valuationDate:            reportData.valuationDate            ?? null,
+        inspectionDate:           reportData.inspectionDate           ?? null,
+        commissionDate:           reportData.commissionDate           ?? null,
+        requestNumber:            reportData.requestNumber            ?? null,
+        valuerName:               reportData.valuerName               ?? null,
+        licenseNumber:            reportData.licenseNumber            ?? null,
+        licenseDate:              reportData.licenseDate              ?? null,
+        membershipNumber:         reportData.membershipNumber         ?? null,
+        membershipType:           reportData.membershipType           ?? null,
+        valuerPercentage:         reportData.valuerPercentage         ?? null,
+        secondValuerName:         reportData.secondValuerName         ?? null,
+        secondValuerPercentage:   reportData.secondValuerPercentage   ?? null,
+        secondValuerLicenseNumber:  reportData.secondValuerLicenseNumber  ?? null,
+        secondValuerMembershipNumber: reportData.secondValuerMembershipNumber ?? null,
+        clientName:               reportData.clientName               ?? null,
+        clientEmail:              reportData.clientEmail              ?? null,
+        clientPhone:              reportData.clientPhone              ?? null,
+        intendedUser:             reportData.intendedUser             ?? null,
+        reportType:               reportData.reportType               ?? null,
+        valuationPurpose:         reportData.valuationPurpose         ?? null,
+        valuationBasis:           reportData.valuationBasis           ?? null,
+        propertyType:             reportData.propertyType             ?? null,
+        propertySubType:          reportData.propertySubType          ?? null,
+        region:                   reportData.region                   ?? null,
+        city:                     reportData.city                     ?? null,
+        district:                 reportData.district                 ?? null,
+        street:                   reportData.street                   ?? null,
+        blockNumber:              reportData.blockNumber              ?? null,
+        plotNumber:               reportData.plotNumber               ?? null,
+        planNumber:               reportData.planNumber               ?? null,
+        propertyUse:              reportData.propertyUse              ?? null,
+        deedNumber:               reportData.deedNumber               ?? null,
+        deedDate:                 reportData.deedDate                 ?? null,
+        ownerName:                reportData.ownerName                ?? null,
+        ownershipType:            reportData.ownershipType            ?? null,
+        buildingPermitNumber:     reportData.buildingPermitNumber     ?? null,
+        buildingStatus:           reportData.buildingStatus           ?? null,
+        buildingAge:              reportData.buildingAge              ?? null,
+        landArea:                 reportData.landArea                 ?? null,
+        buildingArea:             reportData.buildingArea             ?? null,
+        basementArea:             reportData.basementArea             ?? null,
+        annexArea:                reportData.annexArea                ?? null,
+        floorsCount:              reportData.floorsCount              ?? null,
+        permittedFloorsCount:     reportData.permittedFloorsCount     ?? null,
+        permittedBuildingRatio:   reportData.permittedBuildingRatio   ?? null,
+        streetWidth:              reportData.streetWidth              ?? null,
+        streetFacades:            reportData.streetFacades            ?? null,
+        utilities:                reportData.utilities                ?? null,
+        coordinates:              reportData.coordinates              ?? null,
+        valuationMethod:          reportData.valuationMethod          ?? null,
+        marketValue:              reportData.marketValue              ?? null,
+        incomeValue:              reportData.incomeValue              ?? null,
+        costValue:                reportData.costValue                ?? null,
+        finalValue:               reportData.finalValue               ?? null,
+        pricePerMeter:            reportData.pricePerMeter            ?? null,
+        companyName:              reportData.companyName              ?? null,
+        commercialRegNumber:      reportData.commercialRegNumber      ?? null,
+        notes:                    reportData.notes                    ?? null,
+        // ملف PDF
+        pdfFileName:  req.file.originalname,
+        pdfFilePath:  req.file.path,
+        // الحالة الأولية
+        status:           "reviewed",  // البيانات من نظام خارجي = مراجعة مسبقة
+        automationStatus: "queued",    // سيُحدَّث بناءً على حالة الجلسة
+      })
+      .returning();
+
+    // ─── هل الجلسة نشطة؟ ────────────────────────────────────────────────────
+    const sessionContext = await getAuthenticatedContext();
+
+    if (sessionContext) {
+      // ✅ جلسة نشطة — رفع فوري
+      await db
+        .update(reportsTable)
+        .set({ automationStatus: "idle" })
+        .where(eq(reportsTable.id, report.id));
+
+      const sessionId = await startAutomation(report.id);
+
+      console.log(`[ExternalSubmit] ✅ تقرير #${report.id} — رفع فوري (جلسة نشطة)`);
+
+      res.status(202).json({
+        status: "processing",
+        reportId: report.id,
+        sessionId,
+        message: "الجلسة نشطة — جارٍ الرفع الفوري على منصة تقييم",
+      });
+    } else {
+      // 🕐 جلسة منتهية — يبقى في الطابور
+      console.log(`[ExternalSubmit] 🕐 تقرير #${report.id} — تم حفظه في الطابور (لا توجد جلسة)`);
+
+      res.status(202).json({
+        status: "queued",
+        reportId: report.id,
+        message: "لا توجد جلسة نشطة — تم حفظ الطلب وسيُرفع تلقائياً عند تسجيل الدخول",
+      });
+    }
+
+  } catch (err: any) {
+    req.log.error({ err }, "Failed to process external submission");
+    res.status(500).json({ error: err.message || "Internal server error" });
+  }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -106,10 +267,10 @@ router.get("/automation/status/:reportId", async (req, res) => {
     const [report] = await db
       .select({
         automationStatus: reportsTable.automationStatus,
-        automationError: reportsTable.automationError,
+        automationError:  reportsTable.automationError,
         automationSessionId: reportsTable.automationSessionId,
-        qrCodeBase64: reportsTable.qrCodeBase64,
-        certificatePath: reportsTable.certificatePath,
+        qrCodeBase64:     reportsTable.qrCodeBase64,
+        certificatePath:  reportsTable.certificatePath,
         taqeemSubmittedAt: reportsTable.taqeemSubmittedAt,
       })
       .from(reportsTable)
@@ -126,10 +287,10 @@ router.get("/automation/status/:reportId", async (req, res) => {
     res.json({
       reportId,
       automationStatus: report.automationStatus ?? "idle",
-      automationError: report.automationError,
-      sessionId: report.automationSessionId,
-      qrCodeBase64: report.qrCodeBase64,
-      hasCertificate: !!report.certificatePath,
+      automationError:  report.automationError,
+      sessionId:        report.automationSessionId,
+      qrCodeBase64:     report.qrCodeBase64,
+      hasCertificate:   !!report.certificatePath,
       taqeemSubmittedAt: report.taqeemSubmittedAt,
       logs,
     });
@@ -179,6 +340,26 @@ router.post("/automation/retry/:reportId", async (req, res) => {
   } catch (err: any) {
     req.log.error({ err }, "Failed to retry automation");
     res.status(500).json({ error: err.message || "Internal server error" });
+  }
+});
+
+// GET /api/automation/queue — عرض الطلبات المعلقة في الطابور
+router.get("/automation/queue", async (_req, res) => {
+  try {
+    const queued = await db
+      .select({
+        id:              reportsTable.id,
+        reportNumber:    reportsTable.reportNumber,
+        clientName:      reportsTable.clientName,
+        automationStatus: reportsTable.automationStatus,
+        createdAt:       reportsTable.createdAt,
+      })
+      .from(reportsTable)
+      .where(eq(reportsTable.automationStatus, "queued"));
+
+    res.json({ count: queued.length, queue: queued });
+  } catch (err: any) {
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
