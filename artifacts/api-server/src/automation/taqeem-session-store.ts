@@ -171,11 +171,12 @@ async function runLoginFlow(flow: ActiveLoginFlow, username: string, password: s
   try {
     addFlowLog("الانتقال إلى صفحة تسجيل الدخول...");
 
-    // ⚠️ TODO: Update URL if needed
     await page.goto(`${TAQEEM_URL}/membership/login`, {
-      waitUntil: "networkidle",
-      timeout: 30000,
+      waitUntil: "domcontentloaded",
+      timeout: 60000,
     });
+    // انتظار إضافي للتأكد من تحميل الصفحة بالكامل
+    await page.waitForTimeout(3000);
 
     // Check if already logged in (session restored from storage state)
     if (!page.url().includes("/login")) {
