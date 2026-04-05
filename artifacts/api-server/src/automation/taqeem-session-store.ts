@@ -181,11 +181,56 @@ async function runLoginFlow(flow: ActiveLoginFlow, username: string, password: s
     await page.fill('input[name="password"], input[type="password"]', password);
     await page.click('button[type="submit"], input[type="submit"]');
 
-    addFlowLog("انتظار صفحة التحقق برمز OTP...");
+    addFlowLog("انتظار صفحة اختيار طريقة OTP...");
     flow.status = "waiting_otp";
 
-    // ⚠️ TODO: تحديث انتظار صفحة OTP
-    await page.waitForURL(/otp|verify|تحقق/, { timeout: 15000 }).catch(() => {});
+    // انتظار صفحة اختيار طريقة OTP أو صفحة OTP مباشرة
+    await page.waitForURL(/otp|verify|تحقق|confirm|channel|method/, { timeout: 15000 }).catch(() => {});
+
+    // ─── اختيار البريد الإلكتروني إذا ظهرت صفحة الاختيار ───────────
+    const emailSelectors = [
+      'input[type="radio"][value*="email" i]',
+      'input[type="radio"][value*="mail" i]',
+      'label:has-text("البريد الإلكتروني") input[type="radio"]',
+      'label:has-text("email" i) input[type="radio"]',
+      'li:has-text("البريد الإلكتروني")',
+      'div:has-text("البريد الإلكتروني") input',
+      'button:has-text("البريد الإلكتروني")',
+      'button:has-text("Email" i)',
+      '[data-value*="email" i]',
+      '[value*="email" i]',
+    ];
+
+    let selectedEmail = false;
+    for (const sel of emailSelectors) {
+      try {
+        const el = await page.$(sel);
+        if (el) {
+          await el.click();
+          selectedEmail = true;
+          addFlowLog("تم اختيار البريد الإلكتروني لاستقبال OTP ✅");
+          break;
+        }
+      } catch {}
+    }
+
+    // إذا تم اختيار الطريقة، انقر على زر التأكيد/التالي
+    if (selectedEmail) {
+      try {
+        await page.click(
+          'button[type="submit"], button:has-text("تأكيد"), button:has-text("التالي"), button:has-text("إرسال"), button:has-text("Continue")',
+          { timeout: 5000 }
+        );
+        addFlowLog("تم النقر على زر إرسال OTP...");
+        await page.waitForURL(/otp|verify|تحقق|confirm/, { timeout: 15000 }).catch(() => {});
+      } catch {}
+    }
+
+    if (!selectedEmail) {
+      addFlowLog("لم يتم العثور على خيار البريد الإلكتروني — المتابعة مباشرة...");
+    }
+
+    addFlowLog("في انتظار إدخال رمز OTP من البريد الإلكتروني...");
 
     const otp = await new Promise<string>((resolve) => {
       flow.otpResolver = resolve;
