@@ -1,0 +1,108 @@
+> tsc --build
+
+'tsc' is not recognized as an internal or external command,
+operable program or batch file.
+ ELIFECYCLE  Command failed with exit code 1.
+ WARN   Local package.json exists, but node_modules missing, did you mean to install?
+ ELIFECYCLE  Command failed with exit code 1.
+ WARN   Local package.json exists, but node_modules missing, did you mean to install?
+ ELIFECYCLE  Command failed with exit code 1.
+ WARN   Local package.json exists, but node_modules missing, did you mean to install?
+
+D:\Devolper\New\taqeem-tool-main>pnpm run start
+ ERR_PNPM_NO_SCRIPT_OR_SERVER  Missing script start or file server.js
+
+D:\Devolper\New\taqeem-tool-main>cd /d "D:\Devolper\New\taqeem-tool-main\artifacts\api-server"
+
+D:\Devolper\New\taqeem-tool-main\artifacts\api-server>set NODE_ENV=development
+
+D:\Devolper\New\taqeem-tool-main\artifacts\api-server>pnpm run build
+
+> @workspace/api-server@0.0.0 build D:\Devolper\New\taqeem-tool-main\artifacts\api-server
+> node ./build.mjs
+
+node:internal/modules/package_json_reader:301
+  throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);
+        ^
+
+Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'esbuild' imported from D:\Devolper\New\taqeem-tool-main\artifacts\api-server\build.mjs
+    at Object.getPackageJSONURL (node:internal/modules/package_json_reader:301:9)
+Progress: resolved 514, reused 506, downloaded 1, added 0768:81)
+    at moduleResolve (node:internal/modules/esm/resolve:859:18)
+    at defaultResolve (node:internal/modules/esm/resolve:991:11)
+    at #cachedDefaultResolve (node:internal/modules/esm/loader:719:20)
+    at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:736:38)
+Packages: +507
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Progress: resolved 514, reused 506, downloaded 1, added 0odules/esm/loader:621:35)
+Progress: resolved 514, reused 506, downloaded 1, added 361_job:160:33) {
+  code: 'ERR_MODULE_NOT_FOUND'
+Progress: resolved 448, reused 439, downloaded 1, added 0
+Progress: resolved 514, reused 506, downloaded 1, added 507, done
+node_modules/.pnpm/esbuild@0.27.3/node_modules/esbuild: Running postinstall script, done in 2.7s
+. preinstall$ node -e "const fs=require('fs');['package-lock.json','yarn.lock'].forEach(f=>{try{fs.unlinkSync(f)}catc…
+└─ Done in 60msackage.json exists, but node_modules missing, did you mean to install?
+
+devDependencies:taqeem-tool-main\artifacts\api-server>cd /d "D:\Devolper\New\taqeem-tool-main"
++ prettier 3.8.1ed 245, reused 233, downloaded 1, added 0
++ typescript 5.9.3 (6.0.2 is available)nstall
+Progress: resolved 227, reused 215, downloaded 1, added 0
+Done in 1m 53.8s using pnpm v10.33.0downloaded 1, added 0
+
+D:\Devolper\New\taqeem-tool-main>
+D:\Devolper\New\taqeem-tool-main>set NODE_ENV=development
+
+D:\Devolper\New\taqeem-tool-main>pnpm run build
+
+> workspace@0.0.0 build D:\Devolper\New\taqeem-tool-main
+> pnpm run typecheck && pnpm -r --if-present run build
+
+
+> workspace@0.0.0 typecheck D:\Devolper\New\taqeem-tool-main
+> pnpm run typecheck:libs && pnpm -r --filter "./artifacts/**" --filter "./scripts" --if-present run typecheck
+
+
+> workspace@0.0.0 typecheck:libs D:\Devolper\New\taqeem-tool-main
+> tsc --build
+
+error TS2688: Cannot find type definition file for 'node'.
+  The file is in the program because:
+    Entry point of type library 'node' specified in compilerOptions
+
+  lib/integrations-openai-ai-server/tsconfig.json:9:15
+    9     "types": ["node"]
+                    ~~~~~~
+    File is entry point of type library specified here.
+
+lib/integrations-openai-ai-server/src/batch/utils.ts:77:30 - error TS2339: Property 'AbortError' does not exist on type '<T>(input: (attemptNumber: number) => T | PromiseLike<T>, options?: Options | undefined) => Promise<T>'.
+
+77             throw new pRetry.AbortError(
+                                ~~~~~~~~~~
+
+lib/integrations-openai-ai-server/src/batch/utils.ts:117:32 - error TS2339: Property 'AbortError' does not exist on type '<T>(input: (attemptNumber: number) => T | PromiseLike<T>, options?: Options | undefined) => Promise<T>'.
+
+117               throw new pRetry.AbortError(
+                                   ~~~~~~~~~~
+
+lib/integrations-openai-ai-server/src/image/client.ts:31:18 - error TS18048: 'response.data' is possibly 'undefined'.
+
+31   const base64 = response.data[0]?.b64_json ?? "";
+                    ~~~~~~~~~~~~~
+
+lib/integrations-openai-ai-server/src/image/client.ts:54:23 - error TS18048: 'response.data' is possibly 'undefined'.
+
+54   const imageBase64 = response.data[0]?.b64_json ?? "";
+                         ~~~~~~~~~~~~~
+
+
+Found 5 errors.
+
+ ELIFECYCLE  Command failed with exit code 1.
+ ELIFECYCLE  Command failed with exit code 1.
+ ELIFECYCLE  Command failed with exit code 1.
+
+D:\Devolper\New\taqeem-tool-main>pnpm run start
+ ERR_PNPM_NO_SCRIPT_OR_SERVER  Missing script start or file server.js
+
+D:\Devolper\New\taqeem-tool-main>
+D:\Devolper\New\taqeem-tool-main>
