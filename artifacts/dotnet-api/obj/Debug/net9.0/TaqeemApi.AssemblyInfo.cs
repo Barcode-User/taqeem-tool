@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("TaqeemApi")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+6b48a196f0f98d5934d9ccaf519aedef3f917c59")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+432b2ab1469682e8d3384043517463d14a13901d")]
 [assembly: System.Reflection.AssemblyProductAttribute("TaqeemApi")]
 [assembly: System.Reflection.AssemblyTitleAttribute("TaqeemApi")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
