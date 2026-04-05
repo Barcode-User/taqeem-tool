@@ -3,6 +3,18 @@ import type { Browser, BrowserContext } from "playwright";
 import { randomUUID } from "crypto";
 import * as fs from "fs";
 import * as path from "path";
+import { execSync } from "child_process";
+
+function getChromiumExecutable(): string | undefined {
+  if (process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH) {
+    return process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
+  }
+  try {
+    const p = execSync("which chromium 2>/dev/null || which chromium-browser 2>/dev/null || which google-chrome 2>/dev/null", { encoding: "utf-8" }).trim();
+    if (p) return p;
+  } catch {}
+  return undefined;
+}
 
 const UPLOADS_DIR = path.join(process.cwd(), "uploads");
 const STORAGE_STATE_FILE = path.join(UPLOADS_DIR, "taqeem-session.json");
@@ -110,10 +122,12 @@ export async function startLogin(username: string, password: string): Promise<st
 
   const loginId = randomUUID();
 
+  const chromiumExec = getChromiumExecutable();
+  console.log(`[TaqeemLogin] Using Chromium: ${chromiumExec ?? "playwright-default"}`);
   const browser = await chromium.launch({
     headless: true,
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
-    executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,
+    ...(chromiumExec ? { executablePath: chromiumExec } : {}),
   });
 
   const storageState = fs.existsSync(STORAGE_STATE_FILE)

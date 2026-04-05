@@ -1,5 +1,6 @@
 {pkgs}: {
   deps = [
+    pkgs.chromium
     pkgs.xorg.libXrandr
     pkgs.xorg.libXfixes
     pkgs.xorg.libXext
