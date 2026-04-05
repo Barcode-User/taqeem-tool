@@ -298,17 +298,29 @@ async function runLoginFlow(flow: ActiveLoginFlow, username: string, password: s
     addFlowLog("النقر على زر تسجيل الدخول...");
     await page.click('#kc-login, input[type="submit"], button[type="submit"]');
 
-    // انتظار الانتقال بعد الضغط
-    await page.waitForLoadState("domcontentloaded", { timeout: 30000 });
-    await page.waitForTimeout(2000);
+    // انتظار حتى تستقر الصفحة بعد الانتقالات المتسلسلة (Keycloak → callback → TAQEEM)
+    await page.waitForLoadState("domcontentloaded", { timeout: 30000 }).catch(() => {});
+    await page.waitForTimeout(3000);
 
-    addFlowLog(`بعد تسجيل الدخول — الصفحة: ${page.url()}`);
+    // انتظار إضافي لاستقرار الـ redirects
+    let stableUrl = page.url();
+    for (let i = 0; i < 5; i++) {
+      await page.waitForTimeout(1000);
+      const newUrl = page.url();
+      if (newUrl === stableUrl) break;
+      stableUrl = newUrl;
+    }
+
+    addFlowLog(`بعد تسجيل الدخول — الصفحة: ${stableUrl}`);
 
     // ─── التحقق من صفحة OTP أو اختيار الطريقة ──────────────────────
-    const afterLoginUrl = page.url();
-    const isOnOtpPage = /otp|verify|تحقق|confirm|channel|method|authenticate/i.test(afterLoginUrl);
+    // التحقق بالـ hostname وليس الـ URL كاملاً (لتفادي الـ iss parameter المشفّر)
+    let afterLoginHostname = "";
+    try { afterLoginHostname = new URL(stableUrl).hostname; } catch {}
+    const isOnSSOHost = afterLoginHostname === SSO_HOST;
+    const isOnOtpPage = isOnSSOHost && /otp|verify|تحقق|confirm|channel|method|authenticate|login-actions/i.test(stableUrl);
 
-    if (isOnOtpPage || afterLoginUrl.includes(SSO_HOST)) {
+    if (isOnSSOHost) {
       addFlowLog("ظهرت صفحة التحقق الثنائي...");
       flow.status = "waiting_otp";
 
@@ -378,17 +390,23 @@ async function runLoginFlow(flow: ActiveLoginFlow, username: string, password: s
     addFlowLog("تم استلام OTP — جارٍ إدخاله...");
     flow.status = "logging_in";
 
-    // محددات حقل OTP في Keycloak
-    await page.waitForSelector(
-      'input[name="otp"], input[id="otp"], input[autocomplete="one-time-code"], input[maxlength="6"], input[type="number"]',
-      { timeout: 10000 }
-    );
-    await page.fill(
-      'input[name="otp"], input[id="otp"], input[autocomplete="one-time-code"], input[maxlength="6"], input[type="number"]',
-      otp
-    );
-    await page.click('#kc-login, input[type="submit"], button[type="submit"]');
-    await page.waitForLoadState("domcontentloaded", { timeout: 30000 });
+    // تحقق إذا كانت الصفحة لا تزال على SSO أم انتقلت للرئيسية بالفعل
+    const currentPageUrl = page.url();
+    let currentHostname = "";
+    try { currentHostname = new URL(currentPageUrl).hostname; } catch {}
+    addFlowLog(`الصفحة عند إدخال OTP: ${currentPageUrl}`);
+
+    if (currentHostname !== SSO_HOST) {
+      // الصفحة انتقلت للرئيسية — تسجيل الدخول مكتمل بدون حاجة لإدخال OTP
+      addFlowLog("الصفحة انتقلت للرئيسية — تسجيل الدخول مكتمل ✅");
+    } else {
+      // لا تزال على SSO — أدخل الـ OTP
+      const otpSelector = 'input[name="otp"], input[id="otp"], input[autocomplete="one-time-code"], input[maxlength="6"], input[type="number"], input[type="text"]';
+      await page.waitForSelector(otpSelector, { timeout: 10000 });
+      await page.fill(otpSelector, otp);
+      await page.click('#kc-login, input[type="submit"], button[type="submit"]');
+      await page.waitForLoadState("domcontentloaded", { timeout: 30000 });
+    }
 
     addFlowLog("تم تسجيل الدخول بنجاح ✅");
     addFlowLog("جارٍ حفظ الجلسة للاستخدام طوال اليوم...");
