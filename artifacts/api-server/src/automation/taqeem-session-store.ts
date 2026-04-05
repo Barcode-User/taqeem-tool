@@ -166,6 +166,7 @@ export async function startLogin(username: string, password: string): Promise<st
 
 async function runLoginFlow(flow: ActiveLoginFlow, username: string, password: string) {
   const TAQEEM_URL = "https://qima.taqeem.gov.sa";
+  const SSO_HOST = "sso.taqeem.gov.sa";
   const page = await flow.context.newPage();
 
   try {
@@ -175,11 +176,13 @@ async function runLoginFlow(flow: ActiveLoginFlow, username: string, password: s
       waitUntil: "domcontentloaded",
       timeout: 60000,
     });
-    // انتظار إضافي للتأكد من تحميل الصفحة بالكامل
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(2000);
 
-    // Check if already logged in (session restored from storage state)
-    if (!page.url().includes("/login")) {
+    addFlowLog(`الصفحة الحالية: ${page.url()}`);
+
+    // إذا لم نصل إلى SSO ولم نبقَ في /login — نحن مسجلون مسبقاً
+    const currentUrl = page.url();
+    if (!currentUrl.includes(SSO_HOST) && !currentUrl.includes("/login")) {
       addFlowLog("تم استعادة الجلسة السابقة — لا حاجة لإعادة تسجيل الدخول.");
       await page.close();
       flow.status = "authenticated";
@@ -190,63 +193,90 @@ async function runLoginFlow(flow: ActiveLoginFlow, username: string, password: s
       return;
     }
 
-    addFlowLog("إدخال بيانات الدخول...");
-    // ⚠️ TODO: تحديث محددات حقول اسم المستخدم وكلمة المرور
-    await page.fill('input[name="username"], input[type="text"]:first-of-type', username);
-    await page.fill('input[name="password"], input[type="password"]', password);
-    await page.click('button[type="submit"], input[type="submit"]');
+    // ─── إدخال بيانات الدخول على Keycloak ───────────────────────────
+    addFlowLog("إدخال بيانات الدخول على Keycloak SSO...");
 
-    addFlowLog("انتظار صفحة اختيار طريقة OTP...");
-    flow.status = "waiting_otp";
+    // انتظار ظهور حقل اسم المستخدم
+    await page.waitForSelector('#username, input[name="username"]', { timeout: 15000 });
+    await page.fill('#username, input[name="username"]', username);
+    await page.fill('#password, input[name="password"]', password);
 
-    // انتظار صفحة اختيار طريقة OTP أو صفحة OTP مباشرة
-    await page.waitForURL(/otp|verify|تحقق|confirm|channel|method/, { timeout: 15000 }).catch(() => {});
+    addFlowLog("النقر على زر تسجيل الدخول...");
+    await page.click('#kc-login, input[type="submit"], button[type="submit"]');
 
-    // ─── اختيار البريد الإلكتروني إذا ظهرت صفحة الاختيار ───────────
-    const emailSelectors = [
-      'input[type="radio"][value*="email" i]',
-      'input[type="radio"][value*="mail" i]',
-      'label:has-text("البريد الإلكتروني") input[type="radio"]',
-      'label:has-text("email" i) input[type="radio"]',
-      'li:has-text("البريد الإلكتروني")',
-      'div:has-text("البريد الإلكتروني") input',
-      'button:has-text("البريد الإلكتروني")',
-      'button:has-text("Email" i)',
-      '[data-value*="email" i]',
-      '[value*="email" i]',
-    ];
+    // انتظار الانتقال بعد الضغط
+    await page.waitForLoadState("domcontentloaded", { timeout: 30000 });
+    await page.waitForTimeout(2000);
 
-    let selectedEmail = false;
-    for (const sel of emailSelectors) {
-      try {
-        const el = await page.$(sel);
-        if (el) {
-          await el.click();
-          selectedEmail = true;
-          addFlowLog("تم اختيار البريد الإلكتروني لاستقبال OTP ✅");
-          break;
-        }
-      } catch {}
+    addFlowLog(`بعد تسجيل الدخول — الصفحة: ${page.url()}`);
+
+    // ─── التحقق من صفحة OTP أو اختيار الطريقة ──────────────────────
+    const afterLoginUrl = page.url();
+    const isOnOtpPage = /otp|verify|تحقق|confirm|channel|method|authenticate/i.test(afterLoginUrl);
+
+    if (isOnOtpPage || afterLoginUrl.includes(SSO_HOST)) {
+      addFlowLog("ظهرت صفحة التحقق الثنائي...");
+      flow.status = "waiting_otp";
+
+      // ─── اختيار البريد الإلكتروني إذا ظهرت صفحة الاختيار ──────────
+      const emailSelectors = [
+        'input[type="radio"][value*="email" i]',
+        'input[type="radio"][value*="mail" i]',
+        'label:has-text("البريد الإلكتروني") input[type="radio"]',
+        'label:has-text("email" i) input[type="radio"]',
+        'li:has-text("البريد الإلكتروني")',
+        'div:has-text("البريد الإلكتروني") input',
+        'button:has-text("البريد الإلكتروني")',
+        'button:has-text("Email" i)',
+        '[data-value*="email" i]',
+        'a:has-text("البريد الإلكتروني")',
+        'a:has-text("email" i)',
+      ];
+
+      let selectedEmail = false;
+      for (const sel of emailSelectors) {
+        try {
+          const el = await page.$(sel);
+          if (el) {
+            await el.click();
+            selectedEmail = true;
+            addFlowLog("تم اختيار البريد الإلكتروني لاستقبال OTP ✅");
+            await page.waitForTimeout(1000);
+            break;
+          }
+        } catch {}
+      }
+
+      if (selectedEmail) {
+        try {
+          await page.click(
+            'input[type="submit"], button[type="submit"], button:has-text("تأكيد"), button:has-text("التالي"), button:has-text("إرسال"), button:has-text("Continue")',
+            { timeout: 5000 }
+          );
+          addFlowLog("تم النقر على زر إرسال OTP...");
+          await page.waitForLoadState("domcontentloaded", { timeout: 15000 }).catch(() => {});
+        } catch {}
+      } else {
+        addFlowLog("لم يتم العثور على خيار البريد الإلكتروني — المتابعة مباشرة لإدخال OTP...");
+      }
+
+      addFlowLog("في انتظار إدخال رمز OTP من البريد الإلكتروني...");
+    } else {
+      // لا يوجد OTP — تسجيل الدخول مكتمل مباشرة
+      addFlowLog("تسجيل الدخول اكتمل بدون OTP ✅");
+      await page.close();
+      flow.status = "authenticated";
+      flow.loggedInAt = new Date();
+      await flow.context.storageState({ path: STORAGE_STATE_FILE });
+      saveMeta(username);
+      setSharedContext(flow.browser, flow.context);
+      import("./queue-processor").then(({ processQueue }) => {
+        processQueue().catch((err) => console.error("[TaqeemLogin] خطأ في معالج الطابور:", err));
+      });
+      return;
     }
 
-    // إذا تم اختيار الطريقة، انقر على زر التأكيد/التالي
-    if (selectedEmail) {
-      try {
-        await page.click(
-          'button[type="submit"], button:has-text("تأكيد"), button:has-text("التالي"), button:has-text("إرسال"), button:has-text("Continue")',
-          { timeout: 5000 }
-        );
-        addFlowLog("تم النقر على زر إرسال OTP...");
-        await page.waitForURL(/otp|verify|تحقق|confirm/, { timeout: 15000 }).catch(() => {});
-      } catch {}
-    }
-
-    if (!selectedEmail) {
-      addFlowLog("لم يتم العثور على خيار البريد الإلكتروني — المتابعة مباشرة...");
-    }
-
-    addFlowLog("في انتظار إدخال رمز OTP من البريد الإلكتروني...");
-
+    // ─── انتظار إدخال OTP ────────────────────────────────────────────
     const otp = await new Promise<string>((resolve) => {
       flow.otpResolver = resolve;
     });
@@ -254,10 +284,17 @@ async function runLoginFlow(flow: ActiveLoginFlow, username: string, password: s
     addFlowLog("تم استلام OTP — جارٍ إدخاله...");
     flow.status = "logging_in";
 
-    // ⚠️ TODO: تحديث محدد حقل OTP
-    await page.fill('input[name="otp"], input[placeholder*="رمز"], input[maxlength="6"]', otp);
-    await page.click('button[type="submit"], input[type="submit"]');
-    await page.waitForNavigation({ waitUntil: "networkidle", timeout: 30000 });
+    // محددات حقل OTP في Keycloak
+    await page.waitForSelector(
+      'input[name="otp"], input[id="otp"], input[autocomplete="one-time-code"], input[maxlength="6"], input[type="number"]',
+      { timeout: 10000 }
+    );
+    await page.fill(
+      'input[name="otp"], input[id="otp"], input[autocomplete="one-time-code"], input[maxlength="6"], input[type="number"]',
+      otp
+    );
+    await page.click('#kc-login, input[type="submit"], button[type="submit"]');
+    await page.waitForLoadState("domcontentloaded", { timeout: 30000 });
 
     addFlowLog("تم تسجيل الدخول بنجاح ✅");
     addFlowLog("جارٍ حفظ الجلسة للاستخدام طوال اليوم...");
@@ -266,16 +303,12 @@ async function runLoginFlow(flow: ActiveLoginFlow, username: string, password: s
     flow.status = "authenticated";
     flow.loggedInAt = new Date();
 
-    // Save session cookies/storage to disk
     await flow.context.storageState({ path: STORAGE_STATE_FILE });
     saveMeta(username);
-
-    // Keep context alive for reuse
     setSharedContext(flow.browser, flow.context);
 
     addFlowLog("✅ الجلسة محفوظة — يمكنك الآن رفع أي عدد من التقارير بدون إعادة تسجيل الدخول.");
 
-    // تشغيل معالج الطابور في الخلفية
     import("./queue-processor").then(({ processQueue }) => {
       processQueue().catch((err) =>
         console.error("[TaqeemLogin] خطأ في معالج الطابور:", err)
@@ -315,10 +348,11 @@ export async function getAuthenticatedContext(): Promise<BrowserContext | null> 
   // 2. Try restoring from saved state file
   const meta = loadMeta();
   if (meta && fs.existsSync(STORAGE_STATE_FILE)) {
+    const chromiumExec = getChromiumExecutable();
     const browser = await chromium.launch({
       headless: true,
       args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
-      executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,
+      ...(chromiumExec ? { executablePath: chromiumExec } : {}),
     });
 
     const context = await browser.newContext({
