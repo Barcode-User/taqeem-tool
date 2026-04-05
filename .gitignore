@@ -47,3 +47,7 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Keep built frontend for local deployment
+!artifacts/taqeem-tool/dist/
+!artifacts/taqeem-tool/dist/**
