@@ -1,4 +1,4 @@
-modules = ["nodejs-24", "dotnet-10.0", "postgresql-16"]
+modules = ["nodejs-24", "dotnet-10.0", "postgresql-16", "dotnet-9.0"]
 
 [[artifacts]]
 id = "artifacts/api-server"
@@ -30,13 +30,13 @@ args = "artifacts/dotnet-api: .NET API Server"
 name = "artifacts/dotnet-api: .NET API Server"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "export PORT=8099 && export DOTNET_ROOT=/run/current-system/sw/lib/dotnet && cd artifacts/dotnet-api && dotnet run"
-waitForPort = 8099
-
 [workflows.workflow.metadata]
 outputType = "console"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "export PORT=8099 && cd artifacts/dotnet-api && dotnet run"
+waitForPort = 8099
 
 [agent]
 stack = "PNPM_WORKSPACE"
