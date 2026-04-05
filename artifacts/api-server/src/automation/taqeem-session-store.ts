@@ -196,10 +196,49 @@ async function runLoginFlow(flow: ActiveLoginFlow, username: string, password: s
     // ─── إدخال بيانات الدخول على Keycloak ───────────────────────────
     addFlowLog("إدخال بيانات الدخول على Keycloak SSO...");
 
-    // انتظار ظهور حقل اسم المستخدم
-    await page.waitForSelector('#username, input[name="username"]', { timeout: 15000 });
-    await page.fill('#username, input[name="username"]', username);
-    await page.fill('#password, input[name="password"]', password);
+    // انتظار تحميل الصفحة بالكامل
+    await page.waitForLoadState("load", { timeout: 30000 }).catch(() => {});
+    await page.waitForTimeout(2000);
+
+    const pageTitle = await page.title().catch(() => "غير معروف");
+    addFlowLog(`عنوان الصفحة: ${pageTitle}`);
+
+    // حفظ لقطة شاشة للتشخيص
+    try {
+      await page.screenshot({ path: "uploads/login-debug.png" });
+      addFlowLog("تم حفظ لقطة الشاشة في uploads/login-debug.png");
+    } catch {}
+
+    // محاولة إيجاد حقل المستخدم بعدة محددات
+    const usernameSelectors = [
+      '#username',
+      'input[name="username"]',
+      'input[type="text"]',
+      'input[autocomplete="username"]',
+      'input[id*="user" i]',
+      'input[name*="user" i]',
+      'input[placeholder*="اسم" i]',
+      'input[placeholder*="user" i]',
+    ];
+
+    let usernameField = null;
+    for (const sel of usernameSelectors) {
+      try {
+        await page.waitForSelector(sel, { timeout: 5000 });
+        usernameField = sel;
+        addFlowLog(`تم العثور على حقل المستخدم: ${sel}`);
+        break;
+      } catch {}
+    }
+
+    if (!usernameField) {
+      const allInputs = await page.$$eval('input', els => els.map(e => ({ type: e.type, name: e.name, id: e.id, placeholder: e.placeholder })));
+      addFlowLog(`❌ الحقول المتاحة في الصفحة: ${JSON.stringify(allInputs)}`);
+      throw new Error("لم يتم العثور على حقل اسم المستخدم في صفحة تسجيل الدخول");
+    }
+
+    await page.fill(usernameField, username);
+    await page.fill('#password, input[name="password"], input[type="password"]', password);
 
     addFlowLog("النقر على زر تسجيل الدخول...");
     await page.click('#kc-login, input[type="submit"], button[type="submit"]');
