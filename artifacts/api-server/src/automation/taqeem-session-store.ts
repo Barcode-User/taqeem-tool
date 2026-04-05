@@ -123,9 +123,13 @@ export async function startLogin(username: string, password: string): Promise<st
   const loginId = randomUUID();
 
   const chromiumExec = getChromiumExecutable();
-  console.log(`[TaqeemLogin] Using Chromium: ${chromiumExec ?? "playwright-default"}`);
+  // على Replit: headless=true، على الجهاز المحلي: headless=false (لرؤية المتصفح)
+  const isReplit = !!process.env.REPL_ID || !!process.env.REPLIT_ID;
+  const headlessMode = isReplit ? true : false;
+  console.log(`[TaqeemLogin] Using Chromium: ${chromiumExec ?? "playwright-default"} | headless: ${headlessMode}`);
   const browser = await chromium.launch({
-    headless: true,
+    headless: headlessMode,
+    slowMo: headlessMode ? 0 : 200, // تأخير بسيط لرؤية الإجراءات
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
     ...(chromiumExec ? { executablePath: chromiumExec } : {}),
   });
@@ -172,13 +176,29 @@ async function runLoginFlow(flow: ActiveLoginFlow, username: string, password: s
   try {
     addFlowLog("الانتقال إلى صفحة تسجيل الدخول...");
 
-    await page.goto(`${TAQEEM_URL}/membership/login`, {
-      waitUntil: "domcontentloaded",
-      timeout: 60000,
-    });
+    try {
+      await page.goto(`${TAQEEM_URL}/membership/login`, {
+        waitUntil: "domcontentloaded",
+        timeout: 60000,
+      });
+    } catch (navErr: any) {
+      addFlowLog(`❌ فشل الانتقال للموقع: ${navErr.message}`);
+      throw new Error(
+        `لا يمكن الوصول إلى ${TAQEEM_URL} — تأكد من اتصالك بالإنترنت وأن الموقع متاح من جهازك. ` +
+        `(ملاحظة: الأتمتة يجب أن تشتغل من جهازك المحلي، وليس من Replit)`
+      );
+    }
+
     await page.waitForTimeout(2000);
 
-    addFlowLog(`الصفحة الحالية: ${page.url()}`);
+    const currentUrlAfterNav = page.url();
+    addFlowLog(`الصفحة الحالية: ${currentUrlAfterNav}`);
+
+    // تحقق سريع إذا كانت الصفحة فارغة أو تحتوي على خطأ شبكة
+    if (currentUrlAfterNav === "about:blank" || currentUrlAfterNav === `${TAQEEM_URL}/membership/login`) {
+      const bodyText = await page.innerText("body").catch(() => "");
+      addFlowLog(`محتوى الصفحة (أول 200 حرف): ${bodyText.slice(0, 200)}`);
+    }
 
     // إذا لم نصل إلى SSO ولم نبقَ في /login — نحن مسجلون مسبقاً
     const currentUrl = page.url();
