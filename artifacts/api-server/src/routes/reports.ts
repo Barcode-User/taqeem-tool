@@ -222,9 +222,10 @@ ${pdfText.slice(0, 15000)}`;
     });
 
     res.status(201).json(report);
-  } catch (err) {
+  } catch (err: any) {
     req.log.error({ err }, "Failed to upload and extract PDF");
-    res.status(500).json({ error: "Internal server error" });
+    const msg = err?.message ?? String(err);
+    res.status(500).json({ error: "حدث خطأ أثناء معالجة التقرير", detail: msg });
   }
 });
 

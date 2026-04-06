@@ -53,7 +53,8 @@ export default function Upload() {
       });
 
       if (!response.ok) {
-        throw new Error("Failed to upload");
+        const errBody = await response.json().catch(() => ({}));
+        throw new Error(errBody.detail || errBody.error || `خطأ ${response.status}`);
       }
 
       const report = await response.json();

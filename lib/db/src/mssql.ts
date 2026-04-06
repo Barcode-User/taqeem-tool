@@ -84,12 +84,8 @@ export type InsertReport = Omit<Partial<Report>, "id" | "createdAt" | "updatedAt
 
 // ─── تكوين الاتصال ────────────────────────────────────────────────────────────
 export function isConfigured(): boolean {
-  return !!(
-    process.env.MSSQL_SERVER ||
-    process.env.MSSQL_PASSWORD ||
-    process.env.MSSQL_CONNECTION_STRING ||
-    process.env.DATABASE_URL?.startsWith("mssql://")
-  );
+  // دائماً true — القيم الافتراضية مُضمَّنة في getConfig()
+  return true;
 }
 
 function getConfig(): sql.config {
