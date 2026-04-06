@@ -16,7 +16,6 @@ import {
   ShieldCheck,
   Clock,
 } from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 
 type SessionStatus = {
   status: "not_logged_in" | "logging_in" | "waiting_otp" | "authenticated" | "failed";
@@ -36,7 +35,6 @@ export default function TaqeemSessionPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [otp, setOtp] = useState("");
-  const [showOtpDialog, setShowOtpDialog] = useState(false);
   const [loading, setLoading] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -46,10 +44,6 @@ export default function TaqeemSessionPage() {
       if (resp.ok) {
         const data: SessionStatus = await resp.json();
         setSession(data);
-
-        if (data.status === "waiting_otp") {
-          setShowOtpDialog(true);
-        }
 
         if (data.status === "authenticated" || data.status === "failed" || data.status === "not_logged_in") {
           if (pollRef.current) {
@@ -102,7 +96,6 @@ export default function TaqeemSessionPage() {
       });
       const data = await resp.json();
       if (resp.ok) {
-        setShowOtpDialog(false);
         setOtp("");
         toast({ title: "تم إرسال OTP", description: "جارٍ إكمال تسجيل الدخول..." });
         if (!pollRef.current) {
@@ -252,14 +245,44 @@ export default function TaqeemSessionPage() {
         </Card>
       )}
 
-      {/* Retry button if waiting for OTP */}
+      {/* ─── بطاقة OTP المضمّنة ─────────────────────────────────────────── */}
       {session.status === "waiting_otp" && (
-        <div className="flex justify-center">
-          <Button onClick={() => setShowOtpDialog(true)} className="gap-2">
-            <KeyRound className="h-4 w-4" />
-            إدخال رمز OTP
-          </Button>
-        </div>
+        <Card className="border-2 border-yellow-400 shadow-lg">
+          <CardHeader className="bg-yellow-50 border-b border-yellow-200 pb-3">
+            <CardTitle className="text-base flex items-center gap-2 text-yellow-800">
+              <KeyRound className="h-5 w-5 text-yellow-600" />
+              أدخل رمز التحقق OTP
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-6 space-y-4">
+            <div className="rounded-lg bg-yellow-50 border border-yellow-200 text-yellow-800 p-3 text-sm flex items-start gap-2">
+              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+              <span>تم إرسال رمز التحقق إلى بريدك الإلكتروني أو هاتفك المرتبط بحساب منصة تقييم.</span>
+            </div>
+            <div className="space-y-2">
+              <Label className="font-semibold">رمز OTP</Label>
+              <Input
+                value={otp}
+                onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))}
+                placeholder="أدخل الرمز المكوّن من 6 أرقام"
+                dir="ltr"
+                className="text-center text-2xl tracking-[0.5em] font-bold h-14"
+                maxLength={6}
+                inputMode="numeric"
+                onKeyDown={(e) => e.key === "Enter" && otp.length >= 4 && submitOtp()}
+                autoFocus
+              />
+            </div>
+            <Button
+              onClick={submitOtp}
+              disabled={otp.length < 4}
+              className="w-full gap-2 h-11 text-base"
+            >
+              <Check className="h-5 w-5" />
+              تأكيد رمز OTP
+            </Button>
+          </CardContent>
+        </Card>
       )}
 
       {/* Logs */}
@@ -280,40 +303,6 @@ export default function TaqeemSessionPage() {
           </CardContent>
         </Card>
       )}
-
-      {/* OTP Dialog */}
-      <Dialog open={showOtpDialog} onOpenChange={setShowOtpDialog}>
-        <DialogContent className="sm:max-w-sm" dir="rtl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <KeyRound className="h-5 w-5 text-yellow-600" />
-              أدخل رمز التحقق OTP
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <p className="text-sm text-muted-foreground">
-              تم إرسال رمز التحقق إلى هاتفك المرتبط بحساب منصة تقييم.
-            </p>
-            <Input
-              value={otp}
-              onChange={(e) => setOtp(e.target.value)}
-              placeholder="أدخل الرمز هنا"
-              dir="ltr"
-              className="text-center text-lg tracking-widest"
-              maxLength={6}
-              onKeyDown={(e) => e.key === "Enter" && submitOtp()}
-              autoFocus
-            />
-          </div>
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button variant="outline" onClick={() => setShowOtpDialog(false)}>لاحقاً</Button>
-            <Button onClick={submitOtp} disabled={otp.length < 4} className="gap-2">
-              <Check className="h-4 w-4" />
-              تأكيد
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
