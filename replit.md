@@ -7,107 +7,95 @@
 ```
 artifacts/
   taqeem-tool/         → React + Vite frontend (Arabic RTL, port from $PORT)
-  api-server/          → Express API server (port 8080)
+  api-server/          → Express API server (يعمل على 8080 محلياً)
   mockup-sandbox/      → Component preview (design exploration)
+  dotnet-api/          → .NET 9 API (بديل، منفذ 8099)
 lib/
-  db/                  → Drizzle ORM schema + PostgreSQL
-  api-spec/            → OpenAPI spec (openapi.yaml)
-  api-client-react/    → Orval-generated React Query hooks
-  api-zod/             → Orval-generated Zod schemas
+  db/                  → MSSQL client (mssql package) — بدون Drizzle ORM
+  api-zod/             → Orval-generated Zod schemas (مرجع للتوثيق فقط)
   integrations-openai-ai-server/ → OpenAI client (Replit AI integration)
 ```
 
-## Key Features
+## Database — SQL Server
 
-- **PDF Upload & AI Extraction**: Upload PDF valuation reports, AI (OpenAI GPT) extracts 50+ structured fields
-- **Full CRUD**: Review, edit, and manage all extracted report data
-- **Status Tracking**: pending → extracted → reviewed → submitted
-- **Arabic RTL UI**: Fully in Arabic with RTL layout
+قاعدة البيانات: **Microsoft SQL Server** (على جهاز المستخدم المحلي)
+
+| متغير البيئة | القيمة الافتراضية |
+|---|---|
+| MSSQL_SERVER | 192.168.1.88 |
+| MSSQL_DATABASE | TaqeemDb_Qeemah |
+| MSSQL_USER | test1 |
+| MSSQL_PASSWORD | (مطلوب) |
+
+**إنشاء الجدول:** شغّل `artifacts/dotnet-api/create-tables.sql` في SSMS
+
+### ملاحظة عن الأعمدة
+- `plotNumber` (JS) يُخزَّن في عمود `PieceNumber` (SQL)
+- `pdfFileName` (JS) يُخزَّن في عمود `OriginalFileName` (SQL)
+- جميع تحويلات camelCase↔PascalCase تتم تلقائياً في `lib/db/src/mssql.ts`
 
 ## API Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | /api/reports | List all reports |
-| GET | /api/reports/stats | Get report counts by status |
-| GET | /api/reports/:id | Get single report |
-| POST | /api/reports | Create report |
-| POST | /api/reports/upload | Upload PDF + AI extract (multipart/form-data, field: `pdf`) |
-| PATCH | /api/reports/:id | Update report fields |
-| PATCH | /api/reports/:id/status | Update report status |
-| DELETE | /api/reports/:id | Delete report |
-
-## Database
-
-PostgreSQL via `DATABASE_URL`. Schema managed by Drizzle ORM.
-
-Table: `reports` — 50+ fields covering report metadata, valuer info, client info, property details, and valuation results.
-
-To push schema changes:
-```bash
-pnpm --filter @workspace/db run push
-```
+| GET | /api/reports | قائمة التقارير |
+| GET | /api/reports/stats | إحصائيات التقارير |
+| GET | /api/reports/:id | تقرير محدد |
+| POST | /api/reports | إنشاء تقرير |
+| POST | /api/reports/upload | رفع PDF + استخراج AI (field: `pdf`) |
+| PATCH | /api/reports/:id | تعديل بيانات التقرير |
+| PATCH | /api/reports/:id/status | تعديل الحالة |
+| DELETE | /api/reports/:id | حذف التقرير |
+| GET | /api/automation/session-status | حالة جلسة TAQEEM |
+| POST | /api/automation/login | بدء تسجيل الدخول لـ TAQEEM |
+| POST | /api/automation/login-otp | إرسال OTP |
+| POST | /api/automation/logout | تسجيل الخروج |
+| POST | /api/automation/start/:id | بدء الرفع الآلي لتقرير |
+| GET | /api/automation/status/:id | حالة الرفع الآلي |
+| POST | /api/automation/retry/:id | إعادة المحاولة |
+| GET | /api/automation/queue | عرض الطابور |
 
 ## AI Integration
 
-Uses OpenAI via Replit AI Integrations proxy. Environment variables set automatically:
+OpenAI عبر Replit AI Integrations proxy:
 - `AI_INTEGRATIONS_OPENAI_BASE_URL`
 - `AI_INTEGRATIONS_OPENAI_API_KEY`
 
-Model: `gpt-5.2` with `response_format: { type: "json_object" }`
+Model: `gpt-4.1` مع `response_format: { type: "json_object" }`
 
-## Report Status Flow
+## تدفق حالة التقرير
 
-1. **pending** (قيد الانتظار) — Created but no data
-2. **extracted** (تم الاستخراج) — AI extracted data from PDF
-3. **reviewed** (تمت المراجعة) — Manually reviewed and edited
-4. **submitted** (تم الرفع) — Submitted to TAQEEM platform
+1. **pending** — تم الإنشاء
+2. **extracted** — استُخرجت البيانات من PDF بالـ AI
+3. **reviewed** — تمت المراجعة اليدوية
+4. **submitted** — تم الرفع على منصة تقييم
 
-## Development
+## Automation — Playwright
 
-```bash
-# Install dependencies
+- منصة تقييم (`qima.taqeem.gov.sa`) تحجب IPs الخارجية
+- **الأتمتة تعمل فقط على جهاز المستخدم المحلي (Windows)**
+- Playwright: Chrome حقيقي (`channel: 'chrome'`) بوضع `headless: false`
+- OTP: يتحقق من hostname وليس URL كامل لتجنب false positive
+
+## التشغيل المحلي (Windows)
+
+```batch
+git pull
 pnpm install
-
-# Push database schema
-pnpm --filter @workspace/db run push
-
-# Run API codegen (after changing openapi.yaml)
-pnpm --filter @workspace/api-spec run codegen
+cd artifacts\api-server
+pnpm run build
+set PORT=8080 && pnpm run start
 ```
 
-## .NET 10 API (SQL Server)
+ثم افتح http://localhost:8080
 
-مسار الإصدار المتوازي بتقنية .NET 10 + SQL Server:
+## الملفات الأساسية
 
-```
-artifacts/dotnet-api/
-  Program.cs                → نقطة بداية التطبيق، CORS، EF migrations تلقائياً
-  TaqeemApi.csproj          → حزم NuGet: EF Core SQL Server، Playwright، itext7، OpenAI
-  appsettings.json          → ConnectionStrings:SqlServer (يحتاج تعديلاً)
-  Controllers/
-    ReportsController.cs    → CRUD للتقارير
-    AutomationController.cs → جلسة TAQEEM + رفع آلي
-  Data/
-    AppDbContext.cs          → EF Core DbContext
-    Migrations/             → Migration يدوي (InitialCreate)
-  Models/Report.cs          → نموذج قاعدة البيانات
-  Services/
-    OpenAiService.cs        → استخراج البيانات من PDF
-    PdfService.cs           → قراءة PDF عبر itext7
-  Automation/
-    SessionStore.cs         → حفظ جلسة TAQEEM على الديسك
-    TaqeemBot.cs            → أتمتة Playwright (selectors تحتاج تحديثاً)
-```
-
-**للتشغيل:** أعدّل `ConnectionStrings:SqlServer` في `appsettings.json` ثم ابدأ الـ workflow "artifacts/dotnet-api: .NET API Server"
-
-**المنفذ:** 8099
-
-## Relevant Files
-
-- `lib/api-spec/openapi.yaml` — API spec (source of truth for hooks/schemas)
-- `lib/db/src/schema/reports.ts` — Database schema
-- `artifacts/api-server/src/routes/reports.ts` — All report API routes
-- `artifacts/taqeem-tool/src/App.tsx` — Frontend router
-- `lib/api-client-react/src/generated/api.ts` — Generated hooks
+- `lib/db/src/mssql.ts` — كل عمليات SQL Server (CRUD + mapper)
+- `artifacts/api-server/src/app.ts` — Express app + static frontend
+- `artifacts/api-server/src/routes/reports.ts` — API التقارير
+- `artifacts/api-server/src/routes/automation.ts` — API الأتمتة
+- `artifacts/api-server/src/automation/taqeem-session-store.ts` — إدارة جلسة TAQEEM
+- `artifacts/api-server/src/automation/taqeem-bot.ts` — Playwright bot
+- `artifacts/api-server/src/automation/queue-processor.ts` — معالج الطابور
+- `artifacts/dotnet-api/create-tables.sql` — سكريبت إنشاء جدول SQL Server

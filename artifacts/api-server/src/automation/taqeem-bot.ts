@@ -1,8 +1,7 @@
 import { randomUUID } from "crypto";
 import * as fs from "fs";
 import * as path from "path";
-import { db, reportsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { getReportById, updateReport } from "@workspace/db";
 import {
   createSession,
   closeSession,
@@ -37,21 +36,15 @@ export async function startAutomation(
   const page = await context.newPage();
   const session = createSession(sessionId, reportId, null as any, context, page);
 
-  await db
-    .update(reportsTable)
-    .set({
-      automationStatus: "running",
-      automationError: null,
-      automationSessionId: sessionId,
-    })
-    .where(eq(reportsTable.id, reportId));
+  await updateReport(reportId, {
+    automationStatus: "running",
+    automationError: null,
+    automationSessionId: sessionId,
+  });
 
   runAutomation(session, reportId).catch(async (err) => {
     addLog(session, `Fatal error: ${err.message}`);
-    await db
-      .update(reportsTable)
-      .set({ automationStatus: "failed", automationError: err.message })
-      .where(eq(reportsTable.id, reportId));
+    await updateReport(reportId, { automationStatus: "failed", automationError: err.message });
     try { await page.close(); } catch {}
     closeSession(sessionId);
   });
@@ -63,11 +56,7 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
   const { page } = session;
 
   try {
-    const [report] = await db
-      .select()
-      .from(reportsTable)
-      .where(eq(reportsTable.id, reportId));
-
+    const report = await getReportById(reportId);
     if (!report) throw new Error(`التقرير ${reportId} غير موجود`);
 
     addLog(session, "بدء عملية الرفع الآلي...");
@@ -113,25 +102,19 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     const result = await extractQrAndCertificate(session, reportId);
 
     // ─── STEP 6: Update DB — مكتمل ─────────────────────────────────
-    await db
-      .update(reportsTable)
-      .set({
-        status:           "submitted",   // مكتمل ← تم الرفع على تقييم
-        automationStatus: "completed",   // مكتمل ← انتهت الأتمتة
-        qrCodeBase64:     result.qrCodeBase64    ?? null,
-        certificatePath:  result.certificatePath ?? null,
-        taqeemSubmittedAt:   new Date().toISOString(),
-        taqeemReportNumber:  result.taqeemReportNumber ?? report.taqeemReportNumber,
-      })
-      .where(eq(reportsTable.id, reportId));
+    await updateReport(reportId, {
+      status:             "submitted",
+      automationStatus:   "completed",
+      qrCodeBase64:       result.qrCodeBase64    ?? null,
+      certificatePath:    result.certificatePath ?? null,
+      taqeemSubmittedAt:  new Date().toISOString(),
+      taqeemReportNumber: result.taqeemReportNumber ?? report.taqeemReportNumber,
+    });
 
     addLog(session, "✅ اكتملت العملية بنجاح! — تم الرفع على منصة تقييم");
   } catch (err: any) {
     addLog(session, `❌ خطأ: ${err.message}`);
-    await db
-      .update(reportsTable)
-      .set({ automationStatus: "failed", automationError: err.message })
-      .where(eq(reportsTable.id, reportId));
+    await updateReport(reportId, { automationStatus: "failed", automationError: err.message });
     throw err;
   } finally {
     try { await page.close(); } catch {}

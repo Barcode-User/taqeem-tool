@@ -179,7 +179,9 @@ export async function startLogin(username: string, password: string): Promise<st
   // إخفاء علامات الأتمتة من الـ JavaScript
   await context.addInitScript(() => {
     Object.defineProperty(navigator, "webdriver", { get: () => undefined });
-    (window as any).chrome = { runtime: {} };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).window ??= {};
+    (globalThis as any).window.chrome = { runtime: {} };
   });
 
   activeFlow = {

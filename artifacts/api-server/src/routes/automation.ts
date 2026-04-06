@@ -2,8 +2,12 @@ import { Router } from "express";
 import multer from "multer";
 import * as fs from "fs";
 import * as path from "path";
-import { db, reportsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import {
+  insertReport,
+  getReportById,
+  getReportsByAutomationStatus,
+  updateReport,
+} from "@workspace/db";
 import { startAutomation } from "../automation/taqeem-bot";
 import { getSessionByReportId, submitOtp } from "../automation/session-manager";
 import {
@@ -109,78 +113,72 @@ router.post("/automation/submit-external", upload.single("pdf"), async (req, res
     }
 
     // ─── حفظ التقرير في قاعدة البيانات ────────────────────────────────────
-    const [report] = await db
-      .insert(reportsTable)
-      .values({
-        // بيانات التقرير من النظام الخارجي
-        reportNumber:             reportData.reportNumber             ?? null,
-        reportDate:               reportData.reportDate               ?? null,
-        valuationDate:            reportData.valuationDate            ?? null,
-        inspectionDate:           reportData.inspectionDate           ?? null,
-        commissionDate:           reportData.commissionDate           ?? null,
-        requestNumber:            reportData.requestNumber            ?? null,
-        valuerName:               reportData.valuerName               ?? null,
-        licenseNumber:            reportData.licenseNumber            ?? null,
-        licenseDate:              reportData.licenseDate              ?? null,
-        membershipNumber:         reportData.membershipNumber         ?? null,
-        membershipType:           reportData.membershipType           ?? null,
-        valuerPercentage:         reportData.valuerPercentage         ?? null,
-        secondValuerName:         reportData.secondValuerName         ?? null,
-        secondValuerPercentage:   reportData.secondValuerPercentage   ?? null,
-        secondValuerLicenseNumber:  reportData.secondValuerLicenseNumber  ?? null,
-        secondValuerMembershipNumber: reportData.secondValuerMembershipNumber ?? null,
-        clientName:               reportData.clientName               ?? null,
-        clientEmail:              reportData.clientEmail              ?? null,
-        clientPhone:              reportData.clientPhone              ?? null,
-        intendedUser:             reportData.intendedUser             ?? null,
-        reportType:               reportData.reportType               ?? null,
-        valuationPurpose:         reportData.valuationPurpose         ?? null,
-        valuationBasis:           reportData.valuationBasis           ?? null,
-        propertyType:             reportData.propertyType             ?? null,
-        propertySubType:          reportData.propertySubType          ?? null,
-        region:                   reportData.region                   ?? null,
-        city:                     reportData.city                     ?? null,
-        district:                 reportData.district                 ?? null,
-        street:                   reportData.street                   ?? null,
-        blockNumber:              reportData.blockNumber              ?? null,
-        plotNumber:               reportData.plotNumber               ?? null,
-        planNumber:               reportData.planNumber               ?? null,
-        propertyUse:              reportData.propertyUse              ?? null,
-        deedNumber:               reportData.deedNumber               ?? null,
-        deedDate:                 reportData.deedDate                 ?? null,
-        ownerName:                reportData.ownerName                ?? null,
-        ownershipType:            reportData.ownershipType            ?? null,
-        buildingPermitNumber:     reportData.buildingPermitNumber     ?? null,
-        buildingStatus:           reportData.buildingStatus           ?? null,
-        buildingAge:              reportData.buildingAge              ?? null,
-        landArea:                 reportData.landArea                 ?? null,
-        buildingArea:             reportData.buildingArea             ?? null,
-        basementArea:             reportData.basementArea             ?? null,
-        annexArea:                reportData.annexArea                ?? null,
-        floorsCount:              reportData.floorsCount              ?? null,
-        permittedFloorsCount:     reportData.permittedFloorsCount     ?? null,
-        permittedBuildingRatio:   reportData.permittedBuildingRatio   ?? null,
-        streetWidth:              reportData.streetWidth              ?? null,
-        streetFacades:            reportData.streetFacades            ?? null,
-        utilities:                reportData.utilities                ?? null,
-        coordinates:              reportData.coordinates              ?? null,
-        valuationMethod:          reportData.valuationMethod          ?? null,
-        marketValue:              reportData.marketValue              ?? null,
-        incomeValue:              reportData.incomeValue              ?? null,
-        costValue:                reportData.costValue                ?? null,
-        finalValue:               reportData.finalValue               ?? null,
-        pricePerMeter:            reportData.pricePerMeter            ?? null,
-        companyName:              reportData.companyName              ?? null,
-        commercialRegNumber:      reportData.commercialRegNumber      ?? null,
-        notes:                    reportData.notes                    ?? null,
-        // ملف PDF
-        pdfFileName:  req.file.originalname,
-        pdfFilePath:  req.file.path,
-        // الحالة الأولية
-        status:           "reviewed",  // البيانات من نظام خارجي = مراجعة مسبقة
-        automationStatus: "queued",    // سيُحدَّث بناءً على حالة الجلسة
-      })
-      .returning();
+    const report = await insertReport({
+      reportNumber:                reportData.reportNumber             ?? null,
+      reportDate:                  reportData.reportDate               ?? null,
+      valuationDate:               reportData.valuationDate            ?? null,
+      inspectionDate:              reportData.inspectionDate           ?? null,
+      commissionDate:              reportData.commissionDate           ?? null,
+      requestNumber:               reportData.requestNumber            ?? null,
+      valuerName:                  reportData.valuerName               ?? null,
+      licenseNumber:               reportData.licenseNumber            ?? null,
+      licenseDate:                 reportData.licenseDate              ?? null,
+      membershipNumber:            reportData.membershipNumber         ?? null,
+      membershipType:              reportData.membershipType           ?? null,
+      valuerPercentage:            reportData.valuerPercentage         ?? null,
+      secondValuerName:            reportData.secondValuerName         ?? null,
+      secondValuerPercentage:      reportData.secondValuerPercentage   ?? null,
+      secondValuerLicenseNumber:   reportData.secondValuerLicenseNumber  ?? null,
+      secondValuerMembershipNumber:reportData.secondValuerMembershipNumber ?? null,
+      clientName:                  reportData.clientName               ?? null,
+      clientEmail:                 reportData.clientEmail              ?? null,
+      clientPhone:                 reportData.clientPhone              ?? null,
+      intendedUser:                reportData.intendedUser             ?? null,
+      reportType:                  reportData.reportType               ?? null,
+      valuationPurpose:            reportData.valuationPurpose         ?? null,
+      valuationBasis:              reportData.valuationBasis           ?? null,
+      propertyType:                reportData.propertyType             ?? null,
+      propertySubType:             reportData.propertySubType          ?? null,
+      region:                      reportData.region                   ?? null,
+      city:                        reportData.city                     ?? null,
+      district:                    reportData.district                 ?? null,
+      street:                      reportData.street                   ?? null,
+      blockNumber:                 reportData.blockNumber              ?? null,
+      plotNumber:                  reportData.plotNumber               ?? null,
+      planNumber:                  reportData.planNumber               ?? null,
+      propertyUse:                 reportData.propertyUse              ?? null,
+      deedNumber:                  reportData.deedNumber               ?? null,
+      deedDate:                    reportData.deedDate                 ?? null,
+      ownerName:                   reportData.ownerName                ?? null,
+      ownershipType:               reportData.ownershipType            ?? null,
+      buildingPermitNumber:        reportData.buildingPermitNumber     ?? null,
+      buildingStatus:              reportData.buildingStatus           ?? null,
+      buildingAge:                 reportData.buildingAge              ?? null,
+      landArea:                    reportData.landArea                 ?? null,
+      buildingArea:                reportData.buildingArea             ?? null,
+      basementArea:                reportData.basementArea             ?? null,
+      annexArea:                   reportData.annexArea                ?? null,
+      floorsCount:                 reportData.floorsCount              ?? null,
+      permittedFloorsCount:        reportData.permittedFloorsCount     ?? null,
+      permittedBuildingRatio:      reportData.permittedBuildingRatio   ?? null,
+      streetWidth:                 reportData.streetWidth              ?? null,
+      streetFacades:               reportData.streetFacades            ?? null,
+      utilities:                   reportData.utilities                ?? null,
+      coordinates:                 reportData.coordinates              ?? null,
+      valuationMethod:             reportData.valuationMethod          ?? null,
+      marketValue:                 reportData.marketValue              ?? null,
+      incomeValue:                 reportData.incomeValue              ?? null,
+      costValue:                   reportData.costValue                ?? null,
+      finalValue:                  reportData.finalValue               ?? null,
+      pricePerMeter:               reportData.pricePerMeter            ?? null,
+      companyName:                 reportData.companyName              ?? null,
+      commercialRegNumber:         reportData.commercialRegNumber      ?? null,
+      notes:                       reportData.notes                    ?? null,
+      pdfFileName:  req.file.originalname,
+      pdfFilePath:  req.file.path,
+      status:           "reviewed",
+      automationStatus: "queued",
+    });
 
     // ─── هل الجلسة نشطة؟ ────────────────────────────────────────────────────
     const sessionContext = await getAuthenticatedContext();
@@ -230,10 +228,7 @@ router.post("/automation/start/:reportId", async (req, res) => {
       return;
     }
 
-    const [report] = await db
-      .select({ id: reportsTable.id, automationStatus: reportsTable.automationStatus })
-      .from(reportsTable)
-      .where(eq(reportsTable.id, reportId));
+    const report = await getReportById(reportId);
 
     if (!report) {
       res.status(404).json({ error: "Report not found" });
@@ -262,17 +257,7 @@ router.get("/automation/status/:reportId", async (req, res) => {
       return;
     }
 
-    const [report] = await db
-      .select({
-        automationStatus: reportsTable.automationStatus,
-        automationError:  reportsTable.automationError,
-        automationSessionId: reportsTable.automationSessionId,
-        qrCodeBase64:     reportsTable.qrCodeBase64,
-        certificatePath:  reportsTable.certificatePath,
-        taqeemSubmittedAt: reportsTable.taqeemSubmittedAt,
-      })
-      .from(reportsTable)
-      .where(eq(reportsTable.id, reportId));
+    const report = await getReportById(reportId);
 
     if (!report) {
       res.status(404).json({ error: "Report not found" });
@@ -302,10 +287,7 @@ router.get("/automation/status/:reportId", async (req, res) => {
 router.get("/automation/certificate/:reportId", async (req, res) => {
   try {
     const reportId = parseInt(req.params.reportId);
-    const [report] = await db
-      .select({ certificatePath: reportsTable.certificatePath })
-      .from(reportsTable)
-      .where(eq(reportsTable.id, reportId));
+    const report = await getReportById(reportId);
 
     if (!report?.certificatePath) {
       res.status(404).json({ error: "Certificate not found" });
@@ -328,10 +310,7 @@ router.post("/automation/retry/:reportId", async (req, res) => {
       return;
     }
 
-    await db
-      .update(reportsTable)
-      .set({ automationStatus: "idle", automationError: null })
-      .where(eq(reportsTable.id, reportId));
+    await updateReport(reportId, { automationStatus: "idle", automationError: null });
 
     const sessionId = await startAutomation(reportId);
     res.json({ sessionId, message: "تمت إعادة المحاولة" });
@@ -344,17 +323,7 @@ router.post("/automation/retry/:reportId", async (req, res) => {
 // GET /api/automation/queue — عرض الطلبات المعلقة في الطابور
 router.get("/automation/queue", async (_req, res) => {
   try {
-    const queued = await db
-      .select({
-        id:              reportsTable.id,
-        reportNumber:    reportsTable.reportNumber,
-        clientName:      reportsTable.clientName,
-        automationStatus: reportsTable.automationStatus,
-        createdAt:       reportsTable.createdAt,
-      })
-      .from(reportsTable)
-      .where(eq(reportsTable.automationStatus, "queued"));
-
+    const queued = await getReportsByAutomationStatus("queued");
     res.json({ count: queued.length, queue: queued });
   } catch (err: any) {
     res.status(500).json({ error: "Internal server error" });
