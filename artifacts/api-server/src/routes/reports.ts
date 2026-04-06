@@ -1,6 +1,5 @@
 import { Router, type IRouter } from "express";
 import multer from "multer";
-import pdfParse from "pdf-parse";
 import * as fs from "fs";
 import * as path from "path";
 import {
@@ -12,6 +11,7 @@ import {
   getReportStats,
 } from "@workspace/db";
 import { openai } from "@workspace/integrations-openai-ai-server";
+import { extractPdf } from "../lib/pdf-extractor.js";
 
 const UPLOADS_DIR = path.join(process.cwd(), "uploads");
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -25,7 +25,191 @@ const diskStorage = multer.diskStorage({
 });
 
 const router: IRouter = Router();
-const upload = multer({ storage: diskStorage, limits: { fileSize: 20 * 1024 * 1024 } });
+const upload = multer({ storage: diskStorage, limits: { fileSize: 30 * 1024 * 1024 } });
+
+// ─── حقول الاستخراج المطلوبة (تُستخدم في كلا النمطين) ──────────────────────
+const FIELDS_SCHEMA = `{
+  "reportNumber": "رقم التقرير",
+  "reportDate": "تاريخ التقرير (YYYY-MM-DD)",
+  "valuationDate": "تاريخ التقييم",
+  "inspectionDate": "تاريخ المعاينة",
+  "commissionDate": "تاريخ التكليف",
+  "requestNumber": "رقم الطلب",
+  "valuerName": "اسم المقيم المعتمد",
+  "valuerPercentage": "نسبة مشاركة المقيم الأول (0-100)",
+  "licenseNumber": "رقم الترخيص",
+  "licenseDate": "تاريخ الترخيص",
+  "membershipNumber": "رقم العضوية",
+  "membershipType": "نوع العضوية",
+  "secondValuerName": "اسم المقيم الثاني (أو null)",
+  "secondValuerPercentage": "نسبة المقيم الثاني (0-100 أو null)",
+  "secondValuerLicenseNumber": "رقم ترخيص المقيم الثاني",
+  "secondValuerMembershipNumber": "رقم عضوية المقيم الثاني",
+  "clientName": "اسم العميل",
+  "clientEmail": "بريد العميل الإلكتروني",
+  "clientPhone": "هاتف العميل",
+  "intendedUser": "المستخدم المقصود",
+  "reportType": "نوع التقرير",
+  "valuationPurpose": "الغرض من التقييم",
+  "valuationBasis": "أساس القيمة",
+  "propertyType": "نوع العقار (أرض/شقة/فيلا/دور/مبنى تجاري)",
+  "propertySubType": "النوع الفرعي",
+  "region": "المنطقة الإدارية",
+  "city": "المدينة",
+  "district": "الحي",
+  "street": "الشارع",
+  "blockNumber": "رقم البلك",
+  "plotNumber": "رقم القطعة",
+  "planNumber": "رقم المخطط",
+  "propertyUse": "استخدام العقار",
+  "deedNumber": "رقم الصك",
+  "deedDate": "تاريخ الصك",
+  "ownerName": "اسم المالك",
+  "ownershipType": "نوع الملكية",
+  "buildingPermitNumber": "رقم رخصة البناء",
+  "buildingStatus": "حالة البناء",
+  "buildingAge": "عمر البناء",
+  "landArea": "مساحة الأرض بالمتر المربع (رقم فقط)",
+  "buildingArea": "مساحة البناء بالمتر المربع (رقم فقط)",
+  "basementArea": "مساحة القبو (رقم فقط)",
+  "annexArea": "مساحة الملاحق (رقم فقط)",
+  "floorsCount": "عدد الأدوار الفعلية (رقم صحيح)",
+  "permittedFloorsCount": "عدد الأدوار المصرح به (رقم صحيح)",
+  "permittedBuildingRatio": "نسبة البناء المصرح بها (رقم 0-100)",
+  "streetWidth": "عرض الشارع بالأمتار (رقم فقط)",
+  "streetFacades": "الواجهات المطلة (مثال: واجهة واحدة)",
+  "utilities": "المرافق المتاحة مفصولة بفاصلة",
+  "coordinates": "الإحداثيات الجغرافية",
+  "valuationMethod": "أسلوب التقييم المستخدم",
+  "marketValue": "القيمة بأسلوب السوق (رقم فقط)",
+  "incomeValue": "القيمة بأسلوب الدخل (رقم فقط)",
+  "costValue": "القيمة بأسلوب التكلفة (رقم فقط)",
+  "finalValue": "القيمة النهائية المرجحة (رقم فقط)",
+  "pricePerMeter": "سعر المتر المربع (رقم فقط)",
+  "companyName": "اسم شركة التقييم",
+  "commercialRegNumber": "رقم السجل التجاري"
+}`;
+
+const SYSTEM_PROMPT = `أنت مساعد متخصص في قراءة تقارير التقييم العقاري السعودية.
+مهمتك: استخراج البيانات من التقرير وإرجاعها كـ JSON فقط بدون أي نص إضافي.
+- إذا لم تجد قيمة معينة ضع null
+- الأرقام ترجع أرقاماً خالصة بدون وحدات
+- التواريخ بصيغة YYYY-MM-DD إذا أمكن`;
+
+/** يستدعي OpenAI بنمط النص */
+async function extractWithText(text: string) {
+  const response = await openai.chat.completions.create({
+    model: "gpt-4.1",
+    max_completion_tokens: 4096,
+    response_format: { type: "json_object" },
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      {
+        role: "user",
+        content: `استخرج الحقول التالية من نص تقرير التقييم:\n${FIELDS_SCHEMA}\n\nنص التقرير:\n${text.slice(0, 16000)}`,
+      },
+    ],
+  });
+  return JSON.parse(response.choices[0]?.message?.content ?? "{}");
+}
+
+/** يستدعي OpenAI بنمط الصور (Vision) */
+async function extractWithVision(images: string[]) {
+  const imageMessages = images.map((b64) => ({
+    type: "image_url" as const,
+    image_url: { url: `data:image/png;base64,${b64}`, detail: "high" as const },
+  }));
+
+  const response = await openai.chat.completions.create({
+    model: "gpt-4.1",
+    max_completion_tokens: 4096,
+    response_format: { type: "json_object" },
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: `هذه صفحات من تقرير تقييم عقاري. استخرج الحقول التالية:\n${FIELDS_SCHEMA}`,
+          },
+          ...imageMessages,
+        ],
+      },
+    ],
+  });
+  return JSON.parse(response.choices[0]?.message?.content ?? "{}");
+}
+
+/** يحوّل القيم المستخرجة لأنواع البيانات الصحيحة */
+function parseExtracted(e: any) {
+  const n = (v: any) => (v != null && v !== "" ? Number(v) : null);
+  const s = (v: any) => (v != null && v !== "" ? String(v) : null);
+  const i = (v: any) => (v != null && v !== "" ? parseInt(String(v)) : null);
+  return {
+    reportNumber: s(e.reportNumber),
+    reportDate: s(e.reportDate),
+    valuationDate: s(e.valuationDate),
+    inspectionDate: s(e.inspectionDate),
+    commissionDate: s(e.commissionDate),
+    requestNumber: s(e.requestNumber),
+    valuerName: s(e.valuerName),
+    valuerPercentage: n(e.valuerPercentage),
+    licenseNumber: s(e.licenseNumber),
+    licenseDate: s(e.licenseDate),
+    membershipNumber: s(e.membershipNumber),
+    membershipType: s(e.membershipType),
+    secondValuerName: s(e.secondValuerName),
+    secondValuerPercentage: n(e.secondValuerPercentage),
+    secondValuerLicenseNumber: s(e.secondValuerLicenseNumber),
+    secondValuerMembershipNumber: s(e.secondValuerMembershipNumber),
+    clientName: s(e.clientName),
+    clientEmail: s(e.clientEmail),
+    clientPhone: s(e.clientPhone),
+    intendedUser: s(e.intendedUser),
+    reportType: s(e.reportType),
+    valuationPurpose: s(e.valuationPurpose),
+    valuationBasis: s(e.valuationBasis),
+    propertyType: s(e.propertyType),
+    propertySubType: s(e.propertySubType),
+    region: s(e.region),
+    city: s(e.city),
+    district: s(e.district),
+    street: s(e.street),
+    blockNumber: s(e.blockNumber),
+    plotNumber: s(e.plotNumber),
+    planNumber: s(e.planNumber),
+    propertyUse: s(e.propertyUse),
+    deedNumber: s(e.deedNumber),
+    deedDate: s(e.deedDate),
+    ownerName: s(e.ownerName),
+    ownershipType: s(e.ownershipType),
+    buildingPermitNumber: s(e.buildingPermitNumber),
+    buildingStatus: s(e.buildingStatus),
+    buildingAge: s(e.buildingAge),
+    landArea: n(e.landArea),
+    buildingArea: n(e.buildingArea),
+    basementArea: n(e.basementArea),
+    annexArea: n(e.annexArea),
+    floorsCount: i(e.floorsCount),
+    permittedFloorsCount: i(e.permittedFloorsCount),
+    permittedBuildingRatio: n(e.permittedBuildingRatio),
+    streetWidth: n(e.streetWidth),
+    streetFacades: s(e.streetFacades),
+    utilities: s(e.utilities),
+    coordinates: s(e.coordinates),
+    valuationMethod: s(e.valuationMethod),
+    marketValue: n(e.marketValue),
+    incomeValue: n(e.incomeValue),
+    costValue: n(e.costValue),
+    finalValue: n(e.finalValue),
+    pricePerMeter: n(e.pricePerMeter),
+    companyName: s(e.companyName),
+    commercialRegNumber: s(e.commercialRegNumber),
+  };
+}
+
+// ─── Routes ─────────────────────────────────────────────────────────────────
 
 // GET /reports/stats
 router.get("/reports/stats", async (req, res) => {
@@ -64,168 +248,50 @@ router.post("/reports", async (req, res) => {
   }
 });
 
-// POST /reports/upload — رفع PDF واستخراج البيانات بـ OpenAI
+// POST /reports/upload — رفع PDF واستخراج البيانات
 router.post("/reports/upload", upload.single("pdf"), async (req, res) => {
+  if (!req.file) {
+    res.status(400).json({ error: "لم يتم رفع ملف PDF" });
+    return;
+  }
+
   try {
-    if (!req.file) {
-      res.status(400).json({ error: "No PDF file uploaded" });
-      return;
+    req.log.info({ file: req.file.originalname, size: req.file.size }, "PDF upload started");
+
+    // ── الخطوة 1: استخراج المحتوى من PDF ──────────────────────────────────
+    const extraction = await extractPdf(req.file.path, 8);
+    req.log.info({ mode: extraction.mode }, "PDF extracted");
+
+    // ── الخطوة 2: إرسال لـ OpenAI لاستخراج الحقول ─────────────────────────
+    let raw: any;
+    if (extraction.mode === "vision") {
+      raw = await extractWithVision(extraction.images);
+    } else {
+      if (!extraction.text || extraction.text.trim().length < 50) {
+        res.status(422).json({
+          error: "تعذّر قراءة محتوى الملف",
+          detail: "الملف لا يحتوي على نص قابل للقراءة وأداة تحويل الصور غير متاحة. تأكد من رفع PDF يحتوي على نص.",
+        });
+        return;
+      }
+      raw = await extractWithText(extraction.text);
     }
 
-    const pdfBuffer = fs.readFileSync(req.file.path);
-    const parsed = await pdfParse(pdfBuffer);
-    const pdfText = parsed.text;
-
-    const prompt = `أنت مساعد متخصص في استخراج بيانات تقارير التقييم العقاري السعودية.
-استخرج البيانات التالية من نص التقرير وأرجعها بصيغة JSON فقط بدون أي نص إضافي.
-
-إذا لم تجد قيمة لحقل معين، ضع null.
-
-الحقول المطلوبة:
-{
-  "reportNumber": "رقم التقرير",
-  "reportDate": "تاريخ التقرير (بصيغة YYYY-MM-DD إذا أمكن)",
-  "valuationDate": "تاريخ التقييم",
-  "inspectionDate": "تاريخ المعاينة",
-  "commissionDate": "تاريخ التكليف",
-  "requestNumber": "رقم الطلب",
-  "valuerName": "اسم المقيم المعتمد",
-  "licenseNumber": "رقم الترخيص",
-  "licenseDate": "تاريخ الترخيص",
-  "membershipNumber": "رقم العضوية",
-  "membershipType": "نوع العضوية",
-  "clientName": "اسم العميل",
-  "clientEmail": "البريد الإلكتروني للعميل",
-  "clientPhone": "رقم هاتف العميل",
-  "intendedUser": "المستخدم المقصود",
-  "reportType": "نوع التقرير",
-  "valuationPurpose": "الغرض من التقييم / الاستخدام المقصود",
-  "valuationBasis": "أساس القيمة",
-  "propertyType": "نوع العقار (أرض/شقة/فيلا/دور/مبنى تجاري)",
-  "propertySubType": "النوع الفرعي للعقار",
-  "region": "اسم المنطقة الإدارية",
-  "city": "اسم المدينة",
-  "district": "اسم الحي",
-  "street": "اسم الشارع",
-  "blockNumber": "رقم البلك",
-  "plotNumber": "رقم القطعة",
-  "planNumber": "رقم المخطط",
-  "propertyUse": "استخدام العقار",
-  "deedNumber": "رقم الصك",
-  "deedDate": "تاريخ الصك",
-  "ownerName": "اسم المالك",
-  "ownershipType": "نوع الملكية",
-  "buildingPermitNumber": "رقم رخصة البناء",
-  "buildingStatus": "حالة البناء",
-  "buildingAge": "عمر البناء",
-  "landArea": "مساحة الأرض (رقم فقط بالمتر المربع)",
-  "buildingArea": "مساحة المباني (رقم فقط بالمتر المربع)",
-  "basementArea": "مساحة القبو (رقم فقط)",
-  "annexArea": "مساحة الملاحق (رقم فقط)",
-  "floorsCount": "عدد الأدوار الفعلية (رقم صحيح فقط)",
-  "permittedFloorsCount": "عدد الأدوار المصرح به (رقم صحيح فقط)",
-  "permittedBuildingRatio": "نسبة مساحة البناء المصرح بها (رقم من 0 إلى 100، مثل 80)",
-  "streetWidth": "عرض الشارع بالأمتار (رقم فقط)",
-  "streetFacades": "الواجهات المطلة على الشارع (مثل: واجهة واحدة، واجهتان)",
-  "utilities": "المرافق المتاحة (كهرباء، ماء، صرف صحي، ...) مفصولة بفاصلة",
-  "coordinates": "الإحداثيات الجغرافية",
-  "valuationMethod": "أسلوب التقييم المستخدم",
-  "marketValue": "القيمة بأسلوب السوق (رقم فقط)",
-  "incomeValue": "القيمة بأسلوب الدخل (رقم فقط)",
-  "costValue": "القيمة بأسلوب التكلفة (رقم فقط)",
-  "finalValue": "القيمة المرجحة النهائية (رقم فقط)",
-  "pricePerMeter": "سعر المتر المربع (رقم فقط)",
-  "valuerPercentage": "نسبة مشاركة المقيم الأول في التقرير (رقم من 0 إلى 100، مثل: 85 أو 15)",
-  "secondValuerName": "اسم المقيم الثاني المشارك في التقرير (إن وجد، وإلا null)",
-  "secondValuerLicenseNumber": "رقم ترخيص المقيم الثاني",
-  "secondValuerMembershipNumber": "رقم عضوية المقيم الثاني",
-  "secondValuerPercentage": "نسبة مشاركة المقيم الثاني (رقم من 0 إلى 100)",
-  "companyName": "اسم شركة التقييم",
-  "commercialRegNumber": "رقم السجل التجاري"
-}
-
-نص التقرير:
-${pdfText.slice(0, 15000)}`;
-
-    const response = await openai.chat.completions.create({
-      model: "gpt-4.1",
-      max_completion_tokens: 4096,
-      messages: [{ role: "user", content: prompt }],
-      response_format: { type: "json_object" },
-    });
-
-    const extracted = JSON.parse(response.choices[0]?.message?.content ?? "{}");
-
+    // ── الخطوة 3: حفظ البيانات في قاعدة البيانات ──────────────────────────
+    const fields = parseExtracted(raw);
     const report = await insertReport({
-      reportNumber: extracted.reportNumber ?? null,
-      reportDate: extracted.reportDate ?? null,
-      valuationDate: extracted.valuationDate ?? null,
-      inspectionDate: extracted.inspectionDate ?? null,
-      commissionDate: extracted.commissionDate ?? null,
-      requestNumber: extracted.requestNumber ?? null,
+      ...fields,
       status: "extracted",
-      valuerName: extracted.valuerName ?? null,
-      licenseNumber: extracted.licenseNumber ?? null,
-      licenseDate: extracted.licenseDate ?? null,
-      membershipNumber: extracted.membershipNumber ?? null,
-      membershipType: extracted.membershipType ?? null,
-      clientName: extracted.clientName ?? null,
-      clientEmail: extracted.clientEmail ?? null,
-      clientPhone: extracted.clientPhone ?? null,
-      intendedUser: extracted.intendedUser ?? null,
-      reportType: extracted.reportType ?? null,
-      valuationPurpose: extracted.valuationPurpose ?? null,
-      valuationBasis: extracted.valuationBasis ?? null,
-      propertyType: extracted.propertyType ?? null,
-      propertySubType: extracted.propertySubType ?? null,
-      region: extracted.region ?? null,
-      city: extracted.city ?? null,
-      district: extracted.district ?? null,
-      street: extracted.street ?? null,
-      blockNumber: extracted.blockNumber ?? null,
-      plotNumber: extracted.plotNumber ?? null,
-      planNumber: extracted.planNumber ?? null,
-      propertyUse: extracted.propertyUse ?? null,
-      deedNumber: extracted.deedNumber ?? null,
-      deedDate: extracted.deedDate ?? null,
-      ownerName: extracted.ownerName ?? null,
-      ownershipType: extracted.ownershipType ?? null,
-      buildingPermitNumber: extracted.buildingPermitNumber ?? null,
-      buildingStatus: extracted.buildingStatus ?? null,
-      buildingAge: extracted.buildingAge ?? null,
-      landArea: extracted.landArea ? Number(extracted.landArea) : null,
-      buildingArea: extracted.buildingArea ? Number(extracted.buildingArea) : null,
-      basementArea: extracted.basementArea ? Number(extracted.basementArea) : null,
-      annexArea: extracted.annexArea ? Number(extracted.annexArea) : null,
-      floorsCount: extracted.floorsCount ? parseInt(extracted.floorsCount) : null,
-      permittedFloorsCount: extracted.permittedFloorsCount ? parseInt(extracted.permittedFloorsCount) : null,
-      permittedBuildingRatio: extracted.permittedBuildingRatio ? Number(extracted.permittedBuildingRatio) : null,
-      streetWidth: extracted.streetWidth ? Number(extracted.streetWidth) : null,
-      streetFacades: extracted.streetFacades ?? null,
-      utilities: extracted.utilities ?? null,
-      coordinates: extracted.coordinates ?? null,
-      valuationMethod: extracted.valuationMethod ?? null,
-      marketValue: extracted.marketValue ? Number(extracted.marketValue) : null,
-      incomeValue: extracted.incomeValue ? Number(extracted.incomeValue) : null,
-      costValue: extracted.costValue ? Number(extracted.costValue) : null,
-      finalValue: extracted.finalValue ? Number(extracted.finalValue) : null,
-      pricePerMeter: extracted.pricePerMeter ? Number(extracted.pricePerMeter) : null,
-      valuerPercentage: extracted.valuerPercentage ? Number(extracted.valuerPercentage) : null,
-      secondValuerName: extracted.secondValuerName ?? null,
-      secondValuerLicenseNumber: extracted.secondValuerLicenseNumber ?? null,
-      secondValuerMembershipNumber: extracted.secondValuerMembershipNumber ?? null,
-      secondValuerPercentage: extracted.secondValuerPercentage ? Number(extracted.secondValuerPercentage) : null,
-      companyName: extracted.companyName ?? null,
-      commercialRegNumber: extracted.commercialRegNumber ?? null,
       pdfFileName: req.file.originalname,
       pdfFilePath: req.file.path,
     });
 
-    res.status(201).json(report);
+    req.log.info({ reportId: report.id, mode: extraction.mode }, "PDF processed successfully");
+    res.status(201).json({ ...report, _extractionMode: extraction.mode });
   } catch (err: any) {
-    req.log.error({ err }, "Failed to upload and extract PDF");
-    const msg = err?.message ?? String(err);
-    res.status(500).json({ error: "حدث خطأ أثناء معالجة التقرير", detail: msg });
+    req.log.error({ err }, "PDF upload/extract failed");
+    const detail = err?.message ?? String(err);
+    res.status(500).json({ error: "حدث خطأ أثناء معالجة التقرير", detail });
   }
 });
 
