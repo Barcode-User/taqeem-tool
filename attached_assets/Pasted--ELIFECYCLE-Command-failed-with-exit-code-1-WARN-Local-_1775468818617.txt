@@ -1,0 +1,57 @@
+ ELIFECYCLE  Command failed with exit code 1.
+ WARN   Local package.json exists, but node_modules missing, did you mean to install?
+
+D:\Devolper\New\taqeem-tool\artifacts\api-server>cd /d "D:\Devolper\New\taqeem-tool"
+
+D:\Devolper\New\taqeem-tool>pnpm install
+Scope: all 11 workspace projects
+Packages: +570
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Progress: resolved 577, reused 569, downloaded 1, added 570, done
+. preinstall$ node -e "const fs=require('fs');['package-lock.json','yarn.lock'].forEach(f=>{try{fs.unlinkSync(f)}catc…
+└─ Done in 57ms
+
+devDependencies:
++ prettier 3.8.1
++ typescript 5.9.3 (6.0.2 is available)
+
+Done in 1m 22.1s using pnpm v10.33.0
+
+D:\Devolper\New\taqeem-tool>pnpm run build
+
+> workspace@0.0.0 build D:\Devolper\New\taqeem-tool
+> pnpm run typecheck && pnpm -r --if-present run build
+
+
+> workspace@0.0.0 typecheck D:\Devolper\New\taqeem-tool
+> pnpm run typecheck:libs && pnpm -r --filter "./artifacts/**" --filter "./scripts" --if-present run typecheck
+
+
+> workspace@0.0.0 typecheck:libs D:\Devolper\New\taqeem-tool
+> tsc --build
+
+lib/integrations-openai-ai-server/src/batch/utils.ts:77:30 - error TS2339: Property 'AbortError' does not exist on type '<T>(input: (attemptNumber: number) => T | PromiseLike<T>, options?: Options | undefined) => Promise<T>'.
+
+77             throw new pRetry.AbortError(
+                                ~~~~~~~~~~
+
+lib/integrations-openai-ai-server/src/batch/utils.ts:117:32 - error TS2339: Property 'AbortError' does not exist on type '<T>(input: (attemptNumber: number) => T | PromiseLike<T>, options?: Options | undefined) => Promise<T>'.
+
+117               throw new pRetry.AbortError(
+                                   ~~~~~~~~~~
+
+lib/integrations-openai-ai-server/src/image/client.ts:31:18 - error TS18048: 'response.data' is possibly 'undefined'.
+
+31   const base64 = response.data[0]?.b64_json ?? "";
+                    ~~~~~~~~~~~~~
+
+lib/integrations-openai-ai-server/src/image/client.ts:54:23 - error TS18048: 'response.data' is possibly 'undefined'.
+
+54   const imageBase64 = response.data[0]?.b64_json ?? "";
+                         ~~~~~~~~~~~~~
+
+
+Found 4 errors.
+
+ ELIFECYCLE  Command failed with exit code 1.
+ ELIFECYCLE  Command failed with exit code 1.
