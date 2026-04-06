@@ -248,7 +248,61 @@ router.post("/reports", async (req, res) => {
   }
 });
 
-// POST /reports/upload — رفع PDF واستخراج البيانات
+// POST /reports/upload-base64 — رفع PDF كـ base64 JSON (يتجاوز قيود proxy على multipart)
+router.post("/reports/upload-base64", async (req, res) => {
+  const { pdfBase64, fileName } = req.body ?? {};
+  if (!pdfBase64 || typeof pdfBase64 !== "string") {
+    res.status(400).json({ error: "pdfBase64 مطلوب" });
+    return;
+  }
+
+  // فك تشفير base64 وكتابة الملف على القرص
+  const buffer = Buffer.from(pdfBase64, "base64");
+  const safeName = (fileName ?? "report.pdf").replace(/[^a-zA-Z0-9._\-]/g, "_");
+  const unique = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const filePath = path.join(UPLOADS_DIR, `${unique}_${safeName}`);
+  fs.writeFileSync(filePath, buffer);
+
+  req.log.info({ file: safeName, size: buffer.length }, "PDF upload-base64 started");
+
+  try {
+    // الخطوة 1: استخراج المحتوى من PDF
+    const extraction = await extractPdf(filePath, 8);
+    req.log.info({ mode: extraction.mode }, "PDF extracted");
+
+    // الخطوة 2: إرسال لـ OpenAI لاستخراج الحقول
+    let raw: any;
+    if (extraction.mode === "vision") {
+      raw = await extractWithVision(extraction.images);
+    } else {
+      if (!extraction.text || extraction.text.trim().length < 50) {
+        res.status(422).json({
+          error: "تعذّر قراءة محتوى الملف",
+          detail: "الملف لا يحتوي على نص قابل للقراءة. تأكد من رفع PDF يحتوي على نص واضح.",
+        });
+        return;
+      }
+      raw = await extractWithText(extraction.text);
+    }
+
+    // الخطوة 3: حفظ البيانات في قاعدة البيانات
+    const fields = parseExtracted(raw);
+    const report = await insertReport({
+      ...fields,
+      status: "extracted",
+      pdfFileName: fileName ?? "report.pdf",
+      pdfFilePath: filePath,
+    });
+
+    req.log.info({ reportId: report.id, mode: extraction.mode }, "PDF processed successfully");
+    res.status(201).json({ ...report, _extractionMode: extraction.mode });
+  } catch (err: any) {
+    req.log.error({ err }, "PDF upload-base64/extract failed");
+    res.status(500).json({ error: "حدث خطأ أثناء معالجة التقرير", detail: err?.message ?? String(err) });
+  }
+});
+
+// POST /reports/upload — رفع PDF multipart (للاستخدام المحلي)
 router.post("/reports/upload", upload.single("pdf"), async (req, res) => {
   if (!req.file) {
     res.status(400).json({ error: "لم يتم رفع ملف PDF" });

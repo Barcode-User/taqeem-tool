@@ -2,7 +2,7 @@ import { useState, useRef } from "react";
 import { useLocation } from "wouter";
 import { UploadCloud, File, AlertCircle, Loader2, CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { Progress } from "@/components/ui/progress";
 
@@ -19,9 +19,20 @@ export default function Upload() {
     setIsDragging(true);
   };
 
-  const handleDragLeave = () => {
-    setIsDragging(false);
-  };
+  const handleDragLeave = () => setIsDragging(false);
+
+  /** يحوّل File لـ base64 string */
+  const fileToBase64 = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const result = e.target?.result as string;
+        // نزيل بادئة "data:application/pdf;base64,"
+        resolve(result.split(",")[1]);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
 
   const processFile = async (file: File) => {
     if (file.type !== "application/pdf") {
@@ -33,23 +44,38 @@ export default function Upload() {
       return;
     }
 
+    if (file.size > 30 * 1024 * 1024) {
+      toast({
+        variant: "destructive",
+        title: "الملف كبير جداً",
+        description: "الحد الأقصى لحجم الملف 30 ميغابايت.",
+      });
+      return;
+    }
+
     setIsUploading(true);
     setProgress(10);
 
     const progressInterval = setInterval(() => {
       setProgress((prev) => {
-        if (prev >= 95) return prev;
-        return prev + Math.floor(Math.random() * 5);
+        if (prev >= 92) return prev;
+        return prev + Math.floor(Math.random() * 4 + 1);
       });
-    }, 800);
+    }, 1000);
 
     try {
-      const formData = new FormData();
-      formData.append("pdf", file);
+      // نقرأ الملف كـ base64 ونرسله كـ JSON (يتجاوز قيود proxy على multipart)
+      setProgress(15);
+      const pdfBase64 = await fileToBase64(file);
+      setProgress(20);
 
-      const response = await fetch("/api/reports/upload", {
+      const response = await fetch("/api/reports/upload-base64", {
         method: "POST",
-        body: formData,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pdfBase64,
+          fileName: file.name,
+        }),
       });
 
       if (!response.ok) {
@@ -58,26 +84,25 @@ export default function Upload() {
       }
 
       const report = await response.json();
-      
+
       clearInterval(progressInterval);
       setProgress(100);
-      
+
       toast({
         title: "تم استخراج البيانات بنجاح",
         description: "تمت معالجة التقرير واستخراج الحقول بنجاح.",
       });
-      
+
       setTimeout(() => {
         setLocation(`/reports/${report.id}`);
       }, 800);
-      
-    } catch (error) {
+    } catch (error: any) {
       console.error("Upload error:", error);
       clearInterval(progressInterval);
       toast({
         variant: "destructive",
         title: "فشل الرفع",
-        description: "حدث خطأ أثناء معالجة التقرير. الرجاء المحاولة مرة أخرى.",
+        description: error?.message || "حدث خطأ أثناء معالجة التقرير. الرجاء المحاولة مرة أخرى.",
       });
       setIsUploading(false);
       setProgress(0);
@@ -87,16 +112,11 @@ export default function Upload() {
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      processFile(e.dataTransfer.files[0]);
-    }
+    if (e.dataTransfer.files?.[0]) processFile(e.dataTransfer.files[0]);
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      processFile(e.target.files[0]);
-    }
+    if (e.target.files?.[0]) processFile(e.target.files[0]);
   };
 
   return (
@@ -113,8 +133,8 @@ export default function Upload() {
           {!isUploading ? (
             <div
               className={`border-2 border-dashed rounded-2xl p-16 text-center transition-all cursor-pointer flex flex-col items-center justify-center
-                ${isDragging 
-                  ? "border-primary bg-primary/5 scale-[1.01]" 
+                ${isDragging
+                  ? "border-primary bg-primary/5 scale-[1.01]"
                   : "border-muted-foreground/25 hover:border-primary/50 hover:bg-accent/30"
                 }
               `}
@@ -135,9 +155,8 @@ export default function Upload() {
               </div>
               <h3 className="text-xl font-bold text-foreground mb-2">اسحب وأفلت ملف PDF هنا</h3>
               <p className="text-muted-foreground mb-8 max-w-sm">
-                الحد الأقصى لحجم الملف هو 20 ميغابايت. يجب أن يكون التقرير صادراً عن مقيّم معتمد.
+                الحد الأقصى لحجم الملف هو 30 ميغابايت. يجب أن يكون التقرير صادراً عن مقيّم معتمد.
               </p>
-              
               <Button size="lg" type="button" className="px-8 font-bold">
                 تصفح الملفات
               </Button>
@@ -159,14 +178,17 @@ export default function Upload() {
                   </div>
                 )}
               </div>
-              
               <div className="space-y-4 w-full max-w-md">
                 <h3 className="text-xl font-bold">
-                  {progress < 100 ? "جاري معالجة واستخراج البيانات..." : "اكتمل الاستخراج!"}
+                  {progress < 20
+                    ? "جاري قراءة الملف..."
+                    : progress < 100
+                    ? "جاري تحليل واستخراج البيانات..."
+                    : "اكتمل الاستخراج!"}
                 </h3>
                 <p className="text-muted-foreground text-sm">
-                  {progress < 100 
-                    ? "يقوم الذكاء الاصطناعي الآن بقراءة وتحليل التقرير لاستخراج معلومات العميل، العقار، والقيم التقديرية. يرجى الانتظار." 
+                  {progress < 100
+                    ? "يقوم الذكاء الاصطناعي بقراءة وتحليل التقرير لاستخراج جميع المعلومات. يرجى الانتظار."
                     : "يتم الآن توجيهك لصفحة المراجعة..."}
                 </p>
                 <div className="space-y-2 pt-4">
@@ -187,7 +209,7 @@ export default function Upload() {
             <div>
               <h4 className="font-bold text-blue-900 dark:text-blue-200 mb-1">تعليمات هامة</h4>
               <p className="text-sm text-blue-800/80 dark:text-blue-300/80 leading-relaxed">
-                النظام مدرب خصيصاً على نماذج تقارير التقييم العقاري المعتمدة من الهيئة السعودية للمقيمين المعتمدين (تقييم). تأكد من وضوح النصوص في ملف الـ PDF لضمان دقة الاستخراج بنسبة 100%.
+                النظام مدرب خصيصاً على نماذج تقارير التقييم العقاري المعتمدة من الهيئة السعودية للمقيمين المعتمدين (تقييم). تأكد من وضوح النصوص في ملف الـ PDF لضمان دقة الاستخراج.
               </p>
             </div>
           </div>
