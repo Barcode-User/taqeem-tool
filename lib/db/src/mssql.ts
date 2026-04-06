@@ -88,9 +88,54 @@ export function isConfigured(): boolean {
   return true;
 }
 
+/**
+ * يُحلّل connection string بصيغة ADO.NET:
+ * Server=...;Database=...;User Id=...;Password=...;Integrated Security=True;
+ */
+function parseAdoNetConnectionString(cs: string): sql.config {
+  const pairs: Record<string, string> = {};
+  cs.split(";").forEach(part => {
+    const idx = part.indexOf("=");
+    if (idx === -1) return;
+    const k = part.slice(0, idx).trim().toLowerCase();
+    const v = part.slice(idx + 1).trim();
+    pairs[k] = v;
+  });
+
+  const server = pairs["server"] || pairs["data source"] || "localhost";
+  const database = pairs["database"] || pairs["initial catalog"] || "TaqeemDb_Qeemah";
+  const integratedSecurity =
+    pairs["integrated security"] === "True" ||
+    pairs["integrated security"] === "true" ||
+    pairs["trusted_connection"] === "True";
+
+  // استخراج اسم الـ instance إذا كان موجوداً (مثل: DESKTOP-ABC\SQLEXPRESS)
+  const serverParts = server.split("\\");
+  const serverHost = serverParts[0];
+  const instanceName = serverParts[1];
+
+  const config: sql.config = {
+    server: serverHost,
+    database,
+    options: {
+      trustServerCertificate: true,
+      encrypt: false,
+      ...(instanceName ? { instanceName } : {}),
+    },
+    pool: { max: 10, min: 0, idleTimeoutMillis: 30000 },
+  };
+
+  if (!integratedSecurity) {
+    config.user = pairs["user id"] || pairs["uid"] || process.env.MSSQL_USER || "test1";
+    config.password = pairs["password"] || pairs["pwd"] || process.env.MSSQL_PASSWORD || "Aa123456";
+  }
+
+  return config;
+}
+
 function getConfig(): sql.config {
   if (process.env.MSSQL_CONNECTION_STRING) {
-    return sql.ConnectionPool.parseConnectionString(process.env.MSSQL_CONNECTION_STRING) as sql.config;
+    return parseAdoNetConnectionString(process.env.MSSQL_CONNECTION_STRING);
   }
   if (process.env.DATABASE_URL?.startsWith("mssql://")) {
     const url = new URL(process.env.DATABASE_URL);
@@ -103,13 +148,23 @@ function getConfig(): sql.config {
       options: { trustServerCertificate: true, encrypt: false },
     };
   }
+
+  // الإعدادات الافتراضية — يمكن تجاوزها بمتغيرات البيئة
+  const server = process.env.MSSQL_SERVER ?? "localhost\\SQLEXPRESS";
+  const serverParts = server.split("\\");
+  const serverHost = serverParts[0];
+  const instanceName = serverParts[1];
+
   return {
-    server: process.env.MSSQL_SERVER ?? "192.168.1.88",
+    server: serverHost,
     database: process.env.MSSQL_DATABASE ?? "TaqeemDb_Qeemah",
     user: process.env.MSSQL_USER ?? "test1",
     password: process.env.MSSQL_PASSWORD ?? "Aa123456",
-    port: parseInt(process.env.MSSQL_PORT ?? "1433"),
-    options: { trustServerCertificate: true, encrypt: false },
+    options: {
+      trustServerCertificate: true,
+      encrypt: false,
+      ...(instanceName ? { instanceName } : {}),
+    },
     pool: { max: 10, min: 0, idleTimeoutMillis: 30000 },
   };
 }
