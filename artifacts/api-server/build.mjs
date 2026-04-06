@@ -100,6 +100,8 @@ async function buildAll() {
       "puppeteer",
       "puppeteer-core",
       "electron",
+      "mssql",
+      "tedious",
     ],
     sourcemap: "linked",
     plugins: [
