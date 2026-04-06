@@ -1,16 +1,20 @@
 /**
  * pg.ts — طبقة الاتصال بـ PostgreSQL
  * تُستخدم تلقائياً على Replit عندما DATABASE_URL يبدأ بـ postgresql://
+ *
+ * نستخدم require() كسولاً حتى لا يُخفق البناء على Windows عند غياب pg
  */
-import { Pool } from "pg";
+import type { Pool as PgPool } from "pg";
 import type { Report, InsertReport } from "./mssql";
 
 export type { Report, InsertReport };
 
-let _pgPool: Pool | null = null;
+let _pgPool: PgPool | null = null;
 
-function getPgPool(): Pool {
+function getPgPool(): PgPool {
   if (_pgPool) return _pgPool;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { Pool } = require("pg") as typeof import("pg");
   _pgPool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: process.env.DATABASE_URL?.includes("sslmode=require")
@@ -103,7 +107,7 @@ async function ensureTable(): Promise<void> {
 }
 
 let _tableReady = false;
-async function withTable(): Promise<Pool> {
+async function withTable(): Promise<PgPool> {
   if (!_tableReady) {
     await ensureTable();
     _tableReady = true;
@@ -255,14 +259,12 @@ export async function pgInsertReport(data: InsertReport): Promise<Report> {
   const pool = await withTable();
   const cols: string[] = [];
   const vals: any[] = [];
-  let idx = 1;
 
   for (const [jsKey, pgCol] of Object.entries(FIELD_MAP_PG)) {
     const v = (data as any)[jsKey];
     if (v !== undefined && v !== null) {
       cols.push(`"${pgCol}"`);
       vals.push(v);
-      idx++;
     }
   }
 

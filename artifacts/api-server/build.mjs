@@ -102,6 +102,7 @@ async function buildAll() {
       "electron",
       "mssql",
       "tedious",
+      "pg",
     ],
     sourcemap: "linked",
     plugins: [
