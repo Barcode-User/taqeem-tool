@@ -1,0 +1,53 @@
+> @workspace/api-server@0.0.0 build D:\Devolper\New\taqeem-tool-main\artifacts\api-server
+> node ./build.mjs
+
+X [ERROR] Could not resolve "drizzle-orm/node-postgres"
+
+    ../../lib/db/src/index.ts:1:24:
+      1 │ import { drizzle } from "drizzle-orm/node-postgres";
+        ╵                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  You can mark the path "drizzle-orm/node-postgres" as external to exclude it from the bundle, which
+  will remove this error and leave the unresolved path in the bundle.
+
+X [ERROR] Could not resolve "pg"
+
+    ../../lib/db/src/index.ts:2:15:
+      2 │ import pg from "pg";
+        ╵                ~~~~
+
+  You can mark the path "pg" as external to exclude it from the bundle, which will remove this error
+  and leave the unresolved path in the bundle.
+
+X [ERROR] Could not resolve "drizzle-orm/pg-core"
+
+    ../../lib/db/src/schema/reports.ts:1:64:
+      1 │ import { pgTable, text, serial, timestamp, real, integer } from "drizzle-orm/pg-core";
+        ╵                                                                 ~~~~~~~~~~~~~~~~~~~~~
+
+  You can mark the path "drizzle-orm/pg-core" as external to exclude it from the bundle, which will
+  remove this error and leave the unresolved path in the bundle.
+
+X [ERROR] Could not resolve "drizzle-zod"
+
+    ../../lib/db/src/schema/reports.ts:2:35:
+      2 │ import { createInsertSchema } from "drizzle-zod";
+        ╵                                    ~~~~~~~~~~~~~
+
+  You can mark the path "drizzle-zod" as external to exclude it from the bundle, which will remove
+  this error and leave the unresolved path in the bundle.
+
+4 errors
+Error: Build failed with 4 errors:
+../../lib/db/src/index.ts:1:24: ERROR: Could not resolve "drizzle-orm/node-postgres"
+../../lib/db/src/index.ts:2:15: ERROR: Could not resolve "pg"
+../../lib/db/src/schema/reports.ts:1:64: ERROR: Could not resolve "drizzle-orm/pg-core"
+../../lib/db/src/schema/reports.ts:2:35: ERROR: Could not resolve "drizzle-zod"
+    at failureErrorWithLog (D:\Devolper\New\taqeem-tool-main\node_modules\.pnpm\esbuild@0.27.3\node_modules\esbuild\lib\main.js:1467:15)
+    at D:\Devolper\New\taqeem-tool-main\node_modules\.pnpm\esbuild@0.27.3\node_modules\esbuild\lib\main.js:926:25
+    at D:\Devolper\New\taqeem-tool-main\node_modules\.pnpm\esbuild@0.27.3\node_modules\esbuild\lib\main.js:1345:9
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  errors: [Getter/Setter],
+  warnings: [Getter/Setter]
+}
+ ELIFECYCLE  Command failed with exit code 1. 
