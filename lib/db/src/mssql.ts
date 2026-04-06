@@ -170,12 +170,33 @@ function getConfig(): sql.config {
 }
 
 let _pool: sql.ConnectionPool | null = null;
+let _poolError: Error | null = null;
+let _poolErrorTime = 0;
+const POOL_RETRY_MS = 10_000; // إعادة المحاولة بعد 10 ثوانٍ فقط
 
 export async function getPool(): Promise<sql.ConnectionPool> {
+  // إذا كان هناك خطأ سابق وأقل من 10 ثوانٍ مضت، ارمِ الخطأ فوراً بدون انتظار
+  if (_poolError && Date.now() - _poolErrorTime < POOL_RETRY_MS) {
+    throw _poolError;
+  }
+
   if (_pool && _pool.connected) return _pool;
-  _pool = new sql.ConnectionPool(getConfig());
-  await _pool.connect();
-  return _pool;
+
+  try {
+    const cfg = getConfig();
+    // تقليل timeout الاتصال إلى 5 ثوانٍ بدلاً من 15
+    (cfg as any).connectionTimeout = 5000;
+    (cfg as any).requestTimeout = 10000;
+    _pool = new sql.ConnectionPool(cfg);
+    await _pool.connect();
+    _poolError = null;
+    return _pool;
+  } catch (err: any) {
+    _pool = null;
+    _poolError = err;
+    _poolErrorTime = Date.now();
+    throw err;
+  }
 }
 
 // ─── تحويل صف SQL Server إلى كائن JavaScript ─────────────────────────────────
