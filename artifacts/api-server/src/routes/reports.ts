@@ -90,33 +90,63 @@ const FIELDS_SCHEMA = `{
   "commercialRegNumber": "رقم السجل التجاري"
 }`;
 
-const SYSTEM_PROMPT = `أنت مساعد متخصص في قراءة تقارير التقييم العقاري السعودية.
-مهمتك: استخراج البيانات من التقرير وإرجاعها كـ JSON فقط بدون أي نص إضافي.
-- إذا لم تجد قيمة معينة ضع null
-- الأرقام ترجع أرقاماً خالصة بدون وحدات
-- التواريخ بصيغة YYYY-MM-DD إذا أمكن`;
+const SYSTEM_PROMPT = `You are an expert assistant for reading Saudi real estate valuation reports.
+Your task: extract the requested fields and return them as a valid JSON object ONLY.
+Rules:
+- Use EXACTLY the English key names provided in the schema (do NOT translate keys to Arabic)
+- Values can be in Arabic
+- If a field is not found, use null
+- Numbers as plain numbers without units
+- Dates in YYYY-MM-DD format if possible
+- Return ONLY the raw JSON object — no markdown, no code blocks, no extra text`;
 
+/** يُحلّل استجابة النموذج ويستخرج JSON منها حتى لو جاءت بـ markdown */
+function parseAIResponse(content: string): any {
+  // إزالة code blocks إن وُجدت: ```json ... ``` أو ``` ... ```
+  const cleaned = content
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```\s*$/, "")
+    .trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    // محاولة استخراج أول كتلة JSON من النص
+    const match = cleaned.match(/\{[\s\S]*\}/);
+    if (match) {
+      try { return JSON.parse(match[0]); } catch {}
+    }
+    return {};
+  }
+}
 
-/** يستدعي OpenAI بنمط النص */
+/** يُحدد هل نستخدم response_format للنموذج الحالي */
+function supportsJsonMode(): boolean {
+  // نماذج Groq/Llama لا تدعم response_format بشكل موثوق مع العربية
+  if (process.env.GROQ_API_KEY) return false;
+  return true;
+}
+
+/** يستدعي AI بنمط النص */
 async function extractWithText(text: string) {
+  const useJsonMode = supportsJsonMode();
   const response = await openai.chat.completions.create({
     model: getAIModel(),
     max_tokens: 4096,
-    response_format: { type: "json_object" },
+    ...(useJsonMode ? { response_format: { type: "json_object" } } : {}),
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
       {
         role: "user",
-        content: `استخرج الحقول التالية من نص تقرير التقييم:\n${FIELDS_SCHEMA}\n\nنص التقرير:\n${text.slice(0, 16000)}`,
+        content: `Extract the following fields from this valuation report text.\nSchema (use EXACT English keys):\n${FIELDS_SCHEMA}\n\nReport text:\n${text.slice(0, 16000)}`,
       },
     ],
   });
-  return JSON.parse(response.choices[0]?.message?.content ?? "{}");
+  return parseAIResponse(response.choices[0]?.message?.content ?? "{}");
 }
 
-/** يستدعي OpenAI بنمط الصور (Vision) */
+/** يستدعي AI بنمط الصور (Vision) */
 async function extractWithVision(images: string[]) {
-  // ملاحظة: لا نُرسل detail: "high" لأن Gemini لا يدعمها
+  const useJsonMode = supportsJsonMode();
   const imageMessages = images.map((b64) => ({
     type: "image_url" as const,
     image_url: { url: `data:image/png;base64,${b64}` },
@@ -125,7 +155,7 @@ async function extractWithVision(images: string[]) {
   const response = await openai.chat.completions.create({
     model: getAIModel(),
     max_tokens: 4096,
-    response_format: { type: "json_object" },
+    ...(useJsonMode ? { response_format: { type: "json_object" } } : {}),
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
       {
@@ -133,14 +163,14 @@ async function extractWithVision(images: string[]) {
         content: [
           {
             type: "text",
-            text: `هذه صفحات من تقرير تقييم عقاري. استخرج الحقول التالية:\n${FIELDS_SCHEMA}`,
+            text: `These are pages from a Saudi real estate valuation report. Extract the following fields.\nSchema (use EXACT English keys):\n${FIELDS_SCHEMA}`,
           },
           ...imageMessages,
         ],
       },
     ],
   });
-  return JSON.parse(response.choices[0]?.message?.content ?? "{}");
+  return parseAIResponse(response.choices[0]?.message?.content ?? "{}");
 }
 
 /** يحوّل القيم المستخرجة لأنواع البيانات الصحيحة */
