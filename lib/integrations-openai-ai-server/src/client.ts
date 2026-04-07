@@ -4,10 +4,21 @@ let _client: OpenAI | null = null;
 
 function getClient(): OpenAI {
   if (!_client) {
-    // الأولوية: GEMINI_API_KEY (مجاني) ← AI_INTEGRATIONS (Replit/OpenAI)
+    // الأولوية: GROQ ← Gemini ← AI_INTEGRATIONS (OpenAI/Replit)
+
+    const groqKey = process.env.GROQ_API_KEY;
+    if (groqKey) {
+      console.log("[AI] 🟢 يستخدم Groq (مجاني — groq-key.txt / GROQ_API_KEY)");
+      _client = new OpenAI({
+        apiKey: groqKey,
+        baseURL: "https://api.groq.com/openai/v1",
+      });
+      return _client;
+    }
+
     const geminiKey = process.env.GEMINI_API_KEY;
     if (geminiKey) {
-      console.log("[AI] 🟢 يستخدم Gemini (gemini-key.txt / GEMINI_API_KEY)");
+      console.log("[AI] 🟡 يستخدم Gemini (GEMINI_API_KEY)");
       _client = new OpenAI({
         apiKey: geminiKey,
         baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
@@ -17,11 +28,11 @@ function getClient(): OpenAI {
 
     const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
     const apiKey  = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
-    console.log("[AI] 🔴 يستخدم OpenAI — تأكد من وجود gemini-key.txt أو GEMINI_API_KEY");
+    console.log("[AI] 🔴 يستخدم OpenAI / Replit Integration");
 
     if (!baseURL || !apiKey) {
       throw new Error(
-        "لم يتم تعيين مفتاح AI. أنشئ gemini-key.txt (مجاني) أو openai-key.txt بجانب start.bat",
+        "لم يتم تعيين مفتاح AI. أنشئ groq-key.txt (مجاني) بجانب start.bat",
       );
     }
 
@@ -33,6 +44,7 @@ function getClient(): OpenAI {
 /** يعيد اسم النموذج المناسب للخدمة المُهيَّأة */
 export function getAIModel(): string {
   if (process.env.AI_MODEL) return process.env.AI_MODEL;
+  if (process.env.GROQ_API_KEY)   return "llama-3.3-70b-versatile";
   if (process.env.GEMINI_API_KEY) return "gemini-2.0-flash";
   return "gpt-4.1";
 }

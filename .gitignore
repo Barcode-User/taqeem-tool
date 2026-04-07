@@ -58,6 +58,7 @@ artifacts/api-server/uploads/
 # ملف المفتاح المحلي (لا يُرفع لـ GitHub أبداً)
 openai-key.txt
 gemini-key.txt
+groq-key.txt
 
 # Keep built frontend for local deployment
 !artifacts/taqeem-tool/dist/
