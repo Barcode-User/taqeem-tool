@@ -272,19 +272,32 @@ router.post("/reports/upload-base64", async (req, res) => {
     const extraction = await extractPdf(filePath, 8);
     req.log.info({ mode: extraction.mode }, "PDF extracted");
 
-    // الخطوة 2: إرسال لـ OpenAI لاستخراج الحقول
+    // الخطوة 2: إرسال لـ AI لاستخراج الحقول
+    // Groq لا يدعم vision — نستخدم النص دائماً معه
+    const useGroq = !!process.env.GROQ_API_KEY;
     let raw: any;
-    if (extraction.mode === "vision") {
+    if (extraction.mode === "vision" && !useGroq) {
       raw = await extractWithVision(extraction.images);
     } else {
-      if (!extraction.text || extraction.text.trim().length < 50) {
+      // إذا كان النمط vision مع Groq، نستخرج النص من الملف مباشرة
+      let text = extraction.mode === "text" ? extraction.text : null;
+      if (!text || text.trim().length < 50) {
+        // محاولة استخراج النص مباشرة من pdf-parse
+        const { default: pdfParse } = await import("pdf-parse") as any;
+        try {
+          const buf = await import("fs").then(fs => fs.promises.readFile(filePath));
+          const parsed = await pdfParse(buf);
+          text = parsed.text ?? "";
+        } catch {}
+      }
+      if (!text || text.trim().length < 50) {
         res.status(422).json({
           error: "تعذّر قراءة محتوى الملف",
           detail: "الملف لا يحتوي على نص قابل للقراءة. تأكد من رفع PDF يحتوي على نص واضح.",
         });
         return;
       }
-      raw = await extractWithText(extraction.text);
+      raw = await extractWithText(text);
     }
 
     // الخطوة 3: حفظ البيانات في قاعدة البيانات
