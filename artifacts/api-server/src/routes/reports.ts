@@ -10,7 +10,7 @@ import {
   deleteReport,
   getReportStats,
 } from "@workspace/db";
-import { openai } from "@workspace/integrations-openai-ai-server";
+import { openai, getAIModel } from "@workspace/integrations-openai-ai-server";
 import { extractPdf } from "../lib/pdf-extractor.js";
 
 const UPLOADS_DIR = path.join(process.cwd(), "uploads");
@@ -96,12 +96,11 @@ const SYSTEM_PROMPT = `أنت مساعد متخصص في قراءة تقارير
 - الأرقام ترجع أرقاماً خالصة بدون وحدات
 - التواريخ بصيغة YYYY-MM-DD إذا أمكن`;
 
-const AI_MODEL = process.env.AI_MODEL || "gpt-4.1";
 
 /** يستدعي OpenAI بنمط النص */
 async function extractWithText(text: string) {
   const response = await openai.chat.completions.create({
-    model: AI_MODEL,
+    model: getAIModel(),
     max_tokens: 4096,
     response_format: { type: "json_object" },
     messages: [
@@ -123,7 +122,7 @@ async function extractWithVision(images: string[]) {
   }));
 
   const response = await openai.chat.completions.create({
-    model: AI_MODEL,
+    model: getAIModel(),
     max_tokens: 4096,
     response_format: { type: "json_object" },
     messages: [
