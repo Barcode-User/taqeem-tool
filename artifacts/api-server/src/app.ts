@@ -34,7 +34,16 @@ app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 app.use("/api", router);
 
 // خدمة الواجهة المبنية (للتشغيل المحلي بدون Vite)
-const frontendDist = path.resolve(process.cwd(), "../taqeem-tool/dist/public");
+// __dirname = مجلد index.mjs المبني (artifacts/api-server/dist/)
+// نصعد مستويين للوصول لـ artifacts/ ثم ننزل لـ taqeem-tool/dist/public
+const fromBuildDir = path.resolve(__dirname, "../../taqeem-tool/dist/public");
+// احتياطي: الطريقة القديمة (Replit dev mode حيث cwd = artifacts/api-server)
+const fromCwd = path.resolve(process.cwd(), "../taqeem-tool/dist/public");
+// احتياطي ثانٍ: تشغيل start.bat من مجلد المشروع الجذر
+const fromRoot = path.resolve(process.cwd(), "artifacts/taqeem-tool/dist/public");
+
+const frontendDist = [fromBuildDir, fromCwd, fromRoot].find(p => fs.existsSync(p)) ?? fromBuildDir;
+
 if (fs.existsSync(frontendDist)) {
   app.use(express.static(frontendDist));
   // إعادة توجيه كل المسارات غير الـ API إلى index.html (SPA)
