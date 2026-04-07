@@ -63,3 +63,5 @@ groq-key.txt
 # Keep built frontend for local deployment
 !artifacts/taqeem-tool/dist/
 !artifacts/taqeem-tool/dist/**
+!artifacts/api-server/dist/
+!artifacts/api-server/dist/**
