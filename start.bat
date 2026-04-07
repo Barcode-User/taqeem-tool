@@ -6,16 +6,9 @@ REM  شغّل هذا الملف من cmd.exe (لا PowerShell)
 REM  بضغطة مزدوجة أو: cmd /c start.bat
 REM =======================================================
 
-REM ─── إعدادات SQL Server ────────────────────────────────
-REM الخيار 1: Integrated Security (Windows Authentication)
-set MSSQL_CONNECTION_STRING=Server=%COMPUTERNAME%\SQLEXPRESS;Database=TaqeemDb_Qeemah;Integrated Security=True;TrustServerCertificate=True;
-
-REM الخيار 2: SQL Authentication (أزل REM من الأسطر الأربعة وعطّل الخيار 1)
-REM set MSSQL_CONNECTION_STRING=
-REM set MSSQL_SERVER=%COMPUTERNAME%\SQLEXPRESS
-REM set MSSQL_DATABASE=TaqeemDb_Qeemah
-REM set MSSQL_USER=sa
-REM set MSSQL_PASSWORD=YourPassword
+REM ─── قاعدة البيانات ──────────────────────────────────────
+REM SQLite تلقائياً — البيانات تُحفظ في مجلد data بجانب start.bat
+REM لا يلزم أي إعداد
 
 REM ─── مفتاح الذكاء الاصطناعي ──────────────────────────────
 REM الأولوية: groq-key.txt ← gemini-key.txt ← openai-key.txt

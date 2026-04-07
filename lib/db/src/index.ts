@@ -1,52 +1,48 @@
 /**
  * index.ts — نقطة التصدير الموحّدة لقاعدة البيانات
  *
- * - على Replit (DATABASE_URL = postgresql://...) → يستخدم PostgreSQL
- * - على الجهاز المحلي (MSSQL_CONNECTION_STRING أو MSSQL_SERVER) → يستخدم SQL Server
+ * - على Replit (DATABASE_URL = postgresql://...) → PostgreSQL
+ * - على Windows المحلي → SQLite (بدون إعداد، ملف data/taqeem.db)
  */
 
-// ─── أنواع البيانات (مشتركة بين المنصتين) ─────────────────────────────────────
 export type { Report, InsertReport } from "./mssql";
 export { isConfigured } from "./mssql";
 export * from "./schema";
 
-// ─── اكتشاف نوع قاعدة البيانات ────────────────────────────────────────────────
 const isPostgres = !!process.env.DATABASE_URL?.startsWith("postgres");
 
-console.log(`[DB] وضع قاعدة البيانات: ${isPostgres ? "PostgreSQL (Replit)" : "SQL Server (محلي)"}`);
+if (isPostgres) {
+  console.log("[DB] وضع قاعدة البيانات: PostgreSQL (Replit)");
+} else {
+  console.log("[DB] وضع قاعدة البيانات: SQLite (محلي — data/taqeem.db)");
+}
 
-// ─── استيراد جميع التطبيقات ────────────────────────────────────────────────────
-import * as pg from "./pg";
-import * as ms from "./mssql";
+import * as pg  from "./pg";
+import * as sq  from "./sqlite";
 
-// ─── تصدير موحّد يختار التطبيق المناسب تلقائياً ───────────────────────────────
 export const listReports = isPostgres
-  ? pg.pgListReports : ms.listReports;
+  ? pg.pgListReports : sq.sqliteListReports;
 
 export const getReportById = isPostgres
-  ? pg.pgGetReportById : ms.getReportById;
+  ? pg.pgGetReportById : sq.sqliteGetReportById;
 
 export const getReportsByAutomationStatus = isPostgres
-  ? pg.pgGetReportsByAutomationStatus : ms.getReportsByAutomationStatus;
+  ? pg.pgGetReportsByAutomationStatus : sq.sqliteGetReportsByAutomationStatus;
 
 export const getReportAutomationStatus = isPostgres
-  ? pg.pgGetReportAutomationStatus : ms.getReportAutomationStatus;
+  ? pg.pgGetReportAutomationStatus : sq.sqliteGetReportAutomationStatus;
 
 export const insertReport = isPostgres
-  ? pg.pgInsertReport : ms.insertReport;
+  ? pg.pgInsertReport : sq.sqliteInsertReport;
 
 export const updateReport = isPostgres
-  ? pg.pgUpdateReport : ms.updateReport;
+  ? pg.pgUpdateReport : sq.sqliteUpdateReport;
 
 export const deleteReport = isPostgres
-  ? pg.pgDeleteReport : ms.deleteReport;
+  ? pg.pgDeleteReport : sq.sqliteDeleteReport;
 
 export const getReportStats = isPostgres
-  ? pg.pgGetReportStats : ms.getReportStats;
+  ? pg.pgGetReportStats : sq.sqliteGetReportStats;
 
 export const hasPendingQueueDb = isPostgres
-  ? pg.pgHasPendingQueue
-  : async () => {
-      const rows = await ms.getReportsByAutomationStatus("queued");
-      return rows.length;
-    };
+  ? pg.pgHasPendingQueue : sq.sqliteHasPendingQueue;
