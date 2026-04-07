@@ -293,13 +293,17 @@ router.get("/reports", async (req, res) => {
   }
 });
 
-// POST /reports (إنشاء تقرير فارغ)
+// POST /reports — حفظ تقرير (فارغ أو مكتمل من المعاينة)
 router.post("/reports", async (req, res) => {
   try {
     const body = req.body ?? {};
+    const fields = parseExtracted(body);
     const report = await insertReport({
-      reportNumber: body.reportNumber ?? null,
-      status: body.status ?? "pending",
+      ...fields,
+      reportNumber: body.reportNumber ?? fields.reportNumber ?? null,
+      status: body.status ?? "extracted",
+      pdfFileName: body.pdfFileName ?? null,
+      pdfFilePath: body.pdfFilePath ?? null,
     });
     res.status(201).json(report);
   } catch (err) {
