@@ -13,12 +13,10 @@
   },
   "dependencies": {
     "@types/pg": "^8.20.0",
-    "mssql": "^11.0.1",
     "pg": "^8.20.0",
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@types/mssql": "^9.1.11",
     "@types/node": "catalog:"
   }
 }
