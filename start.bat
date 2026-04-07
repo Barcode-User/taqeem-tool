@@ -80,21 +80,28 @@ if not exist "%LOCALAPPDATA%\ms-playwright" (
     call npx playwright install chromium
 )
 
-REM ─── بناء الخادم (esbuild بدون typecheck) ───────────────
-echo [1/2] بناء الخادم...
-call pnpm --filter @workspace/api-server run build
-if %ERRORLEVEL% NEQ 0 (
-    echo [خطأ] فشل البناء.
-    pause
-    exit /b 1
+REM ─── التحقق من وجود الحزمة المبنية ───────────────────────
+REM الحزمة تُبنى على Replit وتُرفع مع الكود — لا حاجة لإعادة البناء
+if exist "artifacts\api-server\dist\index.mjs" (
+    echo [1/2] الخادم جاهز ^(نسخة Replit المبنية مسبقاً^).
+) else (
+    echo [1/2] بناء الخادم...
+    call pnpm install --no-frozen-lockfile
+    call pnpm --filter @workspace/api-server run build
+    if %ERRORLEVEL% NEQ 0 (
+        echo [خطأ] فشل البناء.
+        pause
+        exit /b 1
+    )
 )
 
-REM ─── بناء الواجهة (يُشغَّل مرة واحدة فقط) ───────────────
-if not exist "artifacts\taqeem-tool\dist\public\index.html" (
-    echo [2/2] بناء الواجهة الأمامية...
-    call pnpm --filter @workspace/taqeem-tool run build
-) else (
+REM ─── الواجهة الأمامية ─────────────────────────────────────
+if exist "artifacts\taqeem-tool\dist\public\index.html" (
     echo [2/2] الواجهة جاهزة.
+) else (
+    echo [2/2] بناء الواجهة الأمامية...
+    call pnpm install --no-frozen-lockfile
+    call pnpm --filter @workspace/taqeem-tool run build
 )
 
 REM ─── تشغيل الخادم ────────────────────────────────────────
