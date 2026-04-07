@@ -306,9 +306,9 @@ router.post("/reports", async (req, res) => {
       pdfFilePath: body.pdfFilePath ?? null,
     });
     res.status(201).json(report);
-  } catch (err) {
+  } catch (err: any) {
     req.log.error({ err }, "Failed to create report");
-    res.status(500).json({ error: "Internal server error" });
+    res.status(500).json({ error: "فشل حفظ التقرير", detail: err?.message ?? String(err) });
   }
 });
 
