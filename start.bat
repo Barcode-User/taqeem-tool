@@ -18,8 +18,11 @@ REM set MSSQL_USER=sa
 REM set MSSQL_PASSWORD=YourPassword
 
 REM ─── مفتاح OpenAI (مطلوب للاستخراج التلقائي) ──────────
-REM ضع مفتاحك هنا بدلاً من النقاط:
-set OPENAI_API_KEY=sk-...ضع-مفتاحك-هنا...
+REM المفتاح يُقرأ من ملف openai-key.txt (غير مرفوع لـ GitHub)
+REM أنشئ الملف بجانب start.bat وضع فيه مفتاحك فقط بدون أي نص إضافي
+if exist "%~dp0openai-key.txt" (
+    set /p OPENAI_API_KEY=<"%~dp0openai-key.txt"
+)
 
 REM ─── إعدادات OpenAI (تُضبط تلقائياً من المفتاح أعلاه) ─
 set AI_INTEGRATIONS_OPENAI_BASE_URL=https://api.openai.com/v1
@@ -38,10 +41,12 @@ echo =========================================
 echo.
 
 REM ─── التحقق من وجود مفتاح OpenAI ────────────────────────
-if "%OPENAI_API_KEY%"=="sk-...ضع-مفتاحك-هنا..." (
+if "%OPENAI_API_KEY%"=="" (
     echo [تحذير] لم يتم تعيين مفتاح OpenAI!
-    echo         افتح start.bat وضع مفتاحك في السطر:
-    echo         set OPENAI_API_KEY=sk-proj-...
+    echo.
+    echo         الحل: أنشئ ملف باسم openai-key.txt
+    echo         بجانب ملف start.bat وضع فيه مفتاحك فقط:
+    echo         sk-proj-...
     echo.
     echo         يمكنك الحصول على مفتاح من: https://platform.openai.com/api-keys
     echo.
