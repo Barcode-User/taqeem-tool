@@ -48,6 +48,13 @@ Thumbs.db
 .cache/
 .local/
 
+# .NET build outputs
+artifacts/dotnet-api/bin/
+artifacts/dotnet-api/obj/
+
+# Uploaded PDF files (runtime data, not source)
+artifacts/api-server/uploads/
+
 # Keep built frontend for local deployment
 !artifacts/taqeem-tool/dist/
 !artifacts/taqeem-tool/dist/**
