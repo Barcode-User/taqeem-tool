@@ -463,19 +463,51 @@ export async function getAuthenticatedContext(): Promise<BrowserContext | null> 
   const meta = loadMeta();
   if (meta && fs.existsSync(STORAGE_STATE_FILE)) {
     const chromiumExec = getChromiumExecutable();
-    const browser = await chromium.launch({
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
-      ...(chromiumExec ? { executablePath: chromiumExec } : {}),
-    });
+    const isReplit = !!process.env.REPL_ID || !!process.env.REPLIT_ID;
+
+    // على Windows: نفتح المتصفح بشكل مرئي حتى يرى المستخدم ما يحدث
+    // على Replit: نشغّله مخفياً مع إعدادات Linux
+    let restoredBrowser: import("playwright").Browser | null = null;
+
+    if (!isReplit) {
+      // جرّب Chrome الحقيقي أولاً على Windows
+      try {
+        restoredBrowser = await chromium.launch({
+          headless: false,
+          channel: "chrome",
+          slowMo: 100,
+          args: [
+            "--disable-blink-features=AutomationControlled",
+            "--no-first-run",
+            "--no-default-browser-check",
+          ],
+        });
+      } catch {
+        restoredBrowser = null;
+      }
+    }
+
+    if (!restoredBrowser) {
+      restoredBrowser = await chromium.launch({
+        headless: isReplit,
+        slowMo: isReplit ? 0 : 100,
+        args: isReplit
+          ? ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
+          : ["--disable-blink-features=AutomationControlled", "--no-first-run"],
+        ...(chromiumExec ? { executablePath: chromiumExec } : {}),
+      });
+    }
+
+    const browser = restoredBrowser;
 
     const context = await browser.newContext({
       locale: "ar-SA",
       timezoneId: "Asia/Riyadh",
       viewport: { width: 1280, height: 900 },
       storageState: STORAGE_STATE_FILE as any,
-      userAgent:
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      ...(isReplit ? {
+        userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      } : {}),
     });
 
     setSharedContext(browser, context);
