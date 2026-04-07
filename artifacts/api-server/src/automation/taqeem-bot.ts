@@ -90,12 +90,53 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     }
 
     // ─── STEP 4: Submit ─────────────────────────────────────────────
-    addLog(session, "إرسال التقرير...");
-    // ⚠️ TODO: تحديث محدد زر الإرسال
-    await page.click(
-      'button[type="submit"]:has-text("حفظ"), button:has-text("إرسال"), button:has-text("رفع")',
-    );
-    await page.waitForNavigation({ waitUntil: "networkidle", timeout: 30000 });
+    addLog(session, "البحث عن زر الإرسال...");
+
+    // التقاط لقطة شاشة قبل الإرسال للمساعدة في التشخيص
+    const screenshotPath = path.join(UPLOADS_DIR, `before_submit_${reportId}_${Date.now()}.png`);
+    await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {});
+    addLog(session, `لقطة شاشة قبل الإرسال: ${screenshotPath}`);
+
+    // قائمة محددات محتملة لزر الإرسال في منصة تقييم
+    const submitSelectors = [
+      'button[type="submit"]',
+      'input[type="submit"]',
+      'button:has-text("إرسال")',
+      'button:has-text("حفظ")',
+      'button:has-text("رفع")',
+      'button:has-text("تقديم")',
+      'button:has-text("التالي")',
+      'button:has-text("موافق")',
+      'button:has-text("تأكيد")',
+      'button:has-text("إضافة")',
+      '.btn-primary',
+      '.btn-success',
+      '[class*="submit"]',
+      '[id*="submit"]',
+      '[id*="save"]',
+    ];
+
+    let clicked = false;
+    for (const sel of submitSelectors) {
+      try {
+        const el = await page.$(sel);
+        if (el && await el.isVisible()) {
+          const text = await el.innerText().catch(() => sel);
+          addLog(session, `وجدت زر الإرسال: "${text.trim()}" — جارٍ الضغط...`);
+          await el.click();
+          clicked = true;
+          break;
+        }
+      } catch {}
+    }
+
+    if (!clicked) {
+      // التقاط لقطة شاشة للمساعدة في تشخيص المشكلة
+      addLog(session, "⚠️ لم يُعثر على زر الإرسال — يرجى مراجعة لقطة الشاشة وتحديث المحددات.");
+      throw new Error("لم يُعثر على زر الإرسال في الصفحة. يرجى مشاركة لقطة الشاشة مع المطوّر.");
+    }
+
+    await page.waitForLoadState("networkidle", { timeout: 30000 }).catch(() => {});
 
     // ─── STEP 5: Get QR Code & Certificate ─────────────────────────
     addLog(session, "استخراج QR Code والشهادة...");
