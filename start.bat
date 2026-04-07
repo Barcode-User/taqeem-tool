@@ -1,4 +1,5 @@
 @echo off
+setlocal enabledelayedexpansion
 chcp 65001 >nul
 REM =======================================================
 REM  أداة تقارير التقييم — تشغيل محلي على Windows
@@ -57,20 +58,32 @@ if exist "%~dp0groq-key.txt" (
     echo [AI] يستخدم OpenAI GPT-4o-mini
 ) else (
     echo.
-    echo [!] لم يتم تعيين مفتاح الذكاء الاصطناعي
+    echo [!] لم يُعثر على مفتاح الذكاء الاصطناعي
     echo.
-    echo  الخيار 1 - Groq ^(مجاني تماماً^):
-    echo    1. افتح: https://console.groq.com/keys
-    echo    2. أنشئ ملف باسم: groq-key.txt بجانب start.bat
-    echo    3. ضع المفتاح فيه: gsk_...
+    echo  اختر مزود الذكاء الاصطناعي:
+    echo  1^) OpenAI  ^(sk-proj-...^)
+    echo  2^) Groq    ^(gsk_...^)   ^(مجاني^)
     echo.
-    echo  الخيار 2 - OpenAI GPT-4o-mini:
-    echo    1. افتح: https://platform.openai.com/api-keys
-    echo    2. أنشئ ملف باسم: openai-key.txt بجانب start.bat
-    echo    3. ضع المفتاح فيه: sk-proj-...
+    set /p AI_CHOICE= اختيارك ^(1 او 2^): 
     echo.
-    pause
-    exit /b 1
+
+    if "%AI_CHOICE%"=="1" (
+        set /p USER_KEY= الصق مفتاح OpenAI هنا: 
+        echo !USER_KEY!> "%~dp0openai-key.txt"
+        set AI_INTEGRATIONS_OPENAI_BASE_URL=https://api.openai.com/v1
+        set AI_INTEGRATIONS_OPENAI_API_KEY=!USER_KEY!
+        set AI_MODEL=gpt-4o-mini
+        echo [AI] تم حفظ المفتاح في openai-key.txt
+        echo [AI] يستخدم OpenAI GPT-4o-mini
+    ) else (
+        set /p USER_KEY= الصق مفتاح Groq هنا: 
+        echo !USER_KEY!> "%~dp0groq-key.txt"
+        set GROQ_API_KEY=!USER_KEY!
+        set AI_MODEL=llama-3.3-70b-versatile
+        echo [AI] تم حفظ المفتاح في groq-key.txt
+        echo [AI] يستخدم Groq ^(مجاني^)
+    )
+    echo.
 )
 
 REM ─── إعدادات عامة ───────────────────────────────────────
