@@ -63,6 +63,14 @@ if not exist "node_modules" (
         pause
         exit /b 1
     )
+    echo [0/2] تثبيت متصفح Playwright...
+    call npx playwright install chromium
+)
+
+REM ─── تحديث Playwright إن كانت مجلدات المتصفح غير موجودة ────
+if not exist "%LOCALAPPDATA%\ms-playwright" (
+    echo [0/2] تثبيت متصفح Playwright Chromium...
+    call npx playwright install chromium
 )
 
 REM ─── بناء الخادم (esbuild بدون typecheck) ───────────────
