@@ -1,0 +1,56 @@
+
+X [ERROR] Could not resolve "openai"
+
+    ../../lib/integrations-openai-ai-server/src/client.ts:1:19:
+      1 │ import OpenAI from "openai";
+        ╵                    ~~~~~~~~
+
+  You can mark the path "openai" as external to exclude it from the bundle, which will remove this
+  error and leave the unresolved path in the bundle.
+
+X [ERROR] Could not resolve "p-limit"
+
+    ../../lib/integrations-openai-ai-server/src/batch/utils.ts:1:19:
+      1 │ import pLimit from "p-limit";
+        ╵                    ~~~~~~~~~
+
+  You can mark the path "p-limit" as external to exclude it from the bundle, which will remove this
+  error and leave the unresolved path in the bundle.
+
+X [ERROR] Could not resolve "openai"
+
+    ../../lib/integrations-openai-ai-server/src/image/client.ts:2:31:
+      2 │ import OpenAI, { toFile } from "openai";
+        ╵                                ~~~~~~~~
+
+  You can mark the path "openai" as external to exclude it from the bundle, which will remove this
+  error and leave the unresolved path in the bundle.
+
+X [ERROR] Could not resolve "p-retry"
+
+    ../../lib/integrations-openai-ai-server/src/batch/utils.ts:2:35:
+      2 │ import pRetry, { AbortError } from "p-retry";
+        ╵                                    ~~~~~~~~~
+
+  You can mark the path "p-retry" as external to exclude it from the bundle, which will remove this
+  error and leave the unresolved path in the bundle.
+
+4 errors
+Error: Build failed with 4 errors:
+../../lib/integrations-openai-ai-server/src/batch/utils.ts:1:19: ERROR: Could not resolve "p-limit"
+../../lib/integrations-openai-ai-server/src/batch/utils.ts:2:35: ERROR: Could not resolve "p-retry"
+../../lib/integrations-openai-ai-server/src/client.ts:1:19: ERROR: Could not resolve "openai"
+../../lib/integrations-openai-ai-server/src/image/client.ts:2:31: ERROR: Could not resolve "openai"
+    at failureErrorWithLog (D:\Devolper\New\taqeem-tool\node_modules\.pnpm\esbuild@0.27.3\node_modules\esbuild\lib\main.js:1467:15)
+    at D:\Devolper\New\taqeem-tool\node_modules\.pnpm\esbuild@0.27.3\node_modules\esbuild\lib\main.js:926:25
+    at D:\Devolper\New\taqeem-tool\node_modules\.pnpm\esbuild@0.27.3\node_modules\esbuild\lib\main.js:1345:9
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  errors: [Getter/Setter],
+  warnings: [Getter/Setter]
+}
+D:\Devolper\New\taqeem-tool\artifacts\api-server:
+ ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  @workspace/api-server@0.0.0 build: `node ./build.mjs`
+Exit status 1
+[خطأ] فشل البناء.
+Press any key to continue . . .
+

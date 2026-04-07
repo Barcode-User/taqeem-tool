@@ -61,10 +61,10 @@ if "%GROQ_API_KEY%"=="" if "%AI_INTEGRATIONS_OPENAI_API_KEY%"=="" (
     exit /b 1
 )
 
-REM ─── تثبيت المكتبات إن لم تكن موجودة ──────────────────
+REM ─── تثبيت المكتبات (--no-frozen-lockfile لتجنب تعارض الإصدارات) ──────────
 if not exist "node_modules" (
     echo [0/2] تثبيت المكتبات... قد يستغرق دقيقتين
-    call pnpm install
+    call pnpm install --no-frozen-lockfile
     if %ERRORLEVEL% NEQ 0 (
         echo [خطأ] فشل تثبيت المكتبات.
         pause
