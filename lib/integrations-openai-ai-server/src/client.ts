@@ -7,6 +7,7 @@ function getClient(): OpenAI {
     // الأولوية: GEMINI_API_KEY (مجاني) ← AI_INTEGRATIONS (Replit/OpenAI)
     const geminiKey = process.env.GEMINI_API_KEY;
     if (geminiKey) {
+      console.log("[AI] 🟢 يستخدم Gemini (gemini-key.txt / GEMINI_API_KEY)");
       _client = new OpenAI({
         apiKey: geminiKey,
         baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
@@ -16,6 +17,7 @@ function getClient(): OpenAI {
 
     const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
     const apiKey  = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+    console.log("[AI] 🔴 يستخدم OpenAI — تأكد من وجود gemini-key.txt أو GEMINI_API_KEY");
 
     if (!baseURL || !apiKey) {
       throw new Error(

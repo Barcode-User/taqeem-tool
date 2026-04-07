@@ -116,9 +116,10 @@ async function extractWithText(text: string) {
 
 /** يستدعي OpenAI بنمط الصور (Vision) */
 async function extractWithVision(images: string[]) {
+  // ملاحظة: لا نُرسل detail: "high" لأن Gemini لا يدعمها
   const imageMessages = images.map((b64) => ({
     type: "image_url" as const,
-    image_url: { url: `data:image/png;base64,${b64}`, detail: "high" as const },
+    image_url: { url: `data:image/png;base64,${b64}` },
   }));
 
   const response = await openai.chat.completions.create({
