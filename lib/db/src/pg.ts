@@ -5,7 +5,7 @@
  * نستخدم require() كسولاً حتى لا يُخفق البناء على Windows عند غياب pg
  */
 import type { Pool as PgPool } from "pg";
-import type { Report, InsertReport } from "./mssql";
+import type { Report, InsertReport } from "./types";
 
 export type { Report, InsertReport };
 

@@ -5,8 +5,8 @@
  * - على Windows المحلي → SQLite (بدون إعداد، ملف data/taqeem.db)
  */
 
-export type { Report, InsertReport } from "./mssql";
-export { isConfigured } from "./mssql";
+export type { Report, InsertReport } from "./types";
+export { isConfigured } from "./types";
 export * from "./schema";
 
 const isPostgres = !!process.env.DATABASE_URL?.startsWith("postgres");

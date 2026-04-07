@@ -1,1 +1,1 @@
-export type { Report, InsertReport } from "../mssql";
+export type { Report, InsertReport } from "../types";

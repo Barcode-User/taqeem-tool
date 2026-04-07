@@ -7,7 +7,7 @@
 import { DatabaseSync } from "node:sqlite";
 import * as path from "path";
 import * as fs from "fs";
-import type { Report, InsertReport } from "./mssql";
+import type { Report, InsertReport } from "./types";
 
 // ─── مسار ملف البيانات ───────────────────────────────────────────────────────
 const DATA_DIR = process.env.SQLITE_DATA_DIR
