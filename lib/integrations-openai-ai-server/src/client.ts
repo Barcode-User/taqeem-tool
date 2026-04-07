@@ -46,7 +46,7 @@ export function getAIModel(): string {
   if (process.env.AI_MODEL) return process.env.AI_MODEL;
   if (process.env.GROQ_API_KEY)   return "llama-3.3-70b-versatile";
   if (process.env.GEMINI_API_KEY) return "gemini-2.0-flash";
-  return "gpt-4.1";
+  return "gpt-4o-mini";
 }
 
 export const openai = new Proxy({} as OpenAI, {

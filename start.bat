@@ -33,7 +33,7 @@ if exist "%~dp0groq-key.txt" (
     set /p OPENAI_API_KEY=<"%~dp0openai-key.txt"
     set AI_INTEGRATIONS_OPENAI_BASE_URL=https://api.openai.com/v1
     set AI_INTEGRATIONS_OPENAI_API_KEY=%OPENAI_API_KEY%
-    set AI_MODEL=gpt-4.1
+    set AI_MODEL=gpt-4o-mini
 )
 
 REM ─── إعدادات عامة ───────────────────────────────────────
@@ -53,21 +53,16 @@ if "%GROQ_API_KEY%"=="" if "%AI_INTEGRATIONS_OPENAI_API_KEY%"=="" (
     echo.
     echo [!] لم يتم تعيين مفتاح الذكاء الاصطناعي
     echo.
-    echo  الخيار 1 - Groq ^(مجاني تماماً - الأفضل^):
+    echo  الخيار 1 - OpenAI GPT-4o-mini ^(الأفضل — ~0.001$ لكل تقرير^):
+    echo    1. افتح: https://platform.openai.com/api-keys
+    echo    2. أنشئ ملف باسم: openai-key.txt
+    echo    3. ضع المفتاح فيه: sk-proj-...
+    echo.
+    echo  الخيار 2 - Groq ^(مجاني تماماً^):
     echo    1. افتح: https://console.groq.com/keys
     echo    2. انقر "Create API Key"
     echo    3. أنشئ ملف باسم: groq-key.txt
     echo    4. ضع المفتاح فيه: gsk_...
-    echo.
-    echo  الخيار 2 - Gemini ^(مجاني - قد يحتاج إعداد^):
-    echo    1. افتح: https://aistudio.google.com/apikey
-    echo    2. أنشئ ملف باسم: gemini-key.txt
-    echo    3. ضع المفتاح فيه: AIza...
-    echo.
-    echo  الخيار 3 - OpenAI ^(مدفوع^):
-    echo    1. افتح: https://platform.openai.com/api-keys
-    echo    2. أنشئ ملف باسم: openai-key.txt
-    echo    3. ضع المفتاح فيه: sk-proj-...
     echo.
     pause
     exit /b 1
