@@ -54,6 +54,17 @@ if "%OPENAI_API_KEY%"=="" (
     exit /b 1
 )
 
+REM ─── تثبيت المكتبات إن لم تكن موجودة ──────────────────
+if not exist "node_modules" (
+    echo [0/2] تثبيت المكتبات... قد يستغرق دقيقتين
+    call pnpm install
+    if %ERRORLEVEL% NEQ 0 (
+        echo [خطأ] فشل تثبيت المكتبات.
+        pause
+        exit /b 1
+    )
+)
+
 REM ─── بناء الخادم (esbuild بدون typecheck) ───────────────
 echo [1/2] بناء الخادم...
 call pnpm --filter @workspace/api-server run build
