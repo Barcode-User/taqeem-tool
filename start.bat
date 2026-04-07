@@ -17,16 +17,21 @@ REM set MSSQL_DATABASE=TaqeemDb_Qeemah
 REM set MSSQL_USER=sa
 REM set MSSQL_PASSWORD=YourPassword
 
-REM ─── مفتاح OpenAI (مطلوب للاستخراج التلقائي) ──────────
-REM المفتاح يُقرأ من ملف openai-key.txt (غير مرفوع لـ GitHub)
-REM أنشئ الملف بجانب start.bat وضع فيه مفتاحك فقط بدون أي نص إضافي
-if exist "%~dp0openai-key.txt" (
-    set /p OPENAI_API_KEY=<"%~dp0openai-key.txt"
-)
+REM ─── مفتاح الذكاء الاصطناعي ──────────────────────────────
+REM الأولوية: gemini-key.txt (مجاني) ثم openai-key.txt (مدفوع)
+REM أنشئ أحد الملفين بجانب start.bat وضع فيه المفتاح فقط
 
-REM ─── إعدادات OpenAI (تُضبط تلقائياً من المفتاح أعلاه) ─
-set AI_INTEGRATIONS_OPENAI_BASE_URL=https://api.openai.com/v1
-set AI_INTEGRATIONS_OPENAI_API_KEY=%OPENAI_API_KEY%
+if exist "%~dp0gemini-key.txt" (
+    set /p GEMINI_API_KEY=<"%~dp0gemini-key.txt"
+    set AI_INTEGRATIONS_OPENAI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+    set AI_INTEGRATIONS_OPENAI_API_KEY=%GEMINI_API_KEY%
+    set AI_MODEL=gemini-2.0-flash
+) else if exist "%~dp0openai-key.txt" (
+    set /p OPENAI_API_KEY=<"%~dp0openai-key.txt"
+    set AI_INTEGRATIONS_OPENAI_BASE_URL=https://api.openai.com/v1
+    set AI_INTEGRATIONS_OPENAI_API_KEY=%OPENAI_API_KEY%
+    set AI_MODEL=gpt-4.1
+)
 
 REM ─── إعدادات عامة ───────────────────────────────────────
 set PORT=8080
@@ -40,15 +45,21 @@ echo   أداة تقارير التقييم
 echo =========================================
 echo.
 
-REM ─── التحقق من وجود مفتاح OpenAI ────────────────────────
-if "%OPENAI_API_KEY%"=="" (
-    echo [تحذير] لم يتم تعيين مفتاح OpenAI!
+REM ─── التحقق من وجود مفتاح AI ─────────────────────────────
+if "%AI_INTEGRATIONS_OPENAI_API_KEY%"=="" (
     echo.
-    echo         الحل: أنشئ ملف باسم openai-key.txt
-    echo         بجانب ملف start.bat وضع فيه مفتاحك فقط:
-    echo         sk-proj-...
+    echo [!] لم يتم تعيين مفتاح الذكاء الاصطناعي
     echo.
-    echo         يمكنك الحصول على مفتاح من: https://platform.openai.com/api-keys
+    echo  الخيار 1 - Gemini ^(مجاني تماماً^):
+    echo    1. افتح: https://aistudio.google.com/apikey
+    echo    2. انقر "Create API Key"
+    echo    3. أنشئ ملف باسم: gemini-key.txt
+    echo    4. ضع المفتاح فيه: AIza...
+    echo.
+    echo  الخيار 2 - OpenAI ^(مدفوع^):
+    echo    1. افتح: https://platform.openai.com/api-keys
+    echo    2. أنشئ ملف باسم: openai-key.txt
+    echo    3. ضع المفتاح فيه: sk-proj-...
     echo.
     pause
     exit /b 1

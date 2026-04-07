@@ -96,11 +96,13 @@ const SYSTEM_PROMPT = `أنت مساعد متخصص في قراءة تقارير
 - الأرقام ترجع أرقاماً خالصة بدون وحدات
 - التواريخ بصيغة YYYY-MM-DD إذا أمكن`;
 
+const AI_MODEL = process.env.AI_MODEL || "gpt-4.1";
+
 /** يستدعي OpenAI بنمط النص */
 async function extractWithText(text: string) {
   const response = await openai.chat.completions.create({
-    model: "gpt-4.1",
-    max_completion_tokens: 4096,
+    model: AI_MODEL,
+    max_tokens: 4096,
     response_format: { type: "json_object" },
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
@@ -121,8 +123,8 @@ async function extractWithVision(images: string[]) {
   }));
 
   const response = await openai.chat.completions.create({
-    model: "gpt-4.1",
-    max_completion_tokens: 4096,
+    model: AI_MODEL,
+    max_tokens: 4096,
     response_format: { type: "json_object" },
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
