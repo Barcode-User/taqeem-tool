@@ -516,3 +516,4 @@
 /home/runner/workspace/artifacts/dotnet-api/obj/Debug/net9.0/TaqeemApi.pdb
 /home/runner/workspace/artifacts/dotnet-api/obj/Debug/net9.0/TaqeemApi.genruntimeconfig.cache
 /home/runner/workspace/artifacts/dotnet-api/obj/Debug/net9.0/ref/TaqeemApi.dll
+/home/runner/workspace/artifacts/dotnet-api/obj/Debug/net9.0/TaqeemApi.sourcelink.json
