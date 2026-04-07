@@ -241,6 +241,34 @@ function parseExtracted(e: any) {
   };
 }
 
+// ─── مخزن مؤقت للمعاينة (بدون DB) ──────────────────────────────────────────
+const previewStore = new Map<string, any>();
+
+// ─── دالة مشتركة لاستخراج PDF وإرجاع الحقول ────────────────────────────────
+async function extractFieldsFromFile(filePath: string): Promise<any> {
+  const extraction = await extractPdf(filePath, 8);
+  const useGroq = !!process.env.GROQ_API_KEY;
+  let raw: any;
+  if (extraction.mode === "vision" && !useGroq) {
+    raw = await extractWithVision(extraction.images);
+  } else {
+    let text = extraction.mode === "text" ? extraction.text : null;
+    if (!text || text.trim().length < 50) {
+      const { default: pdfParse } = await import("pdf-parse") as any;
+      try {
+        const buf = await import("fs").then(fs => fs.promises.readFile(filePath));
+        const parsed = await pdfParse(buf);
+        text = parsed.text ?? "";
+      } catch {}
+    }
+    if (!text || text.trim().length < 50) {
+      throw Object.assign(new Error("الملف لا يحتوي على نص قابل للقراءة"), { code: 422 });
+    }
+    raw = await extractWithText(text);
+  }
+  return parseExtracted(raw);
+}
+
 // ─── Routes ─────────────────────────────────────────────────────────────────
 
 // GET /reports/stats
@@ -280,7 +308,54 @@ router.post("/reports", async (req, res) => {
   }
 });
 
-// POST /reports/upload-base64 — رفع PDF كـ base64 JSON (يتجاوز قيود proxy على multipart)
+// ─── دالة مساعدة لتحويل base64 → ملف مؤقت ──────────────────────────────────
+function saveBase64ToFile(pdfBase64: string, fileName: string): string {
+  const buffer = Buffer.from(pdfBase64, "base64");
+  const safeName = fileName.replace(/[^a-zA-Z0-9._\-]/g, "_");
+  const unique = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const filePath = path.join(UPLOADS_DIR, `${unique}_${safeName}`);
+  fs.writeFileSync(filePath, buffer);
+  return filePath;
+}
+
+// POST /reports/extract-preview — استخراج فقط بدون حفظ في قاعدة البيانات
+router.post("/reports/extract-preview", async (req, res) => {
+  const { pdfBase64, fileName } = req.body ?? {};
+  if (!pdfBase64 || typeof pdfBase64 !== "string") {
+    res.status(400).json({ error: "pdfBase64 مطلوب" });
+    return;
+  }
+
+  const safeName = fileName ?? "report.pdf";
+  const filePath = saveBase64ToFile(pdfBase64, safeName);
+  req.log.info({ file: safeName }, "PDF extract-preview started");
+
+  try {
+    const fields = await extractFieldsFromFile(filePath);
+    const token = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    previewStore.set(token, { ...fields, pdfFileName: safeName, _preview: true });
+    // حذف تلقائي بعد ساعة
+    setTimeout(() => previewStore.delete(token), 60 * 60 * 1000);
+    req.log.info({ token }, "Preview extracted successfully");
+    res.status(200).json({ token, fields });
+  } catch (err: any) {
+    req.log.error({ err }, "PDF extract-preview failed");
+    const code = err?.code === 422 ? 422 : 500;
+    res.status(code).json({ error: "حدث خطأ أثناء استخراج البيانات", detail: err?.message ?? String(err) });
+  }
+});
+
+// GET /reports/preview/:token — جلب بيانات المعاينة
+router.get("/reports/preview/:token", (req, res) => {
+  const data = previewStore.get(req.params.token);
+  if (!data) {
+    res.status(404).json({ error: "انتهت صلاحية المعاينة أو الرابط غير صحيح" });
+    return;
+  }
+  res.json(data);
+});
+
+// POST /reports/upload-base64 — رفع PDF كـ base64 وحفظ في قاعدة البيانات
 router.post("/reports/upload-base64", async (req, res) => {
   const { pdfBase64, fileName } = req.body ?? {};
   if (!pdfBase64 || typeof pdfBase64 !== "string") {
@@ -288,62 +363,24 @@ router.post("/reports/upload-base64", async (req, res) => {
     return;
   }
 
-  // فك تشفير base64 وكتابة الملف على القرص
-  const buffer = Buffer.from(pdfBase64, "base64");
-  const safeName = (fileName ?? "report.pdf").replace(/[^a-zA-Z0-9._\-]/g, "_");
-  const unique = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
-  const filePath = path.join(UPLOADS_DIR, `${unique}_${safeName}`);
-  fs.writeFileSync(filePath, buffer);
-
-  req.log.info({ file: safeName, size: buffer.length }, "PDF upload-base64 started");
+  const safeName = fileName ?? "report.pdf";
+  const filePath = saveBase64ToFile(pdfBase64, safeName);
+  req.log.info({ file: safeName, size: Buffer.byteLength(pdfBase64, "base64") }, "PDF upload-base64 started");
 
   try {
-    // الخطوة 1: استخراج المحتوى من PDF
-    const extraction = await extractPdf(filePath, 8);
-    req.log.info({ mode: extraction.mode }, "PDF extracted");
-
-    // الخطوة 2: إرسال لـ AI لاستخراج الحقول
-    // Groq لا يدعم vision — نستخدم النص دائماً معه
-    const useGroq = !!process.env.GROQ_API_KEY;
-    let raw: any;
-    if (extraction.mode === "vision" && !useGroq) {
-      raw = await extractWithVision(extraction.images);
-    } else {
-      // إذا كان النمط vision مع Groq، نستخرج النص من الملف مباشرة
-      let text = extraction.mode === "text" ? extraction.text : null;
-      if (!text || text.trim().length < 50) {
-        // محاولة استخراج النص مباشرة من pdf-parse
-        const { default: pdfParse } = await import("pdf-parse") as any;
-        try {
-          const buf = await import("fs").then(fs => fs.promises.readFile(filePath));
-          const parsed = await pdfParse(buf);
-          text = parsed.text ?? "";
-        } catch {}
-      }
-      if (!text || text.trim().length < 50) {
-        res.status(422).json({
-          error: "تعذّر قراءة محتوى الملف",
-          detail: "الملف لا يحتوي على نص قابل للقراءة. تأكد من رفع PDF يحتوي على نص واضح.",
-        });
-        return;
-      }
-      raw = await extractWithText(text);
-    }
-
-    // الخطوة 3: حفظ البيانات في قاعدة البيانات
-    const fields = parseExtracted(raw);
+    const fields = await extractFieldsFromFile(filePath);
     const report = await insertReport({
       ...fields,
       status: "extracted",
-      pdfFileName: fileName ?? "report.pdf",
+      pdfFileName: safeName,
       pdfFilePath: filePath,
     });
-
-    req.log.info({ reportId: report.id, mode: extraction.mode }, "PDF processed successfully");
-    res.status(201).json({ ...report, _extractionMode: extraction.mode });
+    req.log.info({ reportId: report.id }, "PDF processed successfully");
+    res.status(201).json(report);
   } catch (err: any) {
     req.log.error({ err }, "PDF upload-base64/extract failed");
-    res.status(500).json({ error: "حدث خطأ أثناء معالجة التقرير", detail: err?.message ?? String(err) });
+    const code = err?.code === 422 ? 422 : 500;
+    res.status(code).json({ error: "حدث خطأ أثناء معالجة التقرير", detail: err?.message ?? String(err) });
   }
 });
 

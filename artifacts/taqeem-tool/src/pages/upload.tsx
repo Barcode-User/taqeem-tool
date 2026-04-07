@@ -69,7 +69,8 @@ export default function Upload() {
       const pdfBase64 = await fileToBase64(file);
       setProgress(20);
 
-      const response = await fetch("/api/reports/upload-base64", {
+      // وضع المعاينة: استخراج البيانات فقط بدون حفظ في قاعدة البيانات
+      const response = await fetch("/api/reports/extract-preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -83,19 +84,19 @@ export default function Upload() {
         throw new Error(errBody.detail || errBody.error || `خطأ ${response.status}`);
       }
 
-      const report = await response.json();
+      const result = await response.json();
 
       clearInterval(progressInterval);
       setProgress(100);
 
       toast({
         title: "تم استخراج البيانات بنجاح",
-        description: "تمت معالجة التقرير واستخراج الحقول بنجاح.",
+        description: "راجع البيانات المستخرجة للتحقق من صحتها.",
       });
 
       setTimeout(() => {
-        setLocation(`/reports/${report.id}`);
-      }, 800);
+        setLocation(`/preview/${result.token}`);
+      }, 600);
     } catch (error: any) {
       console.error("Upload error:", error);
       clearInterval(progressInterval);
