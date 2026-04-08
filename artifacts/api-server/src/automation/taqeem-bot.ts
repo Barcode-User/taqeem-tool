@@ -79,10 +79,13 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     }
     addLog(session, `✅ الصفحة 1 جاهزة: ${page.url()}`);
 
+    // حالة مشتركة — يتتبع ما إذا تم رفع PDF بنجاح في أيّ صفحة
+    const pdfState = { pdfUploaded: false };
+
     const els1 = await scanElements(page);
     await saveDebug(reportId, "page1", els1);
     await screenshot(page, `page1_before_${reportId}`);
-    await fillPage1(session, report, els1);
+    await fillPage1(session, report, els1, pdfState);
     await screenshot(page, `page1_after_${reportId}`);
     await clickSaveAndContinue(session);
 
@@ -96,7 +99,7 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     const els2 = await scanElements(page);
     await saveDebug(reportId, "page2", els2);
     await screenshot(page, `page2_before_${reportId}`);
-    await fillPage2(session, report, els2);
+    await fillPage2(session, report, els2, pdfState);
     await screenshot(page, `page2_after_${reportId}`);
     await clickSaveAndContinue(session);
 
@@ -110,8 +113,13 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     const els3 = await scanElements(page);
     await saveDebug(reportId, "page3", els3);
     await screenshot(page, `page3_before_${reportId}`);
-    await fillPage3(session, report, els3);
+    await fillPage3(session, report, els3, pdfState);
     await screenshot(page, `page3_after_${reportId}`);
+
+    if (!pdfState.pdfUploaded && report.pdfFilePath) {
+      addLog(session, "⚠️ لم يُرفع PDF في أي صفحة — يرجى رفعه يدوياً في المتصفح.");
+    }
+
     await clickSaveAndContinue(session);
 
     // ════════════════════════════════════════════════════════
@@ -364,7 +372,7 @@ async function clickSaveAndContinue(session: AutomationSession): Promise<void> {
 // ─────────────────────────────────────────────────────────────────────────────
 // الصفحة 1 — البيانات الأساسية للتقرير
 // ─────────────────────────────────────────────────────────────────────────────
-async function fillPage1(session: AutomationSession, report: any, els: any[]): Promise<void> {
+async function fillPage1(session: AutomationSession, report: any, els: any[], pdfState: { pdfUploaded: boolean }): Promise<void> {
   addLog(session, `📋 الصفحة 1: ${els.length} عنصر مكتشف`);
   els.forEach((el, i) =>
     addLog(session, `  [${i}] ${el.tag} fcn="${el.formControlName}" name="${el.name}" lbl="${el.labelText}"`),
@@ -416,14 +424,14 @@ async function fillPage1(session: AutomationSession, report: any, els: any[]): P
   const userEl = find(inputs, /intended.?user|مستخدم.*مقصود/i);
   if (userEl) await fillAngular(session, buildSelector(userEl), report.intendedUser, "المستخدم المقصود");
 
-  // رفع ملف PDF في الصفحة 1
-  await uploadPdf(session, report);
+  // محاولة رفع PDF في الصفحة 1
+  await uploadPdf(session, report, pdfState);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // الصفحة 2 — معلومات الأصل + أسلوب التقييم + الموقع (Screens 3 & 4)
 // ─────────────────────────────────────────────────────────────────────────────
-async function fillPage2(session: AutomationSession, report: any, els: any[]): Promise<void> {
+async function fillPage2(session: AutomationSession, report: any, els: any[], pdfState: { pdfUploaded: boolean }): Promise<void> {
   addLog(session, `📋 الصفحة 2: ${els.length} عنصر مكتشف`);
   els.forEach((el, i) =>
     addLog(session, `  [${i}] ${el.tag} fcn="${el.formControlName}" name="${el.name}" lbl="${el.labelText}"`),
@@ -509,12 +517,15 @@ async function fillPage2(session: AutomationSession, report: any, els: any[]): P
 
   const latEl = find(inputs, /latitude|خط.*عرض/i);
   if (latEl && lat) await fillAngular(session, buildSelector(latEl), lat, "خط العرض");
+
+  // محاولة رفع PDF في الصفحة 2 إن لم يرفع في الصفحة 1
+  await uploadPdf(session, report, pdfState);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // الصفحة 3 — البيانات الإضافية (Screen 5)
 // ─────────────────────────────────────────────────────────────────────────────
-async function fillPage3(session: AutomationSession, report: any, els: any[]): Promise<void> {
+async function fillPage3(session: AutomationSession, report: any, els: any[], pdfState: { pdfUploaded: boolean }): Promise<void> {
   addLog(session, `📋 الصفحة 3: ${els.length} عنصر مكتشف`);
   els.forEach((el, i) =>
     addLog(session, `  [${i}] ${el.tag} fcn="${el.formControlName}" name="${el.name}" lbl="${el.labelText}"`),
@@ -603,14 +614,26 @@ async function fillPage3(session: AutomationSession, report: any, els: any[]): P
   } catch {
     addLog(session, `⚠️ لم يُحدَّد خيار أفضل استخدام`);
   }
+
+  // محاولة رفع PDF في الصفحة 3 إن لم يرفع سابقاً
+  await uploadPdf(session, report, pdfState);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// رفع ملف PDF — محاولات متعددة
+// رفع ملف PDF — يُستدعى في كل صفحة، يتوقف بمجرد النجاح
+// state.pdfUploaded تُمنع من الرفع المكرر
 // ─────────────────────────────────────────────────────────────────────────────
-async function uploadPdf(session: AutomationSession, report: any): Promise<void> {
+async function uploadPdf(
+  session: AutomationSession,
+  report: any,
+  state: { pdfUploaded: boolean },
+): Promise<void> {
+  // تجاهل إذا رُفع مسبقاً
+  if (state.pdfUploaded) return;
+
   if (!report.pdfFilePath) {
     addLog(session, "⏭️ لا يوجد ملف PDF مرتبط بهذا التقرير.");
+    state.pdfUploaded = true; // لا داعي للمحاولة مجدداً
     return;
   }
   if (!fs.existsSync(report.pdfFilePath)) {
@@ -619,71 +642,73 @@ async function uploadPdf(session: AutomationSession, report: any): Promise<void>
   }
 
   const { page } = session;
-  addLog(session, `📎 رفع ملف PDF: ${report.pdfFilePath}`);
-  let uploaded = false;
+  addLog(session, `📎 محاولة رفع ملف PDF: ${report.pdfFilePath}`);
 
-  // المحاولة 1: مباشر على كل input[type=file]
-  try {
-    const fis = await page.$$('input[type="file"]');
-    for (const fi of fis) {
-      try {
-        await fi.setInputFiles(report.pdfFilePath);
-        await page.waitForTimeout(800);
-        addLog(session, "✅ تم رفع PDF (direct).");
-        uploaded = true;
-        break;
-      } catch { /* جرّب التالي */ }
-    }
-  } catch { /* تجاهل */ }
+  // تحقق هل يوجد حقل رفع في هذه الصفحة أصلاً
+  const fileInputCount = await page.$$eval('input[type="file"]', els => els.length);
+  if (fileInputCount === 0) {
+    addLog(session, "⏭️ لا يوجد حقل رفع ملف في هذه الصفحة — ننتقل للصفحة التالية");
+    return;
+  }
 
-  // المحاولة 2: زر رفع + file chooser
-  if (!uploaded) {
-    const btns = [
-      'button:has-text("رفع")', 'button:has-text("اختر")', 'button:has-text("upload")',
-      'button:has-text("Browse")', '[class*="upload"]', 'label[for*="file"]',
-    ];
-    for (const sel of btns) {
-      const btn = await page.$(sel).catch(() => null);
-      if (!btn) continue;
-      try {
-        const [fc] = await Promise.all([
-          page.waitForEvent("filechooser", { timeout: 3000 }),
-          btn.click(),
-        ]);
-        await fc.setFiles(report.pdfFilePath);
-        await page.waitForTimeout(800);
-        addLog(session, `✅ تم رفع PDF (chooser).`);
-        uploaded = true;
-        break;
-      } catch { /* جرّب التالي */ }
-    }
+  addLog(session, `🔍 وُجد ${fileInputCount} حقل رفع — نبدأ المحاولات`);
+
+  // المحاولة 1: مباشر على كل input[type=file] (حتى المخفية)
+  const fis = await page.$$('input[type="file"]');
+  for (const fi of fis) {
+    try {
+      await fi.setInputFiles(report.pdfFilePath);
+      await page.waitForTimeout(800);
+      addLog(session, "✅ تم رفع PDF (direct input).");
+      state.pdfUploaded = true;
+      return;
+    } catch { /* جرّب التالي */ }
+  }
+
+  // المحاولة 2: زر رفع + اعتراض FileChooser
+  const btns = [
+    'button:has-text("رفع")',   'button:has-text("اختر")',
+    'button:has-text("تحميل")', 'button:has-text("upload")',
+    'button:has-text("Browse")', '[class*="upload"]', 'label[for*="file"]',
+  ];
+  for (const sel of btns) {
+    const btn = await page.$(sel).catch(() => null);
+    if (!btn) continue;
+    try {
+      const [fc] = await Promise.all([
+        page.waitForEvent("filechooser", { timeout: 3000 }),
+        btn.click(),
+      ]);
+      await fc.setFiles(report.pdfFilePath);
+      await page.waitForTimeout(800);
+      addLog(session, `✅ تم رفع PDF (file chooser).`);
+      state.pdfUploaded = true;
+      return;
+    } catch { /* جرّب التالي */ }
   }
 
   // المحاولة 3: إظهار الحقل المخفي قسراً
-  if (!uploaded) {
-    try {
-      await page.evaluate(() => {
-        document.querySelectorAll('input[type="file"]').forEach((el: any) => {
-          Object.assign(el.style, {
-            opacity: "1", display: "block", visibility: "visible",
-            position: "fixed", top: "0", left: "0", width: "80px", height: "80px", zIndex: "99999",
-          });
+  try {
+    await page.evaluate(() => {
+      document.querySelectorAll('input[type="file"]').forEach((el: any) => {
+        Object.assign(el.style, {
+          opacity: "1", display: "block", visibility: "visible",
+          position: "fixed", top: "0", left: "0", width: "80px", height: "80px", zIndex: "99999",
         });
       });
-      await page.waitForTimeout(300);
-      const fi = await page.$('input[type="file"]');
-      if (fi) {
-        await fi.setInputFiles(report.pdfFilePath);
-        await page.waitForTimeout(800);
-        addLog(session, "✅ تم رفع PDF (force show).");
-        uploaded = true;
-      }
-    } catch { /* تجاهل */ }
-  }
+    });
+    await page.waitForTimeout(300);
+    const fi = await page.$('input[type="file"]');
+    if (fi) {
+      await fi.setInputFiles(report.pdfFilePath);
+      await page.waitForTimeout(800);
+      addLog(session, "✅ تم رفع PDF (force show).");
+      state.pdfUploaded = true;
+      return;
+    }
+  } catch { /* تجاهل */ }
 
-  if (!uploaded) {
-    addLog(session, "⚠️ لم يتمكن النظام من رفع PDF تلقائياً — يرجى رفعه يدوياً في المتصفح.");
-  }
+  addLog(session, "⚠️ لم يُرفع PDF في هذه الصفحة — سيُحاوَل في الصفحة التالية.");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
