@@ -160,21 +160,49 @@ async function scanElements(page: Page): Promise<any[]> {
         const lbl = document.querySelector(`label[for="${id}"]`);
         if (lbl) return lbl.textContent?.trim() ?? "";
       }
-      // 2. mat-label داخل mat-form-field الأب
+
+      // 2. aria-label مباشرة
+      const ariaLbl = (el as HTMLElement).getAttribute("aria-label");
+      if (ariaLbl && ariaLbl.trim()) return ariaLbl.trim();
+
+      // 3. aria-labelledby
+      const labelledBy = (el as HTMLElement).getAttribute("aria-labelledby");
+      if (labelledBy) {
+        const parts = labelledBy.split(" ").map(id => document.getElementById(id)?.textContent?.trim() ?? "");
+        const joined = parts.join(" ").trim();
+        if (joined) return joined;
+      }
+
+      // 4. mat-label داخل mat-form-field الأب (حتى 10 مستويات)
       let parent: Element | null = el.parentElement;
-      for (let i = 0; i < 8 && parent; i++) {
-        const matLabel = parent.querySelector("mat-label, label");
-        if (matLabel) {
-          const t = matLabel.textContent?.trim() ?? "";
-          if (t && t.length < 80) return t;
+      for (let i = 0; i < 10 && parent; i++) {
+        // توقف عند mat-form-field
+        if (parent.tagName === "MAT-FORM-FIELD" || parent.classList.contains("mat-form-field")) {
+          const matLabel = parent.querySelector("mat-label, label, .mat-form-field-label");
+          if (matLabel) {
+            const t = matLabel.textContent?.trim() ?? "";
+            if (t && t.length < 100) return t;
+          }
         }
-        // 3. نص الأب المباشر (بدون قيمة العنصر)
-        const directText = Array.from(parent.childNodes)
+        // label عادي
+        const lbl = parent.querySelector(":scope > label, :scope > mat-label");
+        if (lbl) {
+          const t = lbl.textContent?.trim() ?? "";
+          if (t && t.length < 100) return t;
+        }
+        parent = parent.parentElement;
+      }
+
+      // 5. النص المباشر من الأب الأول الذي يحتوي نصاً
+      let p: Element | null = el.parentElement;
+      for (let i = 0; i < 5 && p; i++) {
+        const directText = Array.from(p.childNodes)
           .filter(n => n.nodeType === Node.TEXT_NODE)
           .map(n => n.textContent?.trim() ?? "")
+          .filter(t => t.length > 0)
           .join(" ").trim();
-        if (directText && directText.length < 80) return directText;
-        parent = parent.parentElement;
+        if (directText && directText.length < 100) return directText;
+        p = p.parentElement;
       }
       return "";
     };
@@ -204,6 +232,16 @@ async function scanElements(page: Page): Promise<any[]> {
     document.querySelectorAll("mat-select").forEach((el: any) => {
       const rect = el.getBoundingClientRect();
       if (rect.width === 0 && rect.height === 0) return;
+
+      // حاول قراءة aria-labelledby
+      let ariaLabel = el.getAttribute("aria-label") ?? "";
+      const labelledBy = el.getAttribute("aria-labelledby");
+      if (!ariaLabel && labelledBy) {
+        ariaLabel = labelledBy.split(" ")
+          .map((id: string) => document.getElementById(id)?.textContent?.trim() ?? "")
+          .join(" ").trim();
+      }
+
       result.push({
         tag: "MAT-SELECT",
         type: "select",
@@ -211,8 +249,8 @@ async function scanElements(page: Page): Promise<any[]> {
         id: el.id ?? "",
         placeholder: el.getAttribute("placeholder") ?? "",
         formControlName: el.getAttribute("formcontrolname") ?? "",
-        ariaLabel: el.getAttribute("aria-label") ?? el.getAttribute("aria-labelledby") ?? "",
-        value: el.querySelector(".mat-select-value-text, .mat-mdc-select-value-text")?.textContent?.trim() ?? "",
+        ariaLabel,
+        value: el.querySelector(".mat-select-value-text, .mat-mdc-select-value-text, .mat-select-placeholder")?.textContent?.trim() ?? "",
         labelText: getLabelText(el),
         isMat: true,
         y: Math.round(rect.y),
@@ -252,7 +290,7 @@ function formatDate(raw: string | null | undefined): string | null {
   return s;
 }
 
-// تعبئة حقل نصي (Angular-safe)
+// تعبئة حقل نصي (Angular-safe) — يستخدم page.fill() + keyboard كاحتياط
 async function fillAngular(
   session: AutomationSession, selector: string,
   value: string | number | null | undefined, label: string,
@@ -261,22 +299,38 @@ async function fillAngular(
     addLog(session, `⏭️ تخطي "${label}" — لا توجد قيمة`);
     return;
   }
-  const val = String(value);
+  const val = String(value).trim();
   const { page } = session;
   try {
-    await page.waitForSelector(selector, { timeout: 3000 });
-    await page.evaluate((args: { sel: string; v: string }) => {
-      const el = document.querySelector(args.sel) as HTMLInputElement | null;
-      if (!el) return;
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
-      if (setter) setter.call(el, args.v); else el.value = args.v;
-      el.dispatchEvent(new Event("input",  { bubbles: true }));
-      el.dispatchEvent(new Event("change", { bubbles: true }));
-      el.dispatchEvent(new Event("blur",   { bubbles: true }));
-    }, { sel: selector, v: val });
-    addLog(session, `✅ ${label}: ${val}`);
-  } catch {
-    addLog(session, `⚠️ لم يُعبَّأ "${label}"`);
+    await page.waitForSelector(selector, { timeout: 4000 });
+
+    // طريقة 1: page.fill — أفضل طريقة مع Angular (تُطلق input events تلقائياً)
+    try {
+      await page.click(selector);
+      await page.waitForTimeout(100);
+      await page.fill(selector, val);
+      // أضف Angular events يدوياً
+      await page.evaluate((sel: string) => {
+        const el = document.querySelector(sel) as HTMLInputElement | null;
+        if (!el) return;
+        el.dispatchEvent(new Event("input",  { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        el.dispatchEvent(new Event("blur",   { bubbles: true }));
+      }, selector);
+      addLog(session, `✅ ${label}: ${val}`);
+      return;
+    } catch { /* ننتقل للطريقة 2 */ }
+
+    // طريقة 2: keyboard typing — احتياطية
+    await page.click(selector, { clickCount: 3 });
+    await page.waitForTimeout(100);
+    await page.keyboard.press("Control+a");
+    await page.keyboard.press("Delete");
+    await page.keyboard.type(val, { delay: 30 });
+    await page.keyboard.press("Tab");
+    addLog(session, `✅ ${label}: ${val} (keyboard)`);
+  } catch (err: any) {
+    addLog(session, `⚠️ لم يُعبَّأ "${label}": ${(err as Error).message}`);
   }
 }
 
@@ -450,56 +504,111 @@ async function clickSaveAndContinue(session: AutomationSession): Promise<void> {
 // ─────────────────────────────────────────────────────────────────────────────
 // الصفحة 1 — البيانات الأساسية للتقرير
 // ─────────────────────────────────────────────────────────────────────────────
+// دالة مساعدة للبحث عن عنصر — تبحث في كل الحقول المتاحة
+function findEl(arr: any[], rx: RegExp): any {
+  return arr.find(e => {
+    const combined = [
+      e.formControlName,
+      e.name,
+      e.id,
+      e.placeholder,
+      e.labelText,
+      e.ariaLabel,
+    ].join("|").toLowerCase();
+    return rx.test(combined);
+  });
+}
+
+// سجّل كل العناصر المكتشفة بشكل مفصّل
+function logElements(session: AutomationSession, els: any[], pageLabel: string): void {
+  addLog(session, `\n══ ${pageLabel}: ${els.length} عنصر ══`);
+  els.forEach((el, i) => {
+    const type = el.isMat ? "mat-select" : `${el.tag}[${el.type}]`;
+    addLog(session,
+      `[${i}] ${type} | fcn="${el.formControlName}" | name="${el.name}" | lbl="${el.labelText}" | ph="${el.placeholder}" | aria="${el.ariaLabel}"`,
+    );
+  });
+  addLog(session, "══════════════════════════════════════\n");
+}
+
 async function fillPage1(session: AutomationSession, report: any, els: any[], pdfState: { pdfUploaded: boolean }): Promise<void> {
-  addLog(session, `📋 الصفحة 1: ${els.length} عنصر مكتشف`);
-  els.forEach((el, i) =>
-    addLog(session, `  [${i}] ${el.tag} fcn="${el.formControlName}" name="${el.name}" lbl="${el.labelText}"`),
-  );
+  logElements(session, els, "الصفحة 1 — البيانات الأساسية");
 
   const inputs  = els.filter(e => e.tag === "INPUT" && !["file","radio","checkbox"].includes(e.type));
   const selects = els.filter(e => e.tag === "SELECT" || e.tag === "MAT-SELECT");
 
-  const find = (arr: any[], rx: RegExp) =>
-    arr.find(e => rx.test(e.formControlName + e.name + e.placeholder + e.labelText + e.ariaLabel));
-
-  // الغرض من التقييم
-  const purposeEl = find(selects, /purpose|غرض|valuation.?purpose/i);
+  // ── الغرض من التقييم ──────────────────────────────────────────────────────
+  const purposeEl = findEl(selects,
+    /purpose|غرض|valuation.?purpose|purposeid|valPurpose|valuationpurpose/i,
+  );
   if (purposeEl) await selectAngular(session, buildSelector(purposeEl), report.valuationPurpose, "الغرض من التقييم", purposeEl.isMat);
+  else addLog(session, `⚠️ لم يُعثر على حقل «الغرض من التقييم»`);
 
-  // فرضية القيمة
-  const hypothesisEl = find(selects, /hypothesis|فرضية|premise/i);
+  // ── فرضية القيمة ─────────────────────────────────────────────────────────
+  const hypothesisEl = findEl(selects,
+    /hypothesis|فرضية|premise|valuehypothesis|hypoth/i,
+  );
   if (hypothesisEl) await selectAngular(session, buildSelector(hypothesisEl), report.valuationHypothesis, "فرضية القيمة", hypothesisEl.isMat);
+  else addLog(session, `⚠️ لم يُعثر على حقل «فرضية القيمة»`);
 
-  // أساس القيمة
-  const basisEl = find(selects, /basis|أساس.القيمة|value.?basis/i);
+  // ── أساس القيمة ───────────────────────────────────────────────────────────
+  const basisEl = findEl(selects,
+    /basis|أساس|valuebasis|value.?basis|basisid|أساس.*قيمة/i,
+  );
   if (basisEl) await selectAngular(session, buildSelector(basisEl), report.valuationBasis, "أساس القيمة", basisEl.isMat);
+  else addLog(session, `⚠️ لم يُعثر على حقل «أساس القيمة»`);
 
-  // نوع التقرير
-  const reportTypeEl = find(selects, /report.?type|نوع.*تقرير/i);
+  // ── نوع التقرير ───────────────────────────────────────────────────────────
+  const reportTypeEl = findEl(selects,
+    /report.?type|reporttype|نوع.*تقرير|تقرير.*نوع|typereport|typeId/i,
+  );
   if (reportTypeEl) await selectAngular(session, buildSelector(reportTypeEl), report.reportType, "نوع التقرير", reportTypeEl.isMat);
+  else addLog(session, `⚠️ لم يُعثر على حقل «نوع التقرير»`);
 
-  // رقم التقرير / الطلب
-  const reportNumEl = find(inputs, /report.?number|رقم.*تقرير|request.?number|رقم.*طلب/i);
+  // ── رقم التقرير ───────────────────────────────────────────────────────────
+  const reportNumEl = findEl(inputs,
+    /report.?num|report.?no|reportno|reportnumber|reportref|externalref|externalnum|refno|referencenum|referenceno|رقم.*تقرير|تقرير.*رقم|رقم.*طلب|رقم.*مرجع|رقم.*داخل|numberreport|no\b/i,
+  );
   if (reportNumEl) await fillAngular(session, buildSelector(reportNumEl), report.reportNumber, "رقم التقرير");
+  else addLog(session, `⚠️ لم يُعثر على حقل «رقم التقرير» — جرّب الملء اليدوي`);
 
-  // تاريخ إصدار التقرير
-  const reportDateEl = find(inputs, /report.?date|تاريخ.*تقرير|تاريخ.*إصدار/i);
+  // ── تاريخ إصدار التقرير ───────────────────────────────────────────────────
+  const reportDateEl = findEl(inputs,
+    /report.?date|reportdate|date.*report|تاريخ.*تقرير|تاريخ.*إصدار|تاريخ.*نشر|issuedate|publishdate/i,
+  );
   if (reportDateEl) await fillDate(session, buildSelector(reportDateEl), report.reportDate, "تاريخ إصدار التقرير");
+  else addLog(session, `⚠️ لم يُعثر على حقل «تاريخ إصدار التقرير»`);
 
-  // اسم العميل / الجهة المستفيدة
-  const clientEl = find(inputs, /client.?name|customer|اسم.*عميل|جهة.*مستفيدة/i);
+  // ── تاريخ التقييم ─────────────────────────────────────────────────────────
+  const valDateEl = findEl(inputs,
+    /valuation.?date|valuationdate|date.*valuation|تاريخ.*تقييم|effectivedate|effectdate/i,
+  );
+  if (valDateEl) await fillDate(session, buildSelector(valDateEl), report.valuationDate, "تاريخ التقييم");
+
+  // ── اسم العميل / الجهة المستفيدة ─────────────────────────────────────────
+  const clientEl = findEl(inputs,
+    /client.?name|clientname|customer.?name|customername|beneficiary|اسم.*عميل|عميل.*اسم|جهة.*مستفيدة|جهة.*طلب|اسم.*جهة|مستفيد/i,
+  );
   if (clientEl) await fillAngular(session, buildSelector(clientEl), report.clientName, "اسم العميل");
+  else addLog(session, `⚠️ لم يُعثر على حقل «اسم العميل»`);
 
-  // البريد الإلكتروني
-  const emailEl = find(inputs, /email|بريد/i) ?? els.find(e => e.tag === "INPUT" && e.type === "email");
+  // ── البريد الإلكتروني ────────────────────────────────────────────────────
+  const emailEl = findEl(inputs, /email|mail|بريد|ايميل/) ??
+    els.find((e: any) => e.tag === "INPUT" && e.type === "email");
   if (emailEl) await fillAngular(session, buildSelector(emailEl), report.clientEmail, "البريد الإلكتروني");
+  else addLog(session, `⚠️ لم يُعثر على حقل «البريد الإلكتروني»`);
 
-  // رقم الهاتف
-  const phoneEl = find(inputs, /phone|mobile|هاتف|جوال/i);
+  // ── رقم الهاتف ───────────────────────────────────────────────────────────
+  const phoneEl = findEl(inputs,
+    /phone|mobile|tel\b|contact.?num|هاتف|جوال|تلفون|تليفون/i,
+  );
   if (phoneEl) await fillAngular(session, buildSelector(phoneEl), report.clientPhone, "رقم الهاتف");
+  else addLog(session, `⚠️ لم يُعثر على حقل «رقم الهاتف»`);
 
-  // المستخدم المقصود
-  const userEl = find(inputs, /intended.?user|مستخدم.*مقصود/i);
+  // ── المستخدم المقصود / الاستخدام المقصود ────────────────────────────────
+  const userEl = findEl(inputs,
+    /intended.?user|intendeduser|مستخدم.*مقصود|مقصود.*مستخدم|intended.?use|مستفيد.*مقصود/i,
+  );
   if (userEl) await fillAngular(session, buildSelector(userEl), report.intendedUser, "المستخدم المقصود");
 
   // محاولة رفع PDF في الصفحة 1
@@ -510,90 +619,106 @@ async function fillPage1(session: AutomationSession, report: any, els: any[], pd
 // الصفحة 2 — معلومات الأصل + أسلوب التقييم + الموقع (Screens 3 & 4)
 // ─────────────────────────────────────────────────────────────────────────────
 async function fillPage2(session: AutomationSession, report: any, els: any[], pdfState: { pdfUploaded: boolean }): Promise<void> {
-  addLog(session, `📋 الصفحة 2: ${els.length} عنصر مكتشف`);
-  els.forEach((el, i) =>
-    addLog(session, `  [${i}] ${el.tag} fcn="${el.formControlName}" name="${el.name}" lbl="${el.labelText}"`),
-  );
+  logElements(session, els, "الصفحة 2 — معلومات الأصل والموقع");
 
   const inputs    = els.filter(e => e.tag === "INPUT" && !["file","radio","checkbox"].includes(e.type));
   const selects   = els.filter(e => e.tag === "SELECT" || e.tag === "MAT-SELECT");
   const checkboxes = els.filter(e => e.type === "checkbox");
 
-  const find = (arr: any[], rx: RegExp) =>
-    arr.find(e => rx.test(e.formControlName + e.name + e.placeholder + e.labelText + e.ariaLabel));
-
-  // ── معلومات الأصل ─────────────────────────────────────────────────────────
-
-  // نوع الأصل محل التقييم
-  const propTypeEl = find(selects, /asset.?type|property.?type|نوع.*أصل|نوع.*عقار/i);
+  // ── نوع الأصل محل التقييم ─────────────────────────────────────────────────
+  const propTypeEl = findEl(selects,
+    /asset.?type|assettype|property.?type|propertytype|assetcategory|نوع.*أصل|نوع.*عقار|أصل.*نوع/i,
+  );
   if (propTypeEl) await selectAngular(session, buildSelector(propTypeEl), report.propertyType, "نوع الأصل", propTypeEl.isMat);
+  else addLog(session, `⚠️ لم يُعثر على حقل «نوع الأصل»`);
 
-  // استخدام/قطاع الأصل
-  const propUseEl = find(selects, /use|usage|قطاع|استخدام/i);
+  // ── استخدام / قطاع الأصل ─────────────────────────────────────────────────
+  const propUseEl = findEl(selects,
+    /^use$|usage|sector|assetuse|propertyuse|قطاع|استخدام|نوع.*استخدام/i,
+  );
   if (propUseEl) await selectAngular(session, buildSelector(propUseEl), report.propertyUse, "استخدام الأصل", propUseEl.isMat);
+  else addLog(session, `⚠️ لم يُعثر على حقل «استخدام الأصل»`);
 
-  // تاريخ معاينة الأصل
-  const inspDateEl = find(inputs, /inspection.?date|معاين|تاريخ.*فحص/i);
+  // ── تاريخ المعاينة ────────────────────────────────────────────────────────
+  const inspDateEl = findEl(inputs,
+    /inspection.?date|inspectiondate|inspdate|visit.?date|معاينة|تاريخ.*معاينة|تاريخ.*زيارة|تاريخ.*فحص/i,
+  );
   if (inspDateEl) await fillDate(session, buildSelector(inspDateEl), report.inspectionDate, "تاريخ المعاينة");
+  else addLog(session, `⚠️ لم يُعثر على حقل «تاريخ المعاينة»`);
 
-  // الرأي النهائي في القيمة
-  const finalValEl = find(inputs, /final.?value|final.?opinion|الرأي.*القيمة|رأي.*نهائي/i);
+  // ── الرأي النهائي في القيمة ───────────────────────────────────────────────
+  const finalValEl = findEl(inputs,
+    /final.?value|finalvalue|final.?opinion|valuationresult|الرأي.*قيمة|رأي.*نهائي|القيمة.*نهائية|قيمة.*سوقية|قيمة.*تقييم/i,
+  );
   if (finalValEl) await fillAngular(session, buildSelector(finalValEl), report.finalValue, "الرأي النهائي في القيمة");
+  else addLog(session, `⚠️ لم يُعثر على حقل «الرأي النهائي»`);
 
-  // ── أسلوب السوق ───────────────────────────────────────────────────────────
-  // أساسي تقدير القيمة — checkbox
-  const marketCheckEl = find(checkboxes, /market|سوق|مقارن/i);
+  // ── أسلوب السوق (checkbox) ───────────────────────────────────────────────
+  const marketCheckEl = findEl(checkboxes, /market|سوق|مقارن|comparable/i);
   if (marketCheckEl) {
     const useMarket = !!(report.valuationMethod && /سوق|market/i.test(report.valuationMethod));
     await checkBox(session, buildSelector(marketCheckEl), useMarket, "أسلوب السوق");
   }
 
-  // طريقه المعاملات المعارة (قيمة أسلوب السوق)
-  const marketValEl = find(inputs, /market.?value|comparable|معاملات.*معارة|قيمة.*سوق/i);
-  if (marketValEl) await fillAngular(session, buildSelector(marketValEl), report.marketValue ?? report.finalValue, "طريقة المعاملات المعارة");
+  // ── قيمة أسلوب السوق (المعاملات المعارة) ────────────────────────────────
+  const marketValEl = findEl(inputs,
+    /market.?value|marketvalue|comparable.?value|comparablevalue|معاملات.*معارة|قيمة.*سوق/i,
+  );
+  if (marketValEl) await fillAngular(session, buildSelector(marketValEl), report.marketValue ?? report.finalValue, "قيمة أسلوب السوق");
 
-  // أسلوب الدخل
-  const incomeEl = find(selects, /income|دخل/i);
+  // ── أسلوب الدخل ──────────────────────────────────────────────────────────
+  const incomeEl = findEl(selects,
+    /income.?approach|incomeapproach|income.?method|دخل.*أسلوب|أسلوب.*دخل|طريقة.*دخل/i,
+  );
   if (incomeEl) await selectAngular(session, buildSelector(incomeEl), "غير مستخدم", "أسلوب الدخل", incomeEl.isMat);
 
-  // أسلوب التكلفة
-  const costEl = find(selects, /cost|تكلفة/i);
+  // ── أسلوب التكلفة ────────────────────────────────────────────────────────
+  const costEl = findEl(selects,
+    /cost.?approach|costapproach|cost.?method|تكلفة.*أسلوب|أسلوب.*تكلفة|طريقة.*تكلفة/i,
+  );
   if (costEl) await selectAngular(session, buildSelector(costEl), "مساعد لتقدير القيمة", "أسلوب التكلفة", costEl.isMat);
 
-  // ── معلومات الموقع ────────────────────────────────────────────────────────
-
-  // الدولة (ثابت)
-  const countryEl = find(selects, /country|دولة/i);
+  // ── الدولة (ثابت: المملكة العربية السعودية) ──────────────────────────────
+  const countryEl = findEl(selects,
+    /country|countryid|دولة|بلد/i,
+  );
   if (countryEl) await selectAngular(session, buildSelector(countryEl), "المملكة العربية السعودية", "الدولة", countryEl.isMat);
 
-  // المنطقة
-  const regionEl = find(selects, /region|province|منطقة/i);
+  // ── المنطقة ───────────────────────────────────────────────────────────────
+  const regionEl = findEl(selects,
+    /region|province|regionid|emirate|منطقة|محافظة|إمارة/i,
+  );
   if (regionEl) await selectAngular(session, buildSelector(regionEl), report.region, "المنطقة", regionEl.isMat);
+  else addLog(session, `⚠️ لم يُعثر على حقل «المنطقة»`);
 
-  // المدينة
-  const cityEl = find(selects, /city|مدينة/i) ?? find(inputs, /city|مدينة/i);
+  // ── المدينة ───────────────────────────────────────────────────────────────
+  const cityEl = findEl(selects, /city|cityid|مدينة|بلدية/) ??
+    findEl(inputs, /city|cityid|مدينة|بلدية/);
   if (cityEl) await selectAngular(session, buildSelector(cityEl), report.city, "المدينة", cityEl?.isMat);
+  else addLog(session, `⚠️ لم يُعثر على حقل «المدينة»`);
 
-  // الحي
-  const districtEl = find(inputs, /district|neighborhood|حي/i);
+  // ── الحي ─────────────────────────────────────────────────────────────────
+  const districtEl = findEl(inputs,
+    /district|neighborhood|districtname|حي|حي.*سكني|اسم.*حي/i,
+  );
   if (districtEl) await fillAngular(session, buildSelector(districtEl), report.district, "الحي");
 
-  // الشارع
-  const streetEl = find(inputs, /street|شارع/i);
+  // ── الشارع ────────────────────────────────────────────────────────────────
+  const streetEl = findEl(inputs,
+    /street|streetname|road|شارع|اسم.*شارع/i,
+  );
   if (streetEl) await fillAngular(session, buildSelector(streetEl), report.street, "الشارع");
 
-  // الإحداثيات (خط الطول / العرض)
+  // ── الإحداثيات ───────────────────────────────────────────────────────────
   let lat: string | null = null;
   let lng: string | null = null;
   if (report.coordinates) {
     const parts = String(report.coordinates).split(",").map((s: string) => s.trim());
     if (parts.length === 2) { lat = parts[0]; lng = parts[1]; }
   }
-
-  const lngEl = find(inputs, /longitude|خط.*طول/i);
+  const lngEl = findEl(inputs, /longitude|long\b|lng\b|خط.*طول|طول.*جغرافي/i);
   if (lngEl && lng) await fillAngular(session, buildSelector(lngEl), lng, "خط الطول");
-
-  const latEl = find(inputs, /latitude|خط.*عرض/i);
+  const latEl = findEl(inputs, /latitude|lat\b|خط.*عرض|عرض.*جغرافي/i);
   if (latEl && lat) await fillAngular(session, buildSelector(latEl), lat, "خط العرض");
 
   // محاولة رفع PDF في الصفحة 2 إن لم يرفع في الصفحة 1
@@ -604,29 +729,31 @@ async function fillPage2(session: AutomationSession, report: any, els: any[], pd
 // الصفحة 3 — البيانات الإضافية (Screen 5)
 // ─────────────────────────────────────────────────────────────────────────────
 async function fillPage3(session: AutomationSession, report: any, els: any[], pdfState: { pdfUploaded: boolean }): Promise<void> {
-  addLog(session, `📋 الصفحة 3: ${els.length} عنصر مكتشف`);
-  els.forEach((el, i) =>
-    addLog(session, `  [${i}] ${el.tag} fcn="${el.formControlName}" name="${el.name}" lbl="${el.labelText}"`),
-  );
+  logElements(session, els, "الصفحة 3 — البيانات الإضافية");
 
   const inputs    = els.filter(e => e.tag === "INPUT" && !["file","radio","checkbox"].includes(e.type));
   const selects   = els.filter(e => e.tag === "SELECT" || e.tag === "MAT-SELECT");
   const checkboxes = els.filter(e => e.type === "checkbox");
   const { page } = session;
 
-  const find = (arr: any[], rx: RegExp) =>
-    arr.find(e => rx.test(e.formControlName + e.name + e.placeholder + e.labelText + e.ariaLabel));
-
-  // رقم الصك / سند الملكية
-  const deedEl = find(inputs, /deed|صك|سند/i);
+  // ── رقم الصك / سند الملكية ───────────────────────────────────────────────
+  const deedEl = findEl(inputs,
+    /deed|deednum|deed.?number|titlenum|title.?number|صك|سند|رقم.*صك|رقم.*سند/i,
+  );
   if (deedEl) await fillAngular(session, buildSelector(deedEl), report.deedNumber, "رقم الصك");
+  else addLog(session, `⚠️ لم يُعثر على حقل «رقم الصك»`);
 
-  // نوع الملكية
-  const ownerTypeEl = find(selects, /ownership.?type|ملكية/i);
+  // ── نوع الملكية ───────────────────────────────────────────────────────────
+  const ownerTypeEl = findEl(selects,
+    /ownership.?type|ownershiptype|ownership|ملكية|نوع.*ملكية/i,
+  );
   if (ownerTypeEl) await selectAngular(session, buildSelector(ownerTypeEl), report.ownershipType, "نوع الملكية", ownerTypeEl.isMat);
+  else addLog(session, `⚠️ لم يُعثر على حقل «نوع الملكية»`);
 
-  // الاتجاهات المطلة على الشارع
-  const facadeEl = find(selects, /facade|direction|اتجاه|مطلة|واجهة/i);
+  // ── الاتجاهات المطلة على الشارع ──────────────────────────────────────────
+  const facadeEl = findEl(selects,
+    /facade|direction|frontage|street.?dir|اتجاه|مطلة|واجهة|جهات/i,
+  );
   if (facadeEl) await selectAngular(session, buildSelector(facadeEl), report.streetFacades, "الاتجاهات المطلة", facadeEl.isMat);
 
   // المرافق (checkboxes) — نُحدد المرافق الموجودة في `report.utilities`
@@ -650,36 +777,54 @@ async function fillPage3(session: AutomationSession, report: any, els: any[], pd
     }
   }
 
-  // مساحة الأرض (م²)
-  const landEl = find(inputs, /land.?area|مساحة.*أرض|area.?land/i);
+  // ── مساحة الأرض (م²) ─────────────────────────────────────────────────────
+  const landEl = findEl(inputs,
+    /land.?area|landarea|plot.?area|plotarea|مساحة.*أرض|مساحة.*قطعة|مساحة.*أرضية/i,
+  );
   if (landEl) await fillAngular(session, buildSelector(landEl), report.landArea, "مساحة الأرض");
+  else addLog(session, `⚠️ لم يُعثر على حقل «مساحة الأرض»`);
 
-  // مساحة مسطحات البناء
-  const buildEl = find(inputs, /building.?area|مساحة.*بناء|floor.?area/i);
+  // ── مساحة مسطحات البناء ───────────────────────────────────────────────────
+  const buildEl = findEl(inputs,
+    /building.?area|buildingarea|floor.?area|floorarea|gross.?area|بناء.*مساحة|مساحة.*بناء|مساحة.*مسطحات/i,
+  );
   if (buildEl) await fillAngular(session, buildSelector(buildEl), report.buildingArea, "مساحة البناء");
 
-  // نسبة البناء المصرح بها (%)
-  const ratioEl = find(inputs, /ratio|permit|نسبة.*بناء|مصرح/i);
+  // ── نسبة البناء المصرح بها (%) ────────────────────────────────────────────
+  const ratioEl = findEl(inputs,
+    /ratio|buildratio|permitratio|permit.?ratio|building.?ratio|نسبة.*بناء|نسبة.*مصرح|مصرح.*بناء/i,
+  );
   if (ratioEl) await fillAngular(session, buildSelector(ratioEl), report.permittedBuildingRatio, "نسبة البناء المصرح بها");
 
-  // عدد الأدوار المصرح به
-  const floorsEl = find(inputs, /floor|أدوار|طابق/i);
+  // ── عدد الأدوار المصرح به ────────────────────────────────────────────────
+  const floorsEl = findEl(inputs,
+    /floor.?count|floorcount|floors|num.?floor|أدوار|عدد.*أدوار|طوابق|عدد.*طوابق/i,
+  );
   if (floorsEl) await fillAngular(session, buildSelector(floorsEl), report.permittedFloorsCount ?? report.floorsCount, "عدد الأدوار");
 
-  // حالة البناء
-  const buildStatusEl = find(selects, /building.?status|حالة.*بناء/i);
+  // ── حالة البناء ───────────────────────────────────────────────────────────
+  const buildStatusEl = findEl(selects,
+    /building.?status|buildingstatus|construction.?status|حالة.*بناء|حالة.*إنشاء/i,
+  );
   if (buildStatusEl) await selectAngular(session, buildSelector(buildStatusEl), report.buildingStatus, "حالة البناء", buildStatusEl.isMat);
+  else addLog(session, `⚠️ لم يُعثر على حقل «حالة البناء»`);
 
-  // نوع الصبي / نوع العقار الفرعي
-  const subTypeEl = find(selects, /sub.?type|نوع.*صبي|نوع.*فرعي/i);
+  // ── نوع العقار الفرعي ────────────────────────────────────────────────────
+  const subTypeEl = findEl(selects,
+    /sub.?type|subtype|property.?subtype|asset.?sub|نوع.*فرعي|نوع.*صبي|فرعي/i,
+  );
   if (subTypeEl) await selectAngular(session, buildSelector(subTypeEl), report.propertySubType, "نوع العقار الفرعي", subTypeEl.isMat);
 
-  // عمر الأصل
-  const ageEl = find(inputs, /age|عمر/i);
+  // ── عمر الأصل ─────────────────────────────────────────────────────────────
+  const ageEl = findEl(inputs,
+    /^age$|building.?age|buildingage|construction.?year|عمر.*أصل|عمر.*مبنى|سنة.*بناء/i,
+  );
   if (ageEl) await fillAngular(session, buildSelector(ageEl), report.buildingAge, "عمر الأصل");
 
-  // عرض الشارع
-  const swEl = find(inputs, /street.?width|عرض.*شارع/i);
+  // ── عرض الشارع ───────────────────────────────────────────────────────────
+  const swEl = findEl(inputs,
+    /street.?width|streetwidth|road.?width|عرض.*شارع|عرض.*طريق/i,
+  );
   if (swEl) await fillAngular(session, buildSelector(swEl), report.streetWidth, "عرض الشارع");
 
   // تقدير الأصل ثاني أفضل استخدام → "نعم"
