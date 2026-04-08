@@ -153,44 +153,80 @@ async function waitForAngular(page: Page, extra = 3000): Promise<void> {
 
 async function scanElements(page: Page): Promise<any[]> {
   return page.evaluate(() => {
+    const getLabelText = (el: Element): string => {
+      // 1. label[for=id]
+      const id = (el as HTMLElement).id;
+      if (id) {
+        const lbl = document.querySelector(`label[for="${id}"]`);
+        if (lbl) return lbl.textContent?.trim() ?? "";
+      }
+      // 2. mat-label داخل mat-form-field الأب
+      let parent: Element | null = el.parentElement;
+      for (let i = 0; i < 8 && parent; i++) {
+        const matLabel = parent.querySelector("mat-label, label");
+        if (matLabel) {
+          const t = matLabel.textContent?.trim() ?? "";
+          if (t && t.length < 80) return t;
+        }
+        // 3. نص الأب المباشر (بدون قيمة العنصر)
+        const directText = Array.from(parent.childNodes)
+          .filter(n => n.nodeType === Node.TEXT_NODE)
+          .map(n => n.textContent?.trim() ?? "")
+          .join(" ").trim();
+        if (directText && directText.length < 80) return directText;
+        parent = parent.parentElement;
+      }
+      return "";
+    };
+
     const result: any[] = [];
+
+    // 1. عناصر HTML العادية: input, select, textarea
     document.querySelectorAll("input, select, textarea").forEach((el: any) => {
       const rect = el.getBoundingClientRect();
       if (rect.width === 0 && rect.height === 0) return;
-      let labelText = "";
-      const id = el.id;
-      if (id) {
-        const lbl = document.querySelector(`label[for="${id}"]`);
-        if (lbl) labelText = lbl.textContent?.trim() ?? "";
-      }
-      if (!labelText) {
-        let parent = el.parentElement;
-        for (let i = 0; i < 6 && parent; i++) {
-          const t = parent.textContent?.replace(el.value ?? "", "").trim() ?? "";
-          if (t && t.length < 80) { labelText = t; break; }
-          parent = parent.parentElement;
-        }
-      }
       result.push({
         tag: el.tagName,
-        type: (el as HTMLInputElement).type ?? "",
+        type: el.type ?? "",
         name: el.name ?? "",
         id: el.id ?? "",
-        placeholder: (el as HTMLInputElement).placeholder ?? "",
+        placeholder: el.placeholder ?? "",
         formControlName: el.getAttribute("formcontrolname") ?? "",
         ariaLabel: el.getAttribute("aria-label") ?? "",
-        value: (el as HTMLInputElement).value ?? "",
-        labelText: labelText.substring(0, 70),
+        value: el.value ?? "",
+        labelText: getLabelText(el),
+        isMat: false,
         y: Math.round(rect.y),
       });
     });
+
+    // 2. Angular Material: mat-select (قائمة منسدلة مخصصة)
+    document.querySelectorAll("mat-select").forEach((el: any) => {
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 && rect.height === 0) return;
+      result.push({
+        tag: "MAT-SELECT",
+        type: "select",
+        name: el.getAttribute("name") ?? "",
+        id: el.id ?? "",
+        placeholder: el.getAttribute("placeholder") ?? "",
+        formControlName: el.getAttribute("formcontrolname") ?? "",
+        ariaLabel: el.getAttribute("aria-label") ?? el.getAttribute("aria-labelledby") ?? "",
+        value: el.querySelector(".mat-select-value-text, .mat-mdc-select-value-text")?.textContent?.trim() ?? "",
+        labelText: getLabelText(el),
+        isMat: true,
+        y: Math.round(rect.y),
+      });
+    });
+
     return result.sort((a: any, b: any) => a.y - b.y);
   });
 }
 
 function buildSelector(el: any): string {
+  const tag = el.isMat ? "mat-select" : el.tag?.toLowerCase() ?? "";
   if (el.formControlName) return `[formcontrolname="${el.formControlName}"]`;
-  if (el.name)            return `${el.tag.toLowerCase()}[name="${el.name}"]`;
+  if (el.name && tag)     return `${tag}[name="${el.name}"]`;
   if (el.id)              return `#${el.id}`;
   if (el.placeholder)     return `[placeholder="${el.placeholder}"]`;
   return "";
@@ -279,35 +315,77 @@ async function fillDate(
   }
 }
 
-// اختيار من قائمة منسدلة
+// اختيار من قائمة منسدلة — يدعم native select و mat-select
 async function selectAngular(
   session: AutomationSession, selector: string,
   value: string | null | undefined, label: string,
+  isMat = false,
 ): Promise<void> {
   if (!value || value.trim() === "") {
     addLog(session, `⏭️ تخطي "${label}" — لا توجد قيمة`);
     return;
   }
   const { page } = session;
-  try {
-    await page.waitForSelector(selector, { timeout: 3000 });
-    await page.selectOption(selector, { label: value }).catch(() =>
-      page.selectOption(selector, { value }).catch(() => {}),
-    );
-    await page.evaluate((sel) => {
-      const el = document.querySelector(sel);
-      if (el) el.dispatchEvent(new Event("change", { bubbles: true }));
-    }, selector);
-    addLog(session, `✅ ${label}: ${value}`);
-  } catch {
+
+  // ── محاولة 1: native HTML select ──────────────────────────────────────────
+  if (!isMat) {
     try {
-      await page.click(selector);
-      await page.waitForTimeout(400);
-      await page.getByRole("option", { name: value }).first().click();
-      addLog(session, `✅ ${label} (mat): ${value}`);
-    } catch {
-      addLog(session, `⚠️ لم يُحدَّد "${label}": ${value}`);
+      await page.waitForSelector(selector, { timeout: 2000 });
+      // جرّب بالنص أولاً ثم بالقيمة
+      const chosen = await page.selectOption(selector, { label: value }).catch(() =>
+        page.selectOption(selector, { value }).catch(() => []),
+      );
+      if (Array.isArray(chosen) && chosen.length > 0) {
+        await page.evaluate((sel) => {
+          document.querySelector(sel)?.dispatchEvent(new Event("change", { bubbles: true }));
+        }, selector);
+        addLog(session, `✅ ${label}: ${value} (native select)`);
+        return;
+      }
+    } catch { /* ننتقل لـ mat-select */ }
+  }
+
+  // ── محاولة 2: Angular Material mat-select ─────────────────────────────────
+  try {
+    await page.waitForSelector(selector, { timeout: 2000 });
+    // افتح القائمة بالنقر
+    await page.click(selector);
+    // انتظر ظهور panel الخيارات
+    await page.waitForSelector(
+      "mat-option, .mat-option, .mat-mdc-option",
+      { timeout: 3000 },
+    );
+    await page.waitForTimeout(300);
+
+    // جرّب إيجاد الخيار بالنص المطابق
+    const clicked = await page.evaluate((val: string) => {
+      const options = Array.from(
+        document.querySelectorAll("mat-option, .mat-option, .mat-mdc-option"),
+      );
+      const target = options.find(opt => {
+        const text = opt.textContent?.trim() ?? "";
+        return text === val || text.includes(val) || val.includes(text);
+      }) as HTMLElement | undefined;
+      if (target) { target.click(); return true; }
+      return false;
+    }, value);
+
+    if (clicked) {
+      await page.waitForTimeout(300);
+      addLog(session, `✅ ${label}: ${value} (mat-select)`);
+      return;
     }
+
+    // إذا لم يُعثر على الخيار بالضبط → سجّل الخيارات المتاحة
+    const available = await page.evaluate(() =>
+      Array.from(document.querySelectorAll("mat-option, .mat-option, .mat-mdc-option"))
+        .map(o => o.textContent?.trim() ?? ""),
+    );
+    addLog(session, `⚠️ الخيار "${value}" غير موجود في "${label}" — المتاح: ${available.slice(0, 8).join(" | ")}`);
+    // أغلق القائمة
+    await page.keyboard.press("Escape");
+  } catch {
+    addLog(session, `⚠️ لم يُحدَّد "${label}": ${value}`);
   }
 }
 
@@ -379,26 +457,26 @@ async function fillPage1(session: AutomationSession, report: any, els: any[], pd
   );
 
   const inputs  = els.filter(e => e.tag === "INPUT" && !["file","radio","checkbox"].includes(e.type));
-  const selects = els.filter(e => e.tag === "SELECT");
+  const selects = els.filter(e => e.tag === "SELECT" || e.tag === "MAT-SELECT");
 
   const find = (arr: any[], rx: RegExp) =>
     arr.find(e => rx.test(e.formControlName + e.name + e.placeholder + e.labelText + e.ariaLabel));
 
   // الغرض من التقييم
   const purposeEl = find(selects, /purpose|غرض|valuation.?purpose/i);
-  if (purposeEl) await selectAngular(session, buildSelector(purposeEl), report.valuationPurpose, "الغرض من التقييم");
+  if (purposeEl) await selectAngular(session, buildSelector(purposeEl), report.valuationPurpose, "الغرض من التقييم", purposeEl.isMat);
 
   // فرضية القيمة
   const hypothesisEl = find(selects, /hypothesis|فرضية|premise/i);
-  if (hypothesisEl) await selectAngular(session, buildSelector(hypothesisEl), report.valuationHypothesis, "فرضية القيمة");
+  if (hypothesisEl) await selectAngular(session, buildSelector(hypothesisEl), report.valuationHypothesis, "فرضية القيمة", hypothesisEl.isMat);
 
   // أساس القيمة
   const basisEl = find(selects, /basis|أساس.القيمة|value.?basis/i);
-  if (basisEl) await selectAngular(session, buildSelector(basisEl), report.valuationBasis, "أساس القيمة");
+  if (basisEl) await selectAngular(session, buildSelector(basisEl), report.valuationBasis, "أساس القيمة", basisEl.isMat);
 
   // نوع التقرير
   const reportTypeEl = find(selects, /report.?type|نوع.*تقرير/i);
-  if (reportTypeEl) await selectAngular(session, buildSelector(reportTypeEl), report.reportType, "نوع التقرير");
+  if (reportTypeEl) await selectAngular(session, buildSelector(reportTypeEl), report.reportType, "نوع التقرير", reportTypeEl.isMat);
 
   // رقم التقرير / الطلب
   const reportNumEl = find(inputs, /report.?number|رقم.*تقرير|request.?number|رقم.*طلب/i);
@@ -438,7 +516,7 @@ async function fillPage2(session: AutomationSession, report: any, els: any[], pd
   );
 
   const inputs    = els.filter(e => e.tag === "INPUT" && !["file","radio","checkbox"].includes(e.type));
-  const selects   = els.filter(e => e.tag === "SELECT");
+  const selects   = els.filter(e => e.tag === "SELECT" || e.tag === "MAT-SELECT");
   const checkboxes = els.filter(e => e.type === "checkbox");
 
   const find = (arr: any[], rx: RegExp) =>
@@ -448,11 +526,11 @@ async function fillPage2(session: AutomationSession, report: any, els: any[], pd
 
   // نوع الأصل محل التقييم
   const propTypeEl = find(selects, /asset.?type|property.?type|نوع.*أصل|نوع.*عقار/i);
-  if (propTypeEl) await selectAngular(session, buildSelector(propTypeEl), report.propertyType, "نوع الأصل");
+  if (propTypeEl) await selectAngular(session, buildSelector(propTypeEl), report.propertyType, "نوع الأصل", propTypeEl.isMat);
 
   // استخدام/قطاع الأصل
   const propUseEl = find(selects, /use|usage|قطاع|استخدام/i);
-  if (propUseEl) await selectAngular(session, buildSelector(propUseEl), report.propertyUse, "استخدام الأصل");
+  if (propUseEl) await selectAngular(session, buildSelector(propUseEl), report.propertyUse, "استخدام الأصل", propUseEl.isMat);
 
   // تاريخ معاينة الأصل
   const inspDateEl = find(inputs, /inspection.?date|معاين|تاريخ.*فحص/i);
@@ -476,25 +554,25 @@ async function fillPage2(session: AutomationSession, report: any, els: any[], pd
 
   // أسلوب الدخل
   const incomeEl = find(selects, /income|دخل/i);
-  if (incomeEl) await selectAngular(session, buildSelector(incomeEl), "غير مستخدم", "أسلوب الدخل");
+  if (incomeEl) await selectAngular(session, buildSelector(incomeEl), "غير مستخدم", "أسلوب الدخل", incomeEl.isMat);
 
   // أسلوب التكلفة
   const costEl = find(selects, /cost|تكلفة/i);
-  if (costEl) await selectAngular(session, buildSelector(costEl), "مساعد لتقدير القيمة", "أسلوب التكلفة");
+  if (costEl) await selectAngular(session, buildSelector(costEl), "مساعد لتقدير القيمة", "أسلوب التكلفة", costEl.isMat);
 
   // ── معلومات الموقع ────────────────────────────────────────────────────────
 
   // الدولة (ثابت)
   const countryEl = find(selects, /country|دولة/i);
-  if (countryEl) await selectAngular(session, buildSelector(countryEl), "المملكة العربية السعودية", "الدولة");
+  if (countryEl) await selectAngular(session, buildSelector(countryEl), "المملكة العربية السعودية", "الدولة", countryEl.isMat);
 
   // المنطقة
   const regionEl = find(selects, /region|province|منطقة/i);
-  if (regionEl) await selectAngular(session, buildSelector(regionEl), report.region, "المنطقة");
+  if (regionEl) await selectAngular(session, buildSelector(regionEl), report.region, "المنطقة", regionEl.isMat);
 
   // المدينة
   const cityEl = find(selects, /city|مدينة/i) ?? find(inputs, /city|مدينة/i);
-  if (cityEl) await selectAngular(session, buildSelector(cityEl), report.city, "المدينة");
+  if (cityEl) await selectAngular(session, buildSelector(cityEl), report.city, "المدينة", cityEl?.isMat);
 
   // الحي
   const districtEl = find(inputs, /district|neighborhood|حي/i);
@@ -532,7 +610,7 @@ async function fillPage3(session: AutomationSession, report: any, els: any[], pd
   );
 
   const inputs    = els.filter(e => e.tag === "INPUT" && !["file","radio","checkbox"].includes(e.type));
-  const selects   = els.filter(e => e.tag === "SELECT");
+  const selects   = els.filter(e => e.tag === "SELECT" || e.tag === "MAT-SELECT");
   const checkboxes = els.filter(e => e.type === "checkbox");
   const { page } = session;
 
@@ -545,11 +623,11 @@ async function fillPage3(session: AutomationSession, report: any, els: any[], pd
 
   // نوع الملكية
   const ownerTypeEl = find(selects, /ownership.?type|ملكية/i);
-  if (ownerTypeEl) await selectAngular(session, buildSelector(ownerTypeEl), report.ownershipType, "نوع الملكية");
+  if (ownerTypeEl) await selectAngular(session, buildSelector(ownerTypeEl), report.ownershipType, "نوع الملكية", ownerTypeEl.isMat);
 
   // الاتجاهات المطلة على الشارع
   const facadeEl = find(selects, /facade|direction|اتجاه|مطلة|واجهة/i);
-  if (facadeEl) await selectAngular(session, buildSelector(facadeEl), report.streetFacades, "الاتجاهات المطلة");
+  if (facadeEl) await selectAngular(session, buildSelector(facadeEl), report.streetFacades, "الاتجاهات المطلة", facadeEl.isMat);
 
   // المرافق (checkboxes) — نُحدد المرافق الموجودة في `report.utilities`
   if (report.utilities && checkboxes.length > 0) {
@@ -590,11 +668,11 @@ async function fillPage3(session: AutomationSession, report: any, els: any[], pd
 
   // حالة البناء
   const buildStatusEl = find(selects, /building.?status|حالة.*بناء/i);
-  if (buildStatusEl) await selectAngular(session, buildSelector(buildStatusEl), report.buildingStatus, "حالة البناء");
+  if (buildStatusEl) await selectAngular(session, buildSelector(buildStatusEl), report.buildingStatus, "حالة البناء", buildStatusEl.isMat);
 
   // نوع الصبي / نوع العقار الفرعي
   const subTypeEl = find(selects, /sub.?type|نوع.*صبي|نوع.*فرعي/i);
-  if (subTypeEl) await selectAngular(session, buildSelector(subTypeEl), report.propertySubType, "نوع العقار الفرعي");
+  if (subTypeEl) await selectAngular(session, buildSelector(subTypeEl), report.propertySubType, "نوع العقار الفرعي", subTypeEl.isMat);
 
   // عمر الأصل
   const ageEl = find(inputs, /age|عمر/i);
