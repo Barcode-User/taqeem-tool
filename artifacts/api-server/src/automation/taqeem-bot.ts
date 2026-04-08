@@ -184,7 +184,10 @@ async function fillReportForm(
 
   // ── دالة تعبئة حقل نصي بطريقة Angular-safe ──────────────────────────────
   const fillAngular = async (selector: string, value: string | number | null | undefined, label: string) => {
-    if (value === null || value === undefined || String(value).trim() === "") return;
+    if (value === null || value === undefined || String(value).trim() === "") {
+      addLog(session, `⏭️ تخطي "${label}" — لا توجد قيمة`);
+      return;
+    }
     const val = String(value);
     try {
       await page.waitForSelector(selector, { timeout: 3000 });
@@ -208,7 +211,10 @@ async function fillReportForm(
 
   // ── دالة اختيار من قائمة (select native أو Angular Material) ─────────────
   const selectAngular = async (selector: string, value: string | null | undefined, label: string) => {
-    if (!value) return;
+    if (!value || value.trim() === "") {
+      addLog(session, `⏭️ تخطي "${label}" — لا توجد قيمة`);
+      return;
+    }
     try {
       await page.waitForSelector(selector, { timeout: 3000 });
       // حاول native select أولاً
@@ -267,20 +273,32 @@ async function fillReportForm(
   // الغرض من التقييم
   const purposeEl = selects.find(e =>
     /purpose|غرض|valuation.?purpose/i.test(e.formControlName + e.name + e.placeholder + e.labelText)
-  ) ?? selects[0];
-  if (purposeEl) await selectAngular(buildSelector(purposeEl), report.valuationPurpose, "الغرض من التقييم");
+  );
+  if (purposeEl) {
+    await selectAngular(buildSelector(purposeEl), report.valuationPurpose, "الغرض من التقييم");
+  } else {
+    addLog(session, `⏭️ تخطي "الغرض من التقييم" — لم يُعثر على الحقل في النموذج`);
+  }
 
   // فرضية القيمة
   const hypothesisEl = selects.find(e =>
     /hypothesis|فرضية|premise/i.test(e.formControlName + e.name + e.placeholder + e.labelText)
-  ) ?? selects[1];
-  if (hypothesisEl) await selectAngular(buildSelector(hypothesisEl), report.valuationHypothesis, "فرضية القيمة");
+  );
+  if (hypothesisEl) {
+    await selectAngular(buildSelector(hypothesisEl), report.valuationHypothesis, "فرضية القيمة");
+  } else {
+    addLog(session, `⏭️ تخطي "فرضية القيمة" — لم يُعثر على الحقل في النموذج`);
+  }
 
   // أساس القيمة / طريقة التقييم
   const methodEl = selects.find(e =>
     /method|أساس|approach|valuation.?method/i.test(e.formControlName + e.name + e.placeholder + e.labelText)
-  ) ?? selects[2];
-  if (methodEl) await selectAngular(buildSelector(methodEl), report.valuationMethod, "أساس القيمة");
+  );
+  if (methodEl) {
+    await selectAngular(buildSelector(methodEl), report.valuationMethod, "أساس القيمة");
+  } else {
+    addLog(session, `⏭️ تخطي "أساس القيمة" — لم يُعثر على الحقل في النموذج`);
+  }
 
   // نوع التقرير (radio)
   if (report.reportType && radios.length > 0) {
