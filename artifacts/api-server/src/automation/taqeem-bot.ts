@@ -132,20 +132,89 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     await fillReportForm(session, report, formElements);
 
     // ─── STEP 3: رفع ملف PDF ────────────────────────────────────────
-    if (report.pdfFilePath && fs.existsSync(report.pdfFilePath)) {
-      addLog(session, "رفع ملف PDF...");
-      try {
-        const fileInput = await page.$('input[type="file"]');
-        if (fileInput) {
-          await fileInput.setInputFiles(report.pdfFilePath);
-          await page.waitForTimeout(1000);
-          addLog(session, "✅ تم رفع ملف PDF.");
-        } else {
-          addLog(session, "⚠️ لم يُعثر على حقل رفع الملف.");
+    if (report.pdfFilePath) {
+      if (!fs.existsSync(report.pdfFilePath)) {
+        addLog(session, `⚠️ ملف PDF غير موجود في المسار: ${report.pdfFilePath}`);
+      } else {
+        addLog(session, `📎 رفع ملف PDF: ${report.pdfFilePath}`);
+        let pdfUploaded = false;
+
+        // المحاولة 1: إيجاد حقل الرفع مباشرة (حتى لو مخفي)
+        try {
+          const fileInputs = await page.$$('input[type="file"]');
+          if (fileInputs.length > 0) {
+            // جرّب كل input[type="file"] موجود
+            for (const fi of fileInputs) {
+              try {
+                await fi.setInputFiles(report.pdfFilePath);
+                await page.waitForTimeout(800);
+                addLog(session, "✅ تم رفع ملف PDF (direct input).");
+                pdfUploaded = true;
+                break;
+              } catch { /* جرّب التالي */ }
+            }
+          }
+        } catch { /* تجاهل والانتقال للمحاولة التالية */ }
+
+        // المحاولة 2: البحث عن زر رفع ثم اعتراض FileChooser
+        if (!pdfUploaded) {
+          try {
+            const uploadBtnSelectors = [
+              'button:has-text("رفع")', 'button:has-text("اختر")', 'button:has-text("upload")',
+              'button:has-text("Browse")', '[class*="upload"]', '[class*="attach"]',
+              'label[for*="file"]', 'label[class*="upload"]',
+            ];
+            for (const btnSel of uploadBtnSelectors) {
+              const btn = await page.$(btnSel);
+              if (!btn) continue;
+              try {
+                const [fileChooser] = await Promise.all([
+                  page.waitForEvent("filechooser", { timeout: 3000 }),
+                  btn.click(),
+                ]);
+                await fileChooser.setFiles(report.pdfFilePath);
+                await page.waitForTimeout(800);
+                addLog(session, `✅ تم رفع ملف PDF (file chooser via "${btnSel}").`);
+                pdfUploaded = true;
+                break;
+              } catch { /* جرّب التالي */ }
+            }
+          } catch { /* تجاهل */ }
         }
-      } catch (e: any) {
-        addLog(session, `⚠️ خطأ في رفع PDF: ${e.message}`);
+
+        // المحاولة 3: setInputFiles بـ force على أي input[type=file] في DOM
+        if (!pdfUploaded) {
+          try {
+            await page.evaluate(() => {
+              document.querySelectorAll('input[type="file"]').forEach((el: any) => {
+                el.style.opacity = "1";
+                el.style.display = "block";
+                el.style.visibility = "visible";
+                el.style.position = "fixed";
+                el.style.top = "0";
+                el.style.left = "0";
+                el.style.width = "100px";
+                el.style.height = "100px";
+                el.style.zIndex = "99999";
+              });
+            });
+            await page.waitForTimeout(300);
+            const fileInput = await page.$('input[type="file"]');
+            if (fileInput) {
+              await fileInput.setInputFiles(report.pdfFilePath);
+              await page.waitForTimeout(800);
+              addLog(session, "✅ تم رفع ملف PDF (force visible).");
+              pdfUploaded = true;
+            }
+          } catch { /* تجاهل */ }
+        }
+
+        if (!pdfUploaded) {
+          addLog(session, "⚠️ لم يتمكن النظام من رفع PDF تلقائياً — يرجى رفعه يدوياً في المتصفح.");
+        }
       }
+    } else {
+      addLog(session, "⏭️ لا يوجد ملف PDF مرتبط بهذا التقرير.");
     }
 
     // لقطة شاشة بعد التعبئة
@@ -182,6 +251,18 @@ async function fillReportForm(
 ): Promise<void> {
   const { page } = session;
 
+  // ── تحويل التاريخ إلى تنسيق DD/MM/YYYY المتوقع في النماذج السعودية ────────
+  const formatDate = (raw: string | null | undefined): string | null => {
+    if (!raw) return null;
+    const s = raw.trim();
+    // إذا كان بالفعل DD/MM/YYYY أو D/M/YYYY أُعيد كما هو
+    if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s)) return s;
+    // إذا كان YYYY-MM-DD → حوّل
+    const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (m) return `${m[3]}/${m[2]}/${m[1]}`;
+    return s;
+  };
+
   // ── دالة تعبئة حقل نصي بطريقة Angular-safe ──────────────────────────────
   const fillAngular = async (selector: string, value: string | number | null | undefined, label: string) => {
     if (value === null || value === undefined || String(value).trim() === "") {
@@ -191,21 +272,56 @@ async function fillReportForm(
     const val = String(value);
     try {
       await page.waitForSelector(selector, { timeout: 3000 });
-      await page.click(selector);
-      await page.keyboard.press("Control+a");
-      await page.keyboard.press("Delete");
-      await page.type(selector, val, { delay: 30 });
-      // أطلق حدث input/change لـ Angular
-      await page.evaluate((sel) => {
-        const el = document.querySelector(sel) as HTMLInputElement | null;
+      // ضع القيمة مباشرة عبر JavaScript لضمان قراءتها من Angular
+      await page.evaluate((args: { sel: string; v: string }) => {
+        const el = document.querySelector(args.sel) as HTMLInputElement | null;
         if (!el) return;
+        const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+        if (nativeSetter) nativeSetter.call(el, args.v);
+        else el.value = args.v;
         el.dispatchEvent(new Event("input",  { bubbles: true }));
         el.dispatchEvent(new Event("change", { bubbles: true }));
         el.dispatchEvent(new Event("blur",   { bubbles: true }));
-      }, selector);
+      }, { sel: selector, v: val });
       addLog(session, `✅ ${label}: ${val}`);
     } catch {
       addLog(session, `⚠️ لم يُعبَّأ "${label}"`);
+    }
+  };
+
+  // ── دالة تعبئة حقل التاريخ (Angular datepicker) ─────────────────────────
+  const fillDate = async (selector: string, rawValue: string | null | undefined, label: string) => {
+    const formatted = formatDate(rawValue);
+    if (!formatted) {
+      addLog(session, `⏭️ تخطي "${label}" — لا توجد قيمة`);
+      return;
+    }
+    try {
+      await page.waitForSelector(selector, { timeout: 3000 });
+      // انقر على الحقل أولاً لتفعيله
+      await page.click(selector);
+      await page.waitForTimeout(200);
+      // امسح المحتوى الحالي
+      await page.keyboard.press("Control+a");
+      await page.keyboard.press("Delete");
+      // اكتب التاريخ بتنسيق DD/MM/YYYY
+      await page.keyboard.type(formatted, { delay: 50 });
+      await page.keyboard.press("Escape"); // أغلق أي datepicker popup
+      await page.waitForTimeout(200);
+      // أطلق الأحداث عبر JavaScript
+      await page.evaluate((args: { sel: string; v: string }) => {
+        const el = document.querySelector(args.sel) as HTMLInputElement | null;
+        if (!el) return;
+        const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+        if (nativeSetter) nativeSetter.call(el, args.v);
+        else el.value = args.v;
+        el.dispatchEvent(new Event("input",  { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        el.dispatchEvent(new Event("blur",   { bubbles: true }));
+      }, { sel: selector, v: formatted });
+      addLog(session, `✅ ${label}: ${formatted}`);
+    } catch {
+      addLog(session, `⚠️ لم يُعبَّأ تاريخ "${label}"`);
     }
   };
 
@@ -318,13 +434,21 @@ async function fillReportForm(
   const valDateEl = inputs.find(e =>
     /valuation.?date|تاريخ.*تقييم|inspection.?date/i.test(e.formControlName + e.name + e.placeholder + e.labelText)
   );
-  if (valDateEl) await fillAngular(buildSelector(valDateEl), report.valuationDate, "تاريخ التقييم");
+  if (valDateEl) {
+    await fillDate(buildSelector(valDateEl), report.valuationDate, "تاريخ التقييم");
+  } else {
+    addLog(session, `⏭️ تخطي "تاريخ التقييم" — لم يُعثر على الحقل`);
+  }
 
   // تاريخ إصدار التقرير
   const issueDateEl = inputs.find(e =>
     /issue.?date|report.?date|تاريخ.*إصدار|تاريخ.*تقرير/i.test(e.formControlName + e.name + e.placeholder + e.labelText)
   );
-  if (issueDateEl) await fillAngular(buildSelector(issueDateEl), report.reportDate, "تاريخ إصدار التقرير");
+  if (issueDateEl) {
+    await fillDate(buildSelector(issueDateEl), report.reportDate, "تاريخ إصدار التقرير");
+  } else {
+    addLog(session, `⏭️ تخطي "تاريخ إصدار التقرير" — لم يُعثر على الحقل`);
+  }
 
   // الافتراضات
   const assumEl = inputs.find(e =>
