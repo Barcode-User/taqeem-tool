@@ -136,6 +136,7 @@ router.post("/automation/submit-external", upload.single("pdf"), async (req, res
       intendedUser:                reportData.intendedUser             ?? null,
       reportType:                  reportData.reportType               ?? null,
       valuationPurpose:            reportData.valuationPurpose         ?? null,
+      valuationHypothesis:         reportData.valuationHypothesis      ?? null,
       valuationBasis:              reportData.valuationBasis           ?? null,
       propertyType:                reportData.propertyType             ?? null,
       propertySubType:             reportData.propertySubType          ?? null,

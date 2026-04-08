@@ -95,6 +95,7 @@ const reportFormSchema = z.object({
   
   reportType: stringOrNull,
   valuationPurpose: stringOrNull,
+  valuationHypothesis: stringOrNull,
   valuationBasis: stringOrNull,
   
   propertyType: stringOrNull,
@@ -524,6 +525,7 @@ export default function ReportDetails() {
                 <CopyField label="تاريخ المعاينة" value={report.inspectionDate} />
                 <CopyField label="نوع التقرير" value={report.reportType} />
                 <CopyField label="غرض التقييم" value={report.valuationPurpose} />
+                <CopyField label="فرضية القيمة" value={report.valuationHypothesis} />
                 <CopyField label="أساس القيمة" value={report.valuationBasis} />
                 <CopyField label="أسلوب التقييم" value={report.valuationMethod} />
               </CardContent>
@@ -811,6 +813,9 @@ export default function ReportDetails() {
                 )} />
                 <FormField control={form.control} name="valuationPurpose" render={({ field }) => (
                   <FormItem><FormLabel>غرض التقييم</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                )} />
+                <FormField control={form.control} name="valuationHypothesis" render={({ field }) => (
+                  <FormItem><FormLabel>فرضية القيمة</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="valuationBasis" render={({ field }) => (
                   <FormItem><FormLabel>أساس القيمة</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>

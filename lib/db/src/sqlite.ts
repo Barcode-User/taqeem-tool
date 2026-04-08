@@ -51,6 +51,7 @@ function getDb(): DatabaseSync {
       IntendedUser              TEXT,
       ReportType                TEXT,
       ValuationPurpose          TEXT,
+      ValuationHypothesis       TEXT,
       ValuationBasis            TEXT,
       PropertyType              TEXT,
       PropertySubType           TEXT,
@@ -102,6 +103,16 @@ function getDb(): DatabaseSync {
     )
   `);
 
+  // ─── Migrations: إضافة أعمدة جديدة للقواعد الموجودة ─────────────────────
+  const existingCols: string[] = (_db.prepare("PRAGMA table_info(Reports)").all() as any[]).map((c: any) => c.name);
+  const addIfMissing = (col: string, def: string) => {
+    if (!existingCols.includes(col)) {
+      _db!.exec(`ALTER TABLE Reports ADD COLUMN ${col} ${def}`);
+      console.log(`[DB] Migration: added column ${col}`);
+    }
+  };
+  addIfMissing("ValuationHypothesis", "TEXT");
+
   console.log(`[DB] SQLite: ${DB_PATH}`);
   return _db;
 }
@@ -136,6 +147,7 @@ function rowToReport(row: any): Report {
     intendedUser: str(row.IntendedUser),
     reportType: str(row.ReportType),
     valuationPurpose: str(row.ValuationPurpose),
+    valuationHypothesis: str(row.ValuationHypothesis),
     valuationBasis: str(row.ValuationBasis),
     propertyType: str(row.PropertyType),
     propertySubType: str(row.PropertySubType),
@@ -224,7 +236,7 @@ export async function sqliteInsertReport(data: InsertReport): Promise<Report> {
       LicenseDate, MembershipNumber, MembershipType, SecondValuerName,
       SecondValuerPercentage, SecondValuerLicenseNumber, SecondValuerMembershipNumber,
       TaqeemReportNumber, ClientName, ClientEmail, ClientPhone, IntendedUser,
-      ReportType, ValuationPurpose, ValuationBasis, PropertyType, PropertySubType,
+      ReportType, ValuationPurpose, ValuationHypothesis, ValuationBasis, PropertyType, PropertySubType,
       Region, City, District, Street, BlockNumber, PlotNumber, PlanNumber,
       PropertyUse, DeedNumber, DeedDate, OwnerName, OwnershipType,
       BuildingPermitNumber, BuildingStatus, BuildingAge, LandArea, BuildingArea,
@@ -236,7 +248,7 @@ export async function sqliteInsertReport(data: InsertReport): Promise<Report> {
     ) VALUES (
       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
     )
   `).run(
     data.reportNumber ?? null, data.reportDate ?? null, data.valuationDate ?? null,
@@ -249,6 +261,7 @@ export async function sqliteInsertReport(data: InsertReport): Promise<Report> {
     data.taqeemReportNumber ?? null,
     data.clientName ?? null, data.clientEmail ?? null, data.clientPhone ?? null,
     data.intendedUser ?? null, data.reportType ?? null, data.valuationPurpose ?? null,
+    data.valuationHypothesis ?? null,
     data.valuationBasis ?? null, data.propertyType ?? null, data.propertySubType ?? null,
     data.region ?? null, data.city ?? null, data.district ?? null, data.street ?? null,
     data.blockNumber ?? null, data.plotNumber ?? null, data.planNumber ?? null,
@@ -290,7 +303,7 @@ export async function sqliteUpdateReport(id: number, data: Partial<InsertReport>
     taqeemReportNumber: "TaqeemReportNumber",
     clientName: "ClientName", clientEmail: "ClientEmail", clientPhone: "ClientPhone",
     intendedUser: "IntendedUser", reportType: "ReportType",
-    valuationPurpose: "ValuationPurpose", valuationBasis: "ValuationBasis",
+    valuationPurpose: "ValuationPurpose", valuationHypothesis: "ValuationHypothesis", valuationBasis: "ValuationBasis",
     propertyType: "PropertyType", propertySubType: "PropertySubType",
     region: "Region", city: "City", district: "District", street: "Street",
     blockNumber: "BlockNumber", plotNumber: "PlotNumber", planNumber: "PlanNumber",

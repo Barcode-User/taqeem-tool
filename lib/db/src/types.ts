@@ -29,6 +29,7 @@ export interface Report {
   intendedUser: string | null;
   reportType: string | null;
   valuationPurpose: string | null;
+  valuationHypothesis: string | null;
   valuationBasis: string | null;
   propertyType: string | null;
   propertySubType: string | null;

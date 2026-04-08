@@ -272,9 +272,9 @@ async function fillReportForm(
 
   // فرضية القيمة
   const hypothesisEl = selects.find(e =>
-    /hypothesis|فرضية|basis|value.?basis/i.test(e.formControlName + e.name + e.placeholder + e.labelText)
+    /hypothesis|فرضية|premise/i.test(e.formControlName + e.name + e.placeholder + e.labelText)
   ) ?? selects[1];
-  if (hypothesisEl) await selectAngular(buildSelector(hypothesisEl), report.valuationBasis, "فرضية القيمة");
+  if (hypothesisEl) await selectAngular(buildSelector(hypothesisEl), report.valuationHypothesis, "فرضية القيمة");
 
   // أساس القيمة / طريقة التقييم
   const methodEl = selects.find(e =>
