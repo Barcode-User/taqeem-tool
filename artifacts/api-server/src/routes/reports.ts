@@ -457,6 +457,31 @@ router.get("/reports/:id/download-pdf", async (req, res) => {
   }
 });
 
+// POST /reports/:id/upload-pdf — رفع أو استبدال ملف PDF لتقرير موجود
+router.post("/reports/:id/upload-pdf", upload.single("pdf"), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) { res.status(400).json({ error: "Invalid ID" }); return; }
+    const report = await getReportById(id);
+    if (!report) { res.status(404).json({ error: "التقرير غير موجود" }); return; }
+    if (!req.file) { res.status(400).json({ error: "لم يُرفع أي ملف" }); return; }
+
+    const filePath = req.file.path;
+    const fileName = req.file.originalname;
+
+    // احذف الملف القديم إن وجد
+    if (report.pdfFilePath && report.pdfFilePath !== filePath) {
+      fs.unlink(report.pdfFilePath, () => {});
+    }
+
+    await updateReport(id, { pdfFileName: fileName, pdfFilePath: filePath });
+    res.json({ ok: true, pdfFileName: fileName, pdfFilePath: filePath });
+  } catch (err) {
+    req.log.error({ err }, "Failed to upload PDF");
+    res.status(500).json({ error: "خطأ في رفع الملف" });
+  }
+});
+
 // GET /reports/:id
 router.get("/reports/:id", async (req, res) => {
   try {

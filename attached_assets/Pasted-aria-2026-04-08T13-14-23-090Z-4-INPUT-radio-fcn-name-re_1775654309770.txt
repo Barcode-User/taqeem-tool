@@ -1,0 +1,34 @@
+aria=""
+[2026-04-08T13:14:23.090Z] [4] INPUT[radio] | fcn="" | name="report_type" | lbl="تقرير مفصل" | ph="" | aria=""
+[2026-04-08T13:14:23.090Z] [5] INPUT[radio] | fcn="" | name="report_type" | lbl="ملخص التقرير" | ph="" | aria=""
+[2026-04-08T13:14:23.090Z] [6] INPUT[radio] | fcn="" | name="report_type" | lbl="مراجعة مع قيمة جديدة" | ph="" | aria=""
+[2026-04-08T13:14:23.091Z] [7] INPUT[radio] | fcn="" | name="report_type" | lbl="مراجعة مع قيمة جديدة" | ph="" | aria=""
+[2026-04-08T13:14:23.091Z] [8] INPUT[radio] | fcn="" | name="report_type" | lbl="مراجعة بدون قيمة جديدة" | ph="" | aria=""
+[2026-04-08T13:14:23.092Z] [9] INPUT[radio] | fcn="" | name="report_type" | lbl="مراجعة بدون قيمة جديدة" | ph="" | aria=""
+[2026-04-08T13:14:23.093Z] [10] INPUT[text] | fcn="" | name="valued_at" | lbl="تاريخ التقييم *" | ph="" | aria=""
+[2026-04-08T13:14:23.094Z] [11] INPUT[text] | fcn="" | name="submitted_at" | lbl="تاريخ إصدار التقرير *" | ph="" | aria=""
+[2026-04-08T13:14:23.094Z] [12] INPUT[text] | fcn="" | name="assumptions" | lbl="الافتراضات" | ph="" | aria=""
+[2026-04-08T13:14:23.094Z] [13] INPUT[text] | fcn="" | name="special_assumptions" | lbl="الافتراضات الخاصة" | ph="" | aria=""
+[2026-04-08T13:14:23.094Z] [14] INPUT[text] | fcn="" | name="value" | lbl="الرأي النهائي في القيمة *" | ph="" | aria=""
+[2026-04-08T13:14:23.095Z] [15] SELECT[select-one] | fcn="" | name="currency_id" | lbl="عملة التقييم *" | ph="" | aria=""
+[2026-04-08T13:14:23.095Z] [16] INPUT[file] | fcn="" | name="report_file" | lbl="ملف أصل التقرير *" | ph="" | aria=""
+[2026-04-08T13:14:23.095Z] [17] INPUT[text] | fcn="" | name="client[0][name]" | lbl="اسم العميل" | ph="" | aria=""
+[2026-04-08T13:14:23.095Z] [18] INPUT[text] | fcn="" | name="client[0][telephone]" | lbl="رقم الهاتف" | ph="" | aria=""
+[2026-04-08T13:14:23.096Z] [19] INPUT[text] | fcn="" | name="client[0][email]" | lbl="البريد الإلكتروني" | ph="" | aria=""
+[2026-04-08T13:14:23.096Z] [20] INPUT[checkbox] | fcn="" | name="has_user" | lbl="للتقرير مستخدمون آخرون" | ph="" | aria=""
+[2026-04-08T13:14:23.096Z] [21] SELECT[select-one] | fcn="" | name="valuer[0][id]" | lbl="اسم المقيم *" | ph="" | aria=""
+[2026-04-08T13:14:23.096Z] [22] SELECT[select-one] | fcn="" | name="valuer[0][contribution]" | lbl="نسبة المساهمة *" | ph="" | aria=""
+[2026-04-08T13:14:23.097Z] [23] INPUT[submit] | fcn="" | name="save" | lbl="" | ph="" | aria=""
+[2026-04-08T13:14:23.097Z] [24] INPUT[submit] | fcn="" | name="continue" | lbl="" | ph="" | aria=""
+[2026-04-08T13:14:23.097Z] ══════════════════════════════════════
+[2026-04-08T13:14:23.235Z] ✅ الغرض من التقييم: التمويل (native select)
+[2026-04-08T13:14:23.366Z] ✅ فرضية القيمة: الاستخدام الحالي (native select)
+[2026-04-08T13:14:23.501Z] ✅ أساس القيمة: القيمة السوقية (native select)
+[2026-04-08T13:14:23.501Z] ⚠️ لم يُعثر على حقل «نوع التقرير»
+[2026-04-08T13:14:23.890Z] ✅ عنوان/رقم التقرير: DC26154419
+[2026-04-08T13:14:25.450Z] ✅ تاريخ إصدار التقرير: 05/04/2026
+[2026-04-08T13:14:27.008Z] ✅ تاريخ التقييم: 05/04/2026
+[2026-04-08T13:14:27.386Z] ✅ اسم العميل: إدارة بنك الراجحي
+[2026-04-08T13:14:27.785Z] ✅ البريد الإلكتروني: b.aa@gmail.com
+[2026-04-08T13:14:28.172Z] ✅ رقم الهاتف: 2-28049896023
+[2026-04-08T13:14:28.173Z] ⏭️ لا يوجد ملف PDF مرتبط بهذا التقرير.

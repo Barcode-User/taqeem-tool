@@ -213,6 +213,38 @@ export default function ReportDetails() {
   const [taqeemSession, setTaqeemSession] = useState<{ status: string; username?: string } | null>(null);
   const apiBase = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
 
+  // PDF upload state
+  const [pdfUploading, setPdfUploading] = useState(false);
+
+  const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !id) return;
+    if (file.type !== "application/pdf") {
+      toast({ title: "خطأ", description: "يجب اختيار ملف PDF فقط", variant: "destructive" });
+      return;
+    }
+    setPdfUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("pdf", file);
+      const resp = await fetch(`${apiBase}/api/reports/${id}/upload-pdf`, {
+        method: "POST",
+        body: formData,
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error ?? "فشل رفع الملف");
+      }
+      toast({ title: "✅ تم رفع ملف PDF بنجاح" });
+      queryClient.invalidateQueries({ queryKey: getGetReportQueryKey(id) });
+    } catch (err: any) {
+      toast({ title: "خطأ في الرفع", description: err.message, variant: "destructive" });
+    } finally {
+      setPdfUploading(false);
+      e.target.value = "";
+    }
+  };
+
   const form = useForm<ReportFormValues>({
     resolver: zodResolver(reportFormSchema),
     defaultValues: {},
@@ -391,7 +423,7 @@ export default function ReportDetails() {
               <Badge variant="outline" className={`${currentStatusInfo?.color} font-normal`}>
                 {currentStatusInfo?.label}
               </Badge>
-              {report.pdfFileName && (
+              {report.pdfFileName ? (
                 <a
                   href={`${apiBase}/api/reports/${id}/download-pdf`}
                   download={report.pdfFileName}
@@ -401,6 +433,12 @@ export default function ReportDetails() {
                   <Download className="h-3 w-3" />
                   {report.pdfFileName}
                 </a>
+              ) : (
+                <label className="text-xs text-amber-600 flex items-center gap-1 cursor-pointer hover:text-amber-700 border border-amber-300 bg-amber-50 rounded px-2 py-0.5" title="رفع ملف PDF للتقرير">
+                  {pdfUploading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
+                  {pdfUploading ? "جارٍ الرفع..." : "رفع PDF"}
+                  <input type="file" accept="application/pdf" className="hidden" onChange={handlePdfUpload} disabled={pdfUploading} />
+                </label>
               )}
             </div>
           </div>

@@ -559,12 +559,55 @@ async function fillPage1(session: AutomationSession, report: any, els: any[], pd
   if (basisEl) await selectAngular(session, buildSelector(basisEl), report.valuationBasis, "أساس القيمة", basisEl.isMat);
   else addLog(session, `⚠️ لم يُعثر على حقل «أساس القيمة»`);
 
-  // ── نوع التقرير ───────────────────────────────────────────────────────────
-  const reportTypeEl = findEl(selects,
-    /report.?type|reporttype|نوع.*تقرير|تقرير.*نوع|typereport|typeId/i,
+  // ── نوع التقرير (أزرار راديو) ────────────────────────────────────────────
+  const reportTypeRadios = els.filter(
+    (e: any) => e.tag === "INPUT" && e.type === "radio" && /report.?type/i.test(e.name ?? ""),
   );
-  if (reportTypeEl) await selectAngular(session, buildSelector(reportTypeEl), report.reportType, "نوع التقرير", reportTypeEl.isMat);
-  else addLog(session, `⚠️ لم يُعثر على حقل «نوع التقرير»`);
+  if (reportTypeRadios.length > 0 && report.reportType) {
+    const rt = (report.reportType ?? "").trim();
+    // ابحث عن أفضل تطابق: label أو value
+    const target = reportTypeRadios.find((r: any) => {
+      const lbl = (r.lbl ?? "").trim();
+      const val = (r.value ?? "").trim();
+      return lbl === rt || val === rt || lbl.includes(rt) || rt.includes(lbl);
+    }) ?? reportTypeRadios[0]; // fallback: الخيار الأول (تقرير مفصل)
+    try {
+      const sel = buildSelector(target);
+      await page.click(sel).catch(() =>
+        page.evaluate((s: string) => {
+          const el = document.querySelector(s) as HTMLElement | null;
+          if (el) el.click();
+        }, sel),
+      );
+      addLog(session, `✅ نوع التقرير: ${target.lbl || target.value || "الأول"}`);
+    } catch (e: any) {
+      addLog(session, `⚠️ تعذّر تحديد نوع التقرير: ${e.message}`);
+    }
+  } else if (reportTypeRadios.length === 0) {
+    // جرّب البحث المباشر في الصفحة باستخدام name="report_type"
+    const rCount = await page.$$eval(
+      'input[type="radio"][name="report_type"]',
+      (els) => els.length,
+    ).catch(() => 0);
+    if (rCount > 0 && report.reportType) {
+      const rt = (report.reportType ?? "").trim();
+      const clicked = await page.evaluate((rt: string) => {
+        const radios = Array.from(
+          document.querySelectorAll<HTMLInputElement>('input[type="radio"][name="report_type"]'),
+        );
+        const target = radios.find((r) => {
+          const lbl = (r.closest("label")?.textContent ?? r.labels?.[0]?.textContent ?? "").trim();
+          return lbl === rt || lbl.includes(rt) || rt.includes(lbl);
+        }) ?? radios[0];
+        if (target) { target.click(); return target.value || "ok"; }
+        return null;
+      }, rt);
+      if (clicked) addLog(session, `✅ نوع التقرير [direct]: ${clicked}`);
+      else addLog(session, `⚠️ تعذّر تحديد نوع التقرير من الصفحة`);
+    } else {
+      addLog(session, `⚠️ لم يُعثر على حقل «نوع التقرير»`);
+    }
+  }
 
   // ── رقم التقرير / عنوان التقرير ─────────────────────────────────────────
   const reportNumEl = findEl(inputs,
