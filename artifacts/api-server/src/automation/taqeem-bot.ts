@@ -894,26 +894,50 @@ async function uploadPdf(
     addLog(session, `  [file${i}] id="${f.id}" name="${f.name}" label="${f.nearLabel}" accept="${f.accept}"`),
   );
 
-  // ══ الطريقة 1: page.locator (أحدث وأكثر موثوقية في Playwright) ══════════
-  addLog(session, `  ↳ [1] page.locator('input[name="report_file"]').setInputFiles`);
+  // ══ الطريقة 1: DataTransfer API — تحاكي رفع ملف حقيقي في المتصفح ═════════
+  // تقرأ الملف من الخادم وتُدرجه مباشرة في input عبر JavaScript
+  addLog(session, `  ↳ [1] DataTransfer injection`);
   try {
-    await page.locator('input[name="report_file"]').setInputFiles(report.pdfFilePath);
-    await page.waitForTimeout(500);
-    await page.evaluate(() => {
-      const el = document.querySelector('input[name="report_file"]') as HTMLInputElement | null;
-      if (el) {
-        el.dispatchEvent(new Event("change", { bubbles: true }));
-        el.dispatchEvent(new Event("input",  { bubbles: true }));
-      }
-    });
-    await page.waitForTimeout(600);
-    const count1 = await page.$eval(
-      'input[name="report_file"]',
-      (el: HTMLInputElement) => el.files?.length ?? 0,
-    ).catch(() => 0);
-    addLog(session, `  ↳ files.length = ${count1}`);
-    if (count1 > 0) {
-      addLog(session, `✅ تم رفع PDF [1]: ${fileName}`);
+    const fileBuffer = fs.readFileSync(report.pdfFilePath);
+    const base64Data = fileBuffer.toString("base64");
+
+    const injected = await page.evaluate(
+      ({ b64, name }: { b64: string; name: string }) => {
+        try {
+          const byteArray = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+          const file = new File([byteArray], name, { type: "application/pdf" });
+          const dt = new DataTransfer();
+          dt.items.add(file);
+
+          // حاول على كل input[type=file] في الصفحة
+          const inputs = Array.from(
+            document.querySelectorAll('input[type="file"]'),
+          ) as HTMLInputElement[];
+
+          // الأولوية لـ report_file
+          inputs.sort((a) => (a.name === "report_file" ? -1 : 1));
+
+          for (const inp of inputs) {
+            try {
+              inp.files = dt.files;
+              inp.dispatchEvent(new Event("change", { bubbles: true }));
+              inp.dispatchEvent(new Event("input",  { bubbles: true }));
+              if (inp.files?.length) return `ok:${inp.name || inp.id || "unknown"}`;
+            } catch { /* جرّب التالي */ }
+          }
+          return "no-inputs-accepted";
+        } catch (e: any) {
+          return `error:${e.message}`;
+        }
+      },
+      { b64: base64Data, name: fileName },
+    );
+
+    addLog(session, `  ↳ [1] نتيجة: ${injected}`);
+
+    if (injected.startsWith("ok:")) {
+      await page.waitForTimeout(800);
+      addLog(session, `✅ تم رفع PDF [1-DataTransfer]: ${fileName}`);
       state.pdfUploaded = true;
       return;
     }
@@ -921,8 +945,7 @@ async function uploadPdf(
     addLog(session, `  ↳ [1] فشل: ${(e as Error).message}`);
   }
 
-  // ══ الطريقة 2: FileChooser بالنقر على label المرتبط ══════════════════════
-  // اجمع كل العناصر القابلة للنقر بالقرب من حقل الملف
+  // ══ الطريقة 2: FileChooser — النقر على label/button المرتبط ══════════════
   const reportFileId = await page.$eval(
     'input[name="report_file"]',
     (el: Element) => el.id ?? "",
@@ -938,8 +961,7 @@ async function uploadPdf(
     'button:has-text("Browse")',
     'button:has-text("Upload")',
     'label:has-text("رفع")',
-    '[class*="upload-btn"]',
-    '[class*="file-label"]',
+    '[class*="upload"]',
   ];
 
   for (const sel of clickTargets) {
@@ -953,42 +975,34 @@ async function uploadPdf(
       ]);
       await fc.setFiles(report.pdfFilePath);
       await page.waitForTimeout(800);
-      addLog(session, `✅ تم رفع PDF [2]: ${fileName} عبر ${sel}`);
+      addLog(session, `✅ تم رفع PDF [2-FileChooser]: ${fileName}`);
       state.pdfUploaded = true;
       return;
     } catch { /* جرّب التالي */ }
   }
 
-  // ══ الطريقة 3: إظهار قسري + setInputFiles ════════════════════════════════
-  addLog(session, `  ↳ [3] إظهار قسري للحقل + setInputFiles`);
+  // ══ الطريقة 3: page.locator().setInputFiles() ════════════════════════════
+  addLog(session, `  ↳ [3] page.locator setInputFiles`);
   try {
+    await page.locator('input[name="report_file"]').setInputFiles(report.pdfFilePath);
+    await page.waitForTimeout(500);
     await page.evaluate(() => {
-      const el = document.querySelector('input[name="report_file"]') as HTMLElement | null;
+      const el = document.querySelector('input[name="report_file"]') as HTMLInputElement | null;
       if (el) {
-        Object.assign(el.style, {
-          opacity: "1", display: "block", visibility: "visible",
-          position: "fixed", top: "0", left: "0", zIndex: "99999",
-          width: "200px", height: "50px",
-        });
-      }
-    });
-    await page.waitForTimeout(200);
-    const fi3 = await page.$('input[name="report_file"]');
-    if (fi3) {
-      await fi3.setInputFiles(report.pdfFilePath);
-      await page.waitForTimeout(500);
-      await fi3.evaluate((el: HTMLInputElement) => {
         el.dispatchEvent(new Event("change", { bubbles: true }));
         el.dispatchEvent(new Event("input",  { bubbles: true }));
-      });
-      await page.waitForTimeout(500);
-      const count3 = await fi3.evaluate((el: HTMLInputElement) => el.files?.length ?? 0);
-      addLog(session, `  ↳ [3] files.length = ${count3}`);
-      if (count3 > 0) {
-        addLog(session, `✅ تم رفع PDF [3]: ${fileName}`);
-        state.pdfUploaded = true;
-        return;
       }
+    });
+    await page.waitForTimeout(600);
+    const count3 = await page.$eval(
+      'input[name="report_file"]',
+      (el: HTMLInputElement) => el.files?.length ?? 0,
+    ).catch(() => 0);
+    addLog(session, `  ↳ [3] files.length = ${count3}`);
+    if (count3 > 0) {
+      addLog(session, `✅ تم رفع PDF [3-locator]: ${fileName}`);
+      state.pdfUploaded = true;
+      return;
     }
   } catch (e: any) {
     addLog(session, `  ↳ [3] فشل: ${(e as Error).message}`);
