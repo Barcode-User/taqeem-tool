@@ -392,10 +392,15 @@ export default function ReportDetails() {
                 {currentStatusInfo?.label}
               </Badge>
               {report.pdfFileName && (
-                <span className="text-xs text-muted-foreground flex items-center gap-1">
-                  <FileText className="h-3 w-3" />
+                <a
+                  href={`${apiBase}/api/reports/${id}/download-pdf`}
+                  download={report.pdfFileName}
+                  className="text-xs text-primary flex items-center gap-1 hover:underline"
+                  title="تنزيل ملف التقرير الأصلي"
+                >
+                  <Download className="h-3 w-3" />
                   {report.pdfFileName}
-                </span>
+                </a>
               )}
             </div>
           </div>

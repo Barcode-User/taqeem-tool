@@ -437,6 +437,26 @@ router.post("/reports/upload", upload.single("pdf"), async (req, res) => {
   }
 });
 
+// GET /reports/:id/download-pdf — تنزيل ملف PDF الأصلي
+router.get("/reports/:id/download-pdf", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) { res.status(400).json({ error: "Invalid ID" }); return; }
+    const report = await getReportById(id);
+    if (!report) { res.status(404).json({ error: "التقرير غير موجود" }); return; }
+    if (!report.pdfFilePath) { res.status(404).json({ error: "لا يوجد ملف PDF لهذا التقرير" }); return; }
+    if (!fs.existsSync(report.pdfFilePath)) {
+      res.status(404).json({ error: "ملف PDF غير موجود على الخادم" });
+      return;
+    }
+    const fileName = report.pdfFileName ?? path.basename(report.pdfFilePath);
+    res.download(report.pdfFilePath, fileName);
+  } catch (err) {
+    req.log.error({ err }, "Failed to download PDF");
+    res.status(500).json({ error: "خطأ في تنزيل الملف" });
+  }
+});
+
 // GET /reports/:id
 router.get("/reports/:id", async (req, res) => {
   try {
