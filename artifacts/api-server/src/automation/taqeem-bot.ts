@@ -565,12 +565,12 @@ async function fillPage1(session: AutomationSession, report: any, els: any[], pd
   if (reportTypeEl) await selectAngular(session, buildSelector(reportTypeEl), report.reportType, "نوع التقرير", reportTypeEl.isMat);
   else addLog(session, `⚠️ لم يُعثر على حقل «نوع التقرير»`);
 
-  // ── رقم التقرير ───────────────────────────────────────────────────────────
+  // ── رقم التقرير / عنوان التقرير ─────────────────────────────────────────
   const reportNumEl = findEl(inputs,
-    /report.?num|report.?no|reportno|reportnumber|reportref|externalref|externalnum|refno|referencenum|referenceno|رقم.*تقرير|تقرير.*رقم|رقم.*طلب|رقم.*مرجع|رقم.*داخل|numberreport|no\b/i,
+    /report.?num|report.?no|reportno|reportnumber|reportref|reporttitle|externalref|externalnum|refno|referencenum|referenceno|title|عنوان.*تقرير|تقرير.*عنوان|رقم.*تقرير|تقرير.*رقم|رقم.*طلب|رقم.*مرجع|رقم.*داخل|no\b/i,
   );
-  if (reportNumEl) await fillAngular(session, buildSelector(reportNumEl), report.reportNumber, "رقم التقرير");
-  else addLog(session, `⚠️ لم يُعثر على حقل «رقم التقرير» — جرّب الملء اليدوي`);
+  if (reportNumEl) await fillAngular(session, buildSelector(reportNumEl), report.reportNumber, "عنوان/رقم التقرير");
+  else addLog(session, `⚠️ لم يُعثر على حقل «عنوان/رقم التقرير» — جرّب الملء اليدوي`);
 
   // ── تاريخ إصدار التقرير ───────────────────────────────────────────────────
   const reportDateEl = findEl(inputs,
