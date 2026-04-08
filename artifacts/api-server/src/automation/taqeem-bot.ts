@@ -860,131 +860,100 @@ async function uploadPdf(
     return;
   }
   if (!fs.existsSync(report.pdfFilePath)) {
-    addLog(session, `⚠️ ملف PDF غير موجود: ${report.pdfFilePath}`);
+    addLog(session, `⚠️ ملف PDF غير موجود في المسار: ${report.pdfFilePath}`);
     return;
   }
 
   const { page } = session;
-  addLog(session, `📎 رفع ملف PDF: ${path.basename(report.pdfFilePath)}`);
+  const fileName = path.basename(report.pdfFilePath);
+  addLog(session, `📎 محاولة رفع: ${fileName}`);
 
-  // ── تحقق أولاً من وجود أي حقل رفع في الصفحة ──────────────────────────────
-  const fileInputCount = await page.$$eval(
-    'input[type="file"]',
-    (els: Element[]) => els.length,
-  );
-  if (fileInputCount === 0) {
+  // ── فحص وجود حقول رفع ─────────────────────────────────────────────────────
+  const fileInfos: Array<{ id: string; name: string; accept: string; nearLabel: string }> =
+    await page.evaluate(() =>
+      Array.from(document.querySelectorAll('input[type="file"]')).map((el: any) => {
+        // ابحث عن أقرب label
+        let nearLabel = "";
+        let p: Element | null = el.parentElement;
+        for (let i = 0; i < 8 && p; i++) {
+          const lbl = p.querySelector("label, mat-label, span");
+          if (lbl) { nearLabel = lbl.textContent?.trim().slice(0, 40) ?? ""; break; }
+          p = p.parentElement;
+        }
+        return { id: el.id ?? "", name: el.name ?? "", accept: el.accept ?? "", nearLabel };
+      }),
+    );
+
+  if (fileInfos.length === 0) {
     addLog(session, "⏭️ لا يوجد حقل رفع ملف في هذه الصفحة");
     return;
   }
-  addLog(session, `🔍 عدد حقول الرفع: ${fileInputCount}`);
 
-  // ── الطريقة 1: البحث عن الحقل بالتسمية "ملف أصل التقرير" ─────────────────
-  // (نبحث عن label يحتوي النص، ثم نجد input[type=file] المرتبط أو القريب)
-  const targetInputId = await page.evaluate(() => {
-    const labelTexts = [
-      "ملف أصل التقرير", "ملف التقرير", "رفع الملف", "التقرير",
-      "original", "source", "report file", "upload",
-    ];
-    // ابحث في كل label
-    for (const lbl of Array.from(document.querySelectorAll("label, mat-label, span"))) {
-      const text = lbl.textContent?.trim() ?? "";
-      if (labelTexts.some(t => text.includes(t))) {
-        // هل هو label[for=X]؟
-        const forAttr = (lbl as HTMLLabelElement).htmlFor;
-        if (forAttr) return forAttr; // يُعيد الـ id لنستخدمه
-        // ابحث في أخوة الأب
-        const parent = lbl.parentElement;
-        if (parent) {
-          const fi = parent.querySelector('input[type="file"]');
-          if (fi) return (fi as HTMLElement).id || "__FOUND_NO_ID__";
-        }
-        // ابحث في mat-form-field الأقرب
-        let p: Element | null = lbl.parentElement;
-        for (let i = 0; i < 6 && p; i++) {
-          const fi = p.querySelector('input[type="file"]');
-          if (fi) return (fi as HTMLElement).id || "__FOUND_NO_ID__";
-          p = p.parentElement;
-        }
+  // سجّل كل الحقول المكتشفة
+  fileInfos.forEach((f, i) =>
+    addLog(session, `  [file${i}] id="${f.id}" name="${f.name}" label="${f.nearLabel}" accept="${f.accept}"`),
+  );
+
+  // ── الطريقة 1: setInputFiles مباشرة على كل حقل (يعمل مع المخفية أيضاً) ────
+  const fis = await page.$$('input[type="file"]');
+  for (let i = 0; i < fis.length; i++) {
+    const fi = fis[i];
+    try {
+      addLog(session, `  ↳ تجربة setInputFiles على [file${i}]`);
+      await fi.setInputFiles(report.pdfFilePath);
+      await page.waitForTimeout(400);
+
+      // أطلق أحداث التغيير ليلتقطها Angular
+      await fi.evaluate((el: HTMLInputElement) => {
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        el.dispatchEvent(new Event("input",  { bubbles: true }));
+      });
+      await page.waitForTimeout(600);
+
+      // تحقق من أن الملف أُسند فعلاً
+      const count = await fi.evaluate((el: HTMLInputElement) => el.files?.length ?? 0);
+      addLog(session, `  ↳ files.length = ${count}`);
+
+      if (count > 0) {
+        addLog(session, `✅ تم رفع PDF: ${fileName}`);
+        state.pdfUploaded = true;
+        return;
       }
+    } catch (err: any) {
+      addLog(session, `  ↳ فشل setInputFiles: ${(err as Error).message}`);
     }
-    return null;
-  });
+  }
 
-  // ── الطريقة 2: استخدم FileChooser event عبر أزرار/labels/كل الحقول ──────
-  // أولاً جرّب عبر label الخاص بالحقل المستهدف (أكثر دقة)
-  const clickSelectors = [
-    // الحقل المستهدف تحديداً
+  // ── الطريقة 2: FileChooser عبر النقر على label/button ────────────────────
+  const clickTargets = [
     'label:has-text("ملف أصل التقرير")',
     'label:has-text("ملف التقرير")',
-    '[aria-label*="ملف"]',
-    '[title*="ملف"]',
-    // أزرار عامة للرفع
+    'label:has-text("رفع")',
     'button:has-text("رفع")',
     'button:has-text("اختر")',
     'button:has-text("اختر ملف")',
-    'button:has-text("تحميل")',
     'button:has-text("Browse")',
     'button:has-text("Upload")',
-    '[class*="upload-btn"]',
-    '[class*="file-upload"]',
-    'label[for*="file"]',
-    'label[for*="pdf"]',
-    'label[for*="attachment"]',
+    '[class*="upload"]',
+    'label[for]',          // أي label مرتبط بحقل
   ];
 
-  for (const sel of clickSelectors) {
+  for (const sel of clickTargets) {
     const el = await page.$(sel).catch(() => null);
     if (!el) continue;
+    addLog(session, `  ↳ تجربة FileChooser عبر: ${sel}`);
     try {
       const [fc] = await Promise.all([
         page.waitForEvent("filechooser", { timeout: 3000 }),
         el.click(),
       ]);
       await fc.setFiles(report.pdfFilePath);
-      await page.waitForTimeout(1000);
-      addLog(session, `✅ تم رفع PDF عبر: ${sel}`);
+      await page.waitForTimeout(800);
+      addLog(session, `✅ تم رفع PDF عبر FileChooser: ${sel}`);
       state.pdfUploaded = true;
       return;
     } catch { /* جرّب التالي */ }
   }
-
-  // ── الطريقة 3: setInputFiles مباشرة (بعد إظهار الحقول المخفية) ───────────
-  try {
-    await page.evaluate(() => {
-      document.querySelectorAll('input[type="file"]').forEach((el: any) => {
-        Object.assign(el.style, {
-          opacity: "1", display: "block", visibility: "visible",
-          position: "fixed", top: "0", left: "0",
-          width: "100px", height: "40px", zIndex: "99999",
-        });
-      });
-    });
-    await page.waitForTimeout(300);
-
-    const fis = await page.$$('input[type="file"]');
-    for (const fi of fis) {
-      try {
-        // إذا وجدنا الحقل المحدد بالـ id، استخدمه أولاً
-        const fiId = await fi.getAttribute("id");
-        if (targetInputId && targetInputId !== "__FOUND_NO_ID__" && fiId !== targetInputId) continue;
-
-        await fi.setInputFiles(report.pdfFilePath);
-        await page.waitForTimeout(1000);
-
-        // تحقق من نجاح الرفع (ابحث عن اسم الملف في الصفحة)
-        const fileName = path.basename(report.pdfFilePath);
-        const uploaded = await page.evaluate((name: string) => {
-          return document.body.innerText.includes(name.slice(0, 15)) ||
-            Array.from(document.querySelectorAll("input[type=file]"))
-              .some((el: any) => el.files?.length > 0);
-        }, fileName);
-
-        addLog(session, `✅ تم رفع PDF (setInputFiles)${uploaded ? " — الملف ظهر في الصفحة" : ""}`);
-        state.pdfUploaded = true;
-        return;
-      } catch { /* جرّب التالي */ }
-    }
-  } catch { /* تجاهل */ }
 
   addLog(session, "⚠️ لم يُرفع PDF في هذه الصفحة — سيُحاوَل في الصفحة التالية.");
 }
