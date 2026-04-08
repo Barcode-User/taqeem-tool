@@ -5,7 +5,6 @@ import { getReportById, updateReport } from "@workspace/db";
 import {
   createSession,
   closeSession,
-  waitForOtp,
   addLog,
   type AutomationSession,
 } from "./session-manager";
@@ -26,7 +25,6 @@ export async function startAutomation(
   reportId: number,
   options: AutomationOptions = {},
 ): Promise<string> {
-  // Check that we have an authenticated session before starting
   const context = await getAuthenticatedContext();
   if (!context) {
     throw new Error("لا توجد جلسة مسجّلة. يرجى تسجيل الدخول أولاً من صفحة الإعدادات.");
@@ -61,205 +59,210 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
 
     addLog(session, "بدء عملية الرفع الآلي...");
 
-    // ─── STEP 1: Navigate to New Report ─────────────────────────────
-    addLog(session, "الانتقال لإنشاء تقرير جديد...");
+    // ─── STEP 1: الانتقال لصفحة إنشاء تقرير جديد ────────────────────
+    addLog(session, "فتح صفحة إنشاء تقرير جديد...");
     await page.goto(`${TAQEEM_URL}/report/create/1/13`, {
       waitUntil: "networkidle",
       timeout: 30000,
     });
 
-    // Check if session expired (redirected to login)
-    if (page.url().includes("/login")) {
+    if (page.url().includes("/login") || page.url().includes("sso.taqeem")) {
       throw new Error("انتهت الجلسة — يرجى تسجيل الدخول مجدداً من صفحة الإعدادات.");
     }
 
-    // ─── STEP 2: Fill Report Fields ─────────────────────────────────
-    addLog(session, "تعبئة بيانات التقرير...");
+    addLog(session, `✅ تم فتح الصفحة: ${page.url()}`);
+
+    // ─── STEP 2: تعبئة النموذج ───────────────────────────────────────
+    addLog(session, "بدء تعبئة بيانات التقرير...");
     await fillReportForm(session, report);
 
-    // ─── STEP 3: Upload PDF ─────────────────────────────────────────
+    // ─── STEP 3: رفع ملف PDF ────────────────────────────────────────
     if (report.pdfFilePath && fs.existsSync(report.pdfFilePath)) {
       addLog(session, "رفع ملف PDF...");
-      // ⚠️ TODO: تحديث محدد حقل رفع الملف
-      const fileInput = await page.$('input[type="file"]');
-      if (fileInput) {
-        await fileInput.setInputFiles(report.pdfFilePath);
-        addLog(session, "تم رفع ملف PDF.");
-      }
-    }
-
-    // ─── STEP 4: Submit ─────────────────────────────────────────────
-    addLog(session, "البحث عن زر الإرسال...");
-
-    // التقاط لقطة شاشة قبل الإرسال للمساعدة في التشخيص
-    const screenshotPath = path.join(UPLOADS_DIR, `before_submit_${reportId}_${Date.now()}.png`);
-    await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {});
-    addLog(session, `لقطة شاشة قبل الإرسال: ${screenshotPath}`);
-
-    // قائمة محددات محتملة لزر الإرسال في منصة تقييم
-    const submitSelectors = [
-      'button[type="submit"]',
-      'input[type="submit"]',
-      'button:has-text("إرسال")',
-      'button:has-text("حفظ")',
-      'button:has-text("رفع")',
-      'button:has-text("تقديم")',
-      'button:has-text("التالي")',
-      'button:has-text("موافق")',
-      'button:has-text("تأكيد")',
-      'button:has-text("إضافة")',
-      '.btn-primary',
-      '.btn-success',
-      '[class*="submit"]',
-      '[id*="submit"]',
-      '[id*="save"]',
-    ];
-
-    let clicked = false;
-    for (const sel of submitSelectors) {
       try {
-        const el = await page.$(sel);
-        if (el && await el.isVisible()) {
-          const text = await el.innerText().catch(() => sel);
-          addLog(session, `وجدت زر الإرسال: "${text.trim()}" — جارٍ الضغط...`);
-          await el.click();
-          clicked = true;
-          break;
+        const fileInput = await page.$('input[type="file"]');
+        if (fileInput) {
+          await fileInput.setInputFiles(report.pdfFilePath);
+          await page.waitForTimeout(1000);
+          addLog(session, "✅ تم رفع ملف PDF.");
+        } else {
+          addLog(session, "⚠️ لم يُعثر على حقل رفع الملف.");
         }
-      } catch {}
+      } catch (e: any) {
+        addLog(session, `⚠️ خطأ في رفع PDF: ${e.message}`);
+      }
+    } else {
+      addLog(session, "⚠️ لا يوجد ملف PDF مرتبط بهذا التقرير.");
     }
 
-    if (!clicked) {
-      // التقاط لقطة شاشة للمساعدة في تشخيص المشكلة
-      addLog(session, "⚠️ لم يُعثر على زر الإرسال — يرجى مراجعة لقطة الشاشة وتحديث المحددات.");
-      throw new Error("لم يُعثر على زر الإرسال في الصفحة. يرجى مشاركة لقطة الشاشة مع المطوّر.");
-    }
+    // ─── STEP 4: لقطة شاشة للمراجعة ────────────────────────────────
+    const screenshotPath = path.join(UPLOADS_DIR, `filled_form_${reportId}_${Date.now()}.png`);
+    await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {});
+    addLog(session, `📸 لقطة شاشة محفوظة في: ${screenshotPath}`);
 
-    await page.waitForLoadState("networkidle", { timeout: 30000 }).catch(() => {});
-
-    // ─── STEP 5: Get QR Code & Certificate ─────────────────────────
-    addLog(session, "استخراج QR Code والشهادة...");
-    const result = await extractQrAndCertificate(session, reportId);
-
-    // ─── STEP 6: Update DB — مكتمل ─────────────────────────────────
+    // ─── تحديث الحالة: جاهز للمراجعة ────────────────────────────────
     await updateReport(reportId, {
-      status:             "submitted",
-      automationStatus:   "completed",
-      qrCodeBase64:       result.qrCodeBase64    ?? null,
-      certificatePath:    result.certificatePath ?? null,
-      taqeemSubmittedAt:  new Date().toISOString(),
-      taqeemReportNumber: result.taqeemReportNumber ?? report.taqeemReportNumber,
+      automationStatus: "waiting_review",
+      automationError: null,
     });
 
-    addLog(session, "✅ اكتملت العملية بنجاح! — تم الرفع على منصة تقييم");
+    addLog(session, "✅ تم تعبئة جميع الحقول — راجع البيانات في المتصفح ثم اضغط «حفظ واستمرار» أو «حفظ وإغلاق» يدوياً.");
+    addLog(session, "🔵 المتصفح مفتوح أمامك للمراجعة — لن يُغلق تلقائياً.");
+
+    // لا نُغلق الصفحة — نتركها مفتوحة للمستخدم للمراجعة
+    closeSession(session.sessionId);
+
   } catch (err: any) {
     addLog(session, `❌ خطأ: ${err.message}`);
     await updateReport(reportId, { automationStatus: "failed", automationError: err.message });
-    throw err;
-  } finally {
     try { await page.close(); } catch {}
     closeSession(session.sessionId);
+    throw err;
   }
 }
 
 async function fillReportForm(session: AutomationSession, report: any): Promise<void> {
   const { page } = session;
 
-  // ⚠️ ═══════════════════════════════════════════════════════════
-  // ⚠️  يجب تحديث هذه المحددات (selectors) بناءً على لقطات الشاشة
-  // ⚠│  من منصة تقييم التي ستُرسلها
-  // ⚠️ ═══════════════════════════════════════════════════════════
+  // ─── أدوات مساعدة ────────────────────────────────────────────────
 
-  const fillIfExists = async (selector: string, value: string | number | null | undefined) => {
-    if (!value) return;
+  // تعبئة حقل نصي بالبحث عن تسمية اللافتة أولاً ثم الـ placeholder
+  const fillByLabel = async (labelAr: string, value: string | number | null | undefined) => {
+    if (value === null || value === undefined || value === "") return;
+    const val = String(value);
     try {
-      const el = await page.$(selector);
-      if (el) await page.fill(selector, String(value));
+      await page.getByLabel(labelAr, { exact: false }).first().fill(val);
+      addLog(session, `✅ ${labelAr}: ${val}`);
+      return;
     } catch {}
+    // fallback: ابحث عن input بعد اللافتة
+    try {
+      const label = page.locator(`label, span, div`).filter({ hasText: new RegExp(labelAr, "i") }).first();
+      const input = label.locator("xpath=following::input[1] | xpath=following::textarea[1]");
+      await input.fill(val);
+      addLog(session, `✅ ${labelAr}: ${val}`);
+    } catch {
+      addLog(session, `⚠️ لم يتم تعبئة "${labelAr}"`);
+    }
   };
 
-  const selectIfExists = async (selector: string, value: string | null | undefined) => {
+  // اختيار قيمة من قائمة منسدلة
+  const selectByLabel = async (labelAr: string, value: string | null | undefined) => {
     if (!value) return;
     try {
-      const el = await page.$(selector);
-      if (el)
-        await page
-          .selectOption(selector, { label: value })
-          .catch(() => page.selectOption(selector, { value }).catch(() => {}));
+      const sel = page.getByLabel(labelAr, { exact: false }).first();
+      await sel.selectOption({ label: value }).catch(() => sel.selectOption({ value }));
+      addLog(session, `✅ ${labelAr}: ${value}`);
+      return;
     } catch {}
+    // fallback: ابحث عن select بعد اللافتة
+    try {
+      const label = page.locator(`label, span, div`).filter({ hasText: new RegExp(labelAr, "i") }).first();
+      const select = label.locator("xpath=following::select[1]");
+      await select.selectOption({ label: value }).catch(() => select.selectOption({ value }));
+      addLog(session, `✅ ${labelAr}: ${value}`);
+    } catch {
+      addLog(session, `⚠️ لم يتم تحديد "${labelAr}": ${value}`);
+    }
   };
 
-  await fillIfExists('[name="report_number"], [id*="report_number"]', report.reportNumber);
-  await fillIfExists('[name="report_date"], [id*="report_date"]', report.reportDate);
-  await fillIfExists('[name="valuation_date"], [id*="valuation_date"]', report.valuationDate);
-  await fillIfExists('[name="request_number"], [id*="request_number"]', report.requestNumber);
-  await fillIfExists('[name="client_name"], [id*="client"]', report.clientName);
-  await fillIfExists('[name="client_email"]', report.clientEmail);
-  await fillIfExists('[name="client_phone"]', report.clientPhone);
-  await selectIfExists('[name="property_type"], select[id*="property_type"]', report.propertyType);
-  await selectIfExists('[name="property_use"], select[id*="use"]', report.propertyUse);
-  await selectIfExists('[name="region"], select[id*="region"]', report.region);
-  await fillIfExists('[name="city"], [id*="city"]', report.city);
-  await fillIfExists('[name="district"], [id*="district"]', report.district);
-  await fillIfExists('[name="deed_number"], [id*="deed"]', report.deedNumber);
-  await fillIfExists('[name="land_area"], [id*="land_area"]', report.landArea);
-  await fillIfExists('[name="final_value"], [id*="final_value"]', report.finalValue);
-  await selectIfExists(
-    '[name="valuation_method"], select[id*="method"]',
-    report.valuationMethod,
-  );
-
-  addLog(session, "تم تعبئة حقول النموذج.");
-}
-
-async function extractQrAndCertificate(
-  session: AutomationSession,
-  reportId: number,
-): Promise<{ qrCodeBase64?: string; certificatePath?: string; taqeemReportNumber?: string }> {
-  const { page } = session;
-  let qrCodeBase64: string | undefined;
-  let certificatePath: string | undefined;
-  let taqeemReportNumber: string | undefined;
-
-  try {
-    const reportNumEl = await page.$(
-      '[id*="report_number"], .report-number, [class*="report-num"]',
-    );
-    if (reportNumEl) {
-      taqeemReportNumber = (await reportNumEl.innerText()).trim();
+  // تحديد زر radio
+  const checkRadio = async (labelAr: string) => {
+    try {
+      await page.getByLabel(labelAr, { exact: false }).first().check();
+      addLog(session, `✅ نوع التقرير: ${labelAr}`);
+    } catch {
+      addLog(session, `⚠️ لم يتم تحديد نوع التقرير "${labelAr}"`);
     }
+  };
 
-    const qrImg = await page.$('img[src*="qr"], img[alt*="QR"], canvas[id*="qr"]');
-    if (qrImg) {
-      const qrSrc = await qrImg.getAttribute("src");
-      if (qrSrc?.startsWith("data:")) {
-        qrCodeBase64 = qrSrc;
-      } else if (qrSrc) {
-        const qrResponse = await page.context().request.get(qrSrc);
-        const buffer = await qrResponse.body();
-        qrCodeBase64 = `data:image/png;base64,${buffer.toString("base64")}`;
-      }
-      addLog(session, "تم استخراج QR Code.");
+  // تعبئة حقل تاريخ
+  const fillDate = async (labelAr: string, value: string | null | undefined) => {
+    if (!value) return;
+    // تحويل التاريخ لصيغة YYYY-MM-DD إذا لزم
+    const dateVal = value.replace(/\//g, "-");
+    try {
+      const input = page.getByLabel(labelAr, { exact: false }).first();
+      await input.fill(dateVal);
+      await page.keyboard.press("Tab");
+      addLog(session, `✅ ${labelAr}: ${dateVal}`);
+    } catch {
+      addLog(session, `⚠️ لم يتم تعبئة تاريخ "${labelAr}"`);
     }
+  };
 
-    const certFilename = `certificate_${reportId}_${Date.now()}.pdf`;
-    const certPath = path.join(UPLOADS_DIR, certFilename);
-    const [download] = await Promise.all([
-      page.waitForEvent("download", { timeout: 5000 }).catch(() => null),
-      page
-        .click(
-          'a[href*="certificate"], a[href*="شهادة"], button:has-text("تحميل الشهادة")',
-        )
-        .catch(() => {}),
-    ]);
-    if (download) {
-      await download.saveAs(certPath);
-      certificatePath = certPath;
-      addLog(session, "تم تحميل الشهادة.");
-    }
-  } catch (err: any) {
-    addLog(session, `تحذير: لم يتم استخراج QR/الشهادة - ${err.message}`);
+  await page.waitForTimeout(1500);
+
+  // ════════════════════════════════════════════════════════════════════
+  // معلومات التقرير
+  // ════════════════════════════════════════════════════════════════════
+
+  // عنوان التقرير (نستخدم رقم التقرير كعنوان)
+  await fillByLabel("عنوان التقرير", report.reportNumber);
+
+  // الغرض من التقييم (dropdown)
+  await selectByLabel("الغرض من التقييم", report.valuationPurpose);
+
+  // فرضية القيمة (dropdown)
+  await selectByLabel("فرضية القيمة", report.valuationBasis);
+
+  // أساس القيمة (dropdown)
+  await selectByLabel("أساس القيمة", report.valuationMethod);
+
+  // نوع التقرير (radio buttons)
+  // القيم الممكنة: تقرير مفصل | ملخص التقرير | مراجعة مع قيمة جديدة | مراجعة بدون قيمة جديدة
+  if (report.reportType) {
+    await checkRadio(report.reportType);
   }
 
-  return { qrCodeBase64, certificatePath, taqeemReportNumber };
+  // تاريخ التقييم
+  await fillDate("تاريخ التقييم", report.valuationDate);
+
+  // تاريخ إصدار التقرير
+  await fillDate("تاريخ إصدار التقرير", report.reportDate);
+
+  // الافتراضات
+  await fillByLabel("الافتراضات", report.notes);
+
+  // الرأي النهائي في القيمة
+  await fillByLabel("الرأي النهائي في القيمة", report.finalValue);
+
+  await page.waitForTimeout(500);
+
+  // ════════════════════════════════════════════════════════════════════
+  // بيانات العميل
+  // ════════════════════════════════════════════════════════════════════
+
+  // اسم العميل
+  await fillByLabel("اسم العميل", report.clientName);
+
+  // رقم الهاتف
+  await fillByLabel("رقم الهاتف", report.clientPhone);
+
+  // البريد الإلكتروني
+  await fillByLabel("البريد الإلكتروني", report.clientEmail);
+
+  await page.waitForTimeout(500);
+
+  addLog(session, "✅ اكتملت تعبئة جميع الحقول.");
+}
+
+export async function submitSavedForm(reportId: number): Promise<void> {
+  // يُستدعى لاحقاً إذا أراد المستخدم الإرسال التلقائي بعد المراجعة
+  const context = await getAuthenticatedContext();
+  if (!context) throw new Error("لا توجد جلسة مسجّلة.");
+
+  const pages = context.pages();
+  const formPage = pages.find(p => p.url().includes("/report/create"));
+  if (!formPage) throw new Error("لم يتم العثور على صفحة النموذج المفتوحة.");
+
+  // الضغط على حفظ واستمرار
+  await formPage.click('button:has-text("حفظ واستمرار")');
+  await formPage.waitForLoadState("networkidle", { timeout: 30000 });
+
+  await updateReport(reportId, {
+    status: "submitted",
+    automationStatus: "completed",
+    taqeemSubmittedAt: new Date().toISOString(),
+  });
 }
