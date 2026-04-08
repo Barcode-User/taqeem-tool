@@ -63,8 +63,7 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
 
     // ─── STEP 1: Navigate to New Report ─────────────────────────────
     addLog(session, "الانتقال لإنشاء تقرير جديد...");
-    // ⚠️ TODO: تحديث الرابط الصحيح لصفحة إنشاء تقرير جديد
-    await page.goto(`${TAQEEM_URL}/membership/report/create`, {
+    await page.goto(`${TAQEEM_URL}/report/create/1/13`, {
       waitUntil: "networkidle",
       timeout: 30000,
     });
