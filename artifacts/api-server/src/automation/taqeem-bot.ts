@@ -894,12 +894,17 @@ async function uploadPdf(
     addLog(session, `  [file${i}] id="${f.id}" name="${f.name}" label="${f.nearLabel}" accept="${f.accept}"`),
   );
 
-  // ── الطريقة 1: setInputFiles مباشرة على كل حقل (يعمل مع المخفية أيضاً) ────
-  const fis = await page.$$('input[type="file"]');
-  for (let i = 0; i < fis.length; i++) {
-    const fi = fis[i];
+  // ── الطريقة 1: استهداف الحقل المسمى report_file مباشرةً ─────────────────
+  // report_file أولاً، ثم بقية الحقول احتياطاً
+  const reportFileFis = await page.$$('input[name="report_file"]');
+  const otherFis      = await page.$$('input[type="file"]:not([name="report_file"])');
+  const orderedFis    = [...reportFileFis, ...otherFis];
+
+  for (let i = 0; i < orderedFis.length; i++) {
+    const fi = orderedFis[i];
+    const fiName = await fi.getAttribute("name").catch(() => "");
     try {
-      addLog(session, `  ↳ تجربة setInputFiles على [file${i}]`);
+      addLog(session, `  ↳ setInputFiles على input[name="${fiName}"]`);
       await fi.setInputFiles(report.pdfFilePath);
       await page.waitForTimeout(400);
 
@@ -920,12 +925,20 @@ async function uploadPdf(
         return;
       }
     } catch (err: any) {
-      addLog(session, `  ↳ فشل setInputFiles: ${(err as Error).message}`);
+      addLog(session, `  ↳ فشل: ${(err as Error).message}`);
     }
   }
 
   // ── الطريقة 2: FileChooser عبر النقر على label/button ────────────────────
+  // ابحث عن الـ label المرتبط بـ input[name="report_file"]
+  const reportFileId = await page.$eval(
+    'input[name="report_file"]',
+    (el: Element) => el.id ?? "",
+  ).catch(() => "");
+
   const clickTargets = [
+    // الأدق: label مرتبط بـ report_file
+    ...(reportFileId ? [`label[for="${reportFileId}"]`] : []),
     'label:has-text("ملف أصل التقرير")',
     'label:has-text("ملف التقرير")',
     'label:has-text("رفع")',
@@ -935,7 +948,7 @@ async function uploadPdf(
     'button:has-text("Browse")',
     'button:has-text("Upload")',
     '[class*="upload"]',
-    'label[for]',          // أي label مرتبط بحقل
+    'label[for]',
   ];
 
   for (const sel of clickTargets) {
