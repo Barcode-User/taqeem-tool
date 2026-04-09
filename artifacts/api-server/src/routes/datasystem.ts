@@ -405,10 +405,23 @@ router.post("/datasystem/upload", (req, res, next) => {
 });
 
 // ─── GET /api/datasystem ───────────────────────────────────────────────────────
+// يُرجع قائمة datasystem مع نسبة التطابق لكل سجل
 router.get("/datasystem", async (_req, res) => {
   try {
     const list = await sqliteListDataSystem();
-    res.json(list);
+    const withScores = await Promise.all(
+      list.map(async (ds) => {
+        if (!ds.linkedReportId) return { ...ds, averageScore: null };
+        const report = await getReportById(ds.linkedReportId);
+        if (!report) return { ...ds, averageScore: null };
+        const scores = COMPARE_FIELDS.map(({ key }) =>
+          calcMatchScore((ds as any)[key], (report as any)[key])
+        );
+        const avg = Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
+        return { ...ds, averageScore: avg };
+      })
+    );
+    res.json(withScores);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

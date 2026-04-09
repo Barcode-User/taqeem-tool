@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link } from "wouter";
 import { useListReports, useGetReportStats } from "@workspace/api-client-react";
 import { 
@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { FileText, Clock, CheckCircle2, Upload, AlertCircle, PlusCircle, Search, Filter } from "lucide-react";
+import { FileText, Clock, CheckCircle2, Upload, AlertCircle, PlusCircle, Search, Filter, Database } from "lucide-react";
 import { format } from "date-fns";
 import { arSA } from "date-fns/locale";
 import { Button } from "@/components/ui/button";
@@ -32,12 +32,50 @@ const statusMap: Record<string, { label: string, color: string }> = {
   submitted: { label: "تم الرفع", color: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border-green-200" },
 };
 
+function ScoreBar({ score }: { score: number }) {
+  const color =
+    score >= 80 ? "bg-green-500" :
+    score >= 60 ? "bg-yellow-500" :
+    score >= 40 ? "bg-orange-500" :
+    "bg-red-500";
+  const textColor =
+    score >= 80 ? "text-green-700" :
+    score >= 60 ? "text-yellow-700" :
+    score >= 40 ? "text-orange-700" :
+    "text-red-700";
+
+  return (
+    <div className="flex items-center gap-2 min-w-[90px]">
+      <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
+        <div className={`h-2 ${color} rounded-full transition-all`} style={{ width: `${score}%` }} />
+      </div>
+      <span className={`text-xs font-bold w-8 text-right ${textColor}`}>{score}%</span>
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const { data: reports, isLoading: reportsLoading } = useListReports();
   const { data: stats, isLoading: statsLoading } = useGetReportStats();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [dsMap, setDsMap] = useState<Record<number, { averageScore: number | null }>>({});
+
+  useEffect(() => {
+    fetch("/api/datasystem")
+      .then((r) => r.json())
+      .then((list: any[]) => {
+        const map: Record<number, { averageScore: number | null }> = {};
+        list.forEach((ds) => {
+          if (ds.linkedReportId != null) {
+            map[ds.linkedReportId] = { averageScore: ds.averageScore ?? null };
+          }
+        });
+        setDsMap(map);
+      })
+      .catch(() => {});
+  }, []);
 
   const filteredReports = reports?.filter((report) => {
     const matchesSearch = 
@@ -178,44 +216,74 @@ export default function Dashboard() {
                     <TableHead className="text-right">نوع العقار</TableHead>
                     <TableHead className="text-right">تاريخ التقرير</TableHead>
                     <TableHead className="text-right">الحالة</TableHead>
+                    <TableHead className="text-right">مصدر البيانات</TableHead>
+                    <TableHead className="text-right">نسبة التطابق</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredReports.map((report) => (
-                    <TableRow key={report.id} className="cursor-pointer hover:bg-muted/50 transition-colors">
-                      <TableCell className="font-medium">
-                        <Link href={`/reports/${report.id}`}>
-                          <div className="block w-full py-1 text-primary hover:underline">{report.reportNumber || "—"}</div>
-                        </Link>
-                      </TableCell>
-                      <TableCell>
-                        <Link href={`/reports/${report.id}`}>
-                          <div className="block w-full py-1">{report.clientName || "—"}</div>
-                        </Link>
-                      </TableCell>
-                      <TableCell>
-                        <Link href={`/reports/${report.id}`}>
-                          <div className="block w-full py-1">{report.propertyType || "—"}</div>
-                        </Link>
-                      </TableCell>
-                      <TableCell>
-                        <Link href={`/reports/${report.id}`}>
-                          <div className="block w-full py-1 text-muted-foreground">
-                            {report.reportDate ? format(new Date(report.reportDate), "dd MMMM yyyy", { locale: arSA }) : "—"}
-                          </div>
-                        </Link>
-                      </TableCell>
-                      <TableCell>
-                        <Link href={`/reports/${report.id}`}>
-                          <div className="block w-full py-1">
-                            <Badge variant="outline" className={`${statusMap[report.status]?.color} px-2 py-0.5 rounded-full font-normal`}>
-                              {statusMap[report.status]?.label || report.status}
+                  {filteredReports.map((report) => {
+                    const ds = dsMap[report.id!];
+                    const hasDs = ds !== undefined;
+                    const score = ds?.averageScore;
+                    return (
+                      <TableRow key={report.id} className="cursor-pointer hover:bg-muted/50 transition-colors">
+                        <TableCell className="font-medium">
+                          <Link href={`/reports/${report.id}`}>
+                            <div className="block w-full py-1 text-primary hover:underline">{report.reportNumber || "—"}</div>
+                          </Link>
+                        </TableCell>
+                        <TableCell>
+                          <Link href={`/reports/${report.id}`}>
+                            <div className="block w-full py-1">{report.clientName || "—"}</div>
+                          </Link>
+                        </TableCell>
+                        <TableCell>
+                          <Link href={`/reports/${report.id}`}>
+                            <div className="block w-full py-1">{report.propertyType || "—"}</div>
+                          </Link>
+                        </TableCell>
+                        <TableCell>
+                          <Link href={`/reports/${report.id}`}>
+                            <div className="block w-full py-1 text-muted-foreground">
+                              {report.reportDate ? format(new Date(report.reportDate), "dd MMMM yyyy", { locale: arSA }) : "—"}
+                            </div>
+                          </Link>
+                        </TableCell>
+                        <TableCell>
+                          <Link href={`/reports/${report.id}`}>
+                            <div className="block w-full py-1">
+                              <Badge variant="outline" className={`${statusMap[report.status]?.color} px-2 py-0.5 rounded-full font-normal`}>
+                                {statusMap[report.status]?.label || report.status}
+                              </Badge>
+                            </div>
+                          </Link>
+                        </TableCell>
+
+                        {/* عمود مصدر البيانات */}
+                        <TableCell>
+                          {hasDs ? (
+                            <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 gap-1 px-2 py-0.5 rounded-full font-normal flex items-center w-fit">
+                              <Database className="h-3 w-3" />
+                              مرتبط بالنظام
                             </Badge>
-                          </div>
-                        </Link>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                          ) : (
+                            <span className="text-muted-foreground text-sm">—</span>
+                          )}
+                        </TableCell>
+
+                        {/* عمود نسبة التطابق */}
+                        <TableCell>
+                          {hasDs && score != null ? (
+                            <ScoreBar score={score} />
+                          ) : hasDs ? (
+                            <span className="text-muted-foreground text-sm text-xs">لم يُحسب</span>
+                          ) : (
+                            <span className="text-muted-foreground text-sm">—</span>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>
