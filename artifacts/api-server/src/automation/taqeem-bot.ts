@@ -631,17 +631,11 @@ async function fillPage1(session: AutomationSession, report: any, els: any[], pd
   if (reportNumEl) await fillAngular(session, buildSelector(reportNumEl), report.reportNumber, "عنوان/رقم التقرير");
   else addLog(session, `⚠️ لم يُعثر على حقل «عنوان/رقم التقرير» — جرّب الملء اليدوي`);
 
-  // ── تاريخ إصدار التقرير — دائماً تاريخ اليوم ────────────────────────────
+  // ── تاريخ إصدار التقرير ───────────────────────────────────────────────────
   const reportDateEl = findEl(inputs,
     /report.?date|reportdate|date.*report|تاريخ.*تقرير|تاريخ.*إصدار|تاريخ.*نشر|issuedate|publishdate/i,
   );
-  const todayStr = (() => {
-    const d = new Date();
-    const dd = String(d.getDate()).padStart(2, "0");
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    return `${dd}/${mm}/${d.getFullYear()}`;
-  })();
-  if (reportDateEl) await fillDate(session, buildSelector(reportDateEl), todayStr, "تاريخ إصدار التقرير");
+  if (reportDateEl) await fillDate(session, buildSelector(reportDateEl), report.reportDate, "تاريخ إصدار التقرير");
   else addLog(session, `⚠️ لم يُعثر على حقل «تاريخ إصدار التقرير»`);
 
   // ── تاريخ التقييم ─────────────────────────────────────────────────────────
