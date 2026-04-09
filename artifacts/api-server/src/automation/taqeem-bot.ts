@@ -912,8 +912,23 @@ async function uploadPdf(
   // لا نتخطى حتى لو سبق الرفع — الملف قد يُمسح عند انتقال الصفحة في Angular
   // فقط نتخطى إذا لم يكن هناك حقل رفع في الصفحة الحالية (تتحقق لاحقاً)
 
-  // مسار احتياطي مؤقت عند غياب الملف في التقرير
-  const FALLBACK_PDF = "C:\\Users\\Barcode Users\\Downloads\\DC26153222_3_31_2026 1_21_22 PM_compressed.pdf";
+  // مجلد التنزيلات الافتراضي على جهاز Windows
+  const DOWNLOADS_DIR = "C:\\Users\\Barcode Users\\Downloads";
+
+  // دالة: ابحث عن أحدث PDF يبدأ بـ prefix في مجلد التنزيلات
+  function findLatestPdfByPrefix(prefix: string): string | null {
+    if (!prefix || !fs.existsSync(DOWNLOADS_DIR)) return null;
+    try {
+      const files = fs.readdirSync(DOWNLOADS_DIR)
+        .filter(f => f.toLowerCase().startsWith(prefix.toLowerCase()) && f.toLowerCase().endsWith(".pdf"))
+        .map(f => ({
+          name: f,
+          mtime: fs.statSync(path.join(DOWNLOADS_DIR, f)).mtimeMs,
+        }))
+        .sort((a, b) => b.mtime - a.mtime); // الأحدث أولاً
+      return files.length > 0 ? path.join(DOWNLOADS_DIR, files[0].name) : null;
+    } catch { return null; }
+  }
 
   let resolvedPath: string = report.pdfFilePath ?? "";
 
@@ -923,11 +938,24 @@ async function uploadPdf(
     } else {
       addLog(session, "⚠️ لا يوجد ملف PDF مرتبط بهذا التقرير.");
     }
-    if (fs.existsSync(FALLBACK_PDF)) {
-      addLog(session, `📂 استخدام الملف الاحتياطي: ${path.basename(FALLBACK_PDF)}`);
-      resolvedPath = FALLBACK_PDF;
+
+    // ابحث في مجلد التنزيلات عن ملف يبدأ برقم التقرير
+    const reportNum = (report.reportNumber ?? "").trim();
+    let fallback: string | null = null;
+
+    if (reportNum) {
+      fallback = findLatestPdfByPrefix(reportNum);
+      if (fallback) {
+        addLog(session, `📂 تم إيجاد ملف برقم التقرير (${reportNum}): ${path.basename(fallback)}`);
+      } else {
+        addLog(session, `🔍 لم يُوجد ملف يبدأ بـ "${reportNum}" في مجلد التنزيلات.`);
+      }
+    }
+
+    if (fallback) {
+      resolvedPath = fallback;
     } else {
-      addLog(session, `⏭️ الملف الاحتياطي غير موجود — تجاوز رفع PDF في هذه الصفحة.`);
+      addLog(session, `⏭️ لا يوجد ملف PDF متاح — تجاوز رفع PDF في هذه الصفحة.`);
       return; // لا نضبط pdfUploaded=true حتى نسمح بإعادة المحاولة لاحقاً
     }
   }
