@@ -289,11 +289,14 @@ router.post("/datasystem/upload", (req, res, next) => {
 
     if (ct.includes("application/json")) {
       // ── وضع JSON: الملف في body.fileBytes (base64) ─────────────────────
-      const { fileBytes, fileName } = body;
-      if (!fileBytes) {
-        res.status(400).json({ error: "fileBytes مطلوب عند الإرسال بـ JSON" });
+      // يقبل أي من: fileBytes أو File أو file أو pdfBytes
+      const rawBytes = body.fileBytes ?? body.File ?? body.file ?? body.pdfBytes;
+      if (!rawBytes) {
+        res.status(400).json({ error: "مطلوب حقل الملف: fileBytes أو File أو file (base64)" });
         return;
       }
+      const fileBytes = rawBytes;
+      const fileName = body.fileName ?? body.FileName ?? body.filename ?? null;
       originalName = fileName ?? "report.pdf";
       const unique = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
       filePath = path.join(UPLOADS_DIR, `ds_${unique}_${originalName}`);
