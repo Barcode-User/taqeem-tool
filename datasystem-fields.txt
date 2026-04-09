@@ -1,0 +1,107 @@
+=====================================================
+  POST /api/datasystem/upload
+  Content-Type: multipart/form-data
+=====================================================
+
+الحقل                          | الوصف
+-------------------------------|----------------------------------
+file                           | ملف PDF (مطلوب)
+
+--- بيانات التقرير ---
+reportNumber                   | رقم التقرير
+reportDate                     | تاريخ التقرير (YYYY-MM-DD)
+valuationDate                  | تاريخ التقييم (YYYY-MM-DD)
+inspectionDate                 | تاريخ المعاينة (YYYY-MM-DD)
+commissionDate                 | تاريخ التكليف (YYYY-MM-DD)
+requestNumber                  | رقم الطلب
+reportType                     | نوع التقرير
+valuationPurpose               | الغرض من التقييم
+valuationHypothesis            | فرضية القيمة
+valuationBasis                 | أساس القيمة
+
+--- بيانات المقيم ---
+valuerName                     | اسم المقيم المعتمد
+valuerPercentage               | نسبة مشاركة المقيم % (رقم)
+licenseNumber                  | رقم الترخيص
+licenseDate                    | تاريخ الترخيص (YYYY-MM-DD)
+membershipNumber               | رقم العضوية
+membershipType                 | نوع العضوية
+secondValuerName               | اسم المقيم الثاني
+secondValuerPercentage         | نسبة المقيم الثاني % (رقم)
+secondValuerLicenseNumber      | رقم ترخيص المقيم الثاني
+secondValuerMembershipNumber   | رقم عضوية المقيم الثاني
+companyName                    | اسم شركة التقييم
+commercialRegNumber            | رقم السجل التجاري
+
+--- بيانات العميل ---
+clientName                     | اسم العميل
+clientEmail                    | البريد الإلكتروني للعميل
+clientPhone                    | هاتف العميل
+intendedUser                   | المستخدم المقصود
+
+--- بيانات العقار ---
+propertyType                   | نوع العقار
+propertySubType                | النوع الفرعي للعقار
+region                         | المنطقة الإدارية
+city                           | المدينة
+district                       | الحي
+street                         | الشارع
+blockNumber                    | رقم البلك
+plotNumber                     | رقم القطعة
+planNumber                     | رقم المخطط
+propertyUse                    | استخدام العقار
+coordinates                    | الإحداثيات الجغرافية
+
+--- الصك والملكية ---
+deedNumber                     | رقم الصك
+deedDate                       | تاريخ الصك (YYYY-MM-DD)
+ownerName                      | اسم المالك
+ownershipType                  | نوع الملكية
+
+--- بيانات البناء ---
+buildingPermitNumber           | رقم رخصة البناء
+buildingStatus                 | حالة البناء
+buildingAge                    | عمر البناء
+landArea                       | مساحة الأرض م² (رقم)
+buildingArea                   | مساحة البناء م² (رقم)
+basementArea                   | مساحة القبو م² (رقم)
+annexArea                      | مساحة الملاحق م² (رقم)
+floorsCount                    | عدد الأدوار الفعلية (رقم صحيح)
+permittedFloorsCount           | عدد الأدوار المصرح بها (رقم صحيح)
+permittedBuildingRatio         | نسبة البناء المصرح بها % (رقم)
+streetWidth                    | عرض الشارع م (رقم)
+streetFacades                  | الواجهات المطلة
+utilities                      | المرافق المتاحة
+
+--- القيمة ---
+valuationMethod                | أسلوب التقييم
+marketValue                    | القيمة السوقية (رقم)
+incomeValue                    | قيمة الدخل (رقم)
+costValue                      | قيمة التكلفة (رقم)
+finalValue                     | القيمة النهائية (رقم)
+pricePerMeter                  | سعر المتر (رقم)
+
+--- ملاحظات ---
+notes                          | ملاحظات إضافية
+
+=====================================================
+  الاستجابة (JSON)
+=====================================================
+
+{
+  "datasystemId": 1,          // رقم السجل في جدول datasystem
+  "reportId": 5,              // رقم التقرير المستخرج في جدول reports
+  "datasystem": { ... },      // بيانات النظام المُرسَلة
+  "report": { ... },          // بيانات OpenAI المستخرجة
+  "comparison": [
+    {
+      "key": "reportNumber",
+      "label": "رقم التقرير",
+      "datasystemValue": "DC26153222",
+      "reportValue": "DC26153222",
+      "score": 100            // نسبة التطابق من 100
+    },
+    ...
+  ],
+  "averageScore": 87          // معدل التطابق الإجمالي من 100
+}
