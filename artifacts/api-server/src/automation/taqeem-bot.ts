@@ -87,6 +87,21 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     await screenshot(page, `page1_before_${reportId}`);
     await fillPage1(session, report, els1, pdfState);
     await screenshot(page, `page1_after_${reportId}`);
+
+    // ── إعادة محاولة رفع PDF إذا لم يُرفع في fillPage1 ──────────────────────
+    // pdfUploaded=false يعني الملف موجود لكن الرفع فشل
+    if (!pdfState.pdfUploaded) {
+      addLog(session, "🔄 لم يُرفع PDF — إعادة المحاولة قبل الحفظ...");
+      for (let r = 1; r <= 3 && !pdfState.pdfUploaded; r++) {
+        addLog(session, `  ↳ محاولة ${r}/3`);
+        await page.waitForTimeout(1200);
+        await uploadPdf(session, report, pdfState);
+      }
+      if (!pdfState.pdfUploaded) {
+        throw new Error("❌ فشل رفع ملف PDF بعد 3 محاولات — خانة «أصل التقرير» مطلوبة.");
+      }
+    }
+
     await clickSaveAndContinue(session);
 
     // ════════════════════════════════════════════════════════
@@ -616,11 +631,17 @@ async function fillPage1(session: AutomationSession, report: any, els: any[], pd
   if (reportNumEl) await fillAngular(session, buildSelector(reportNumEl), report.reportNumber, "عنوان/رقم التقرير");
   else addLog(session, `⚠️ لم يُعثر على حقل «عنوان/رقم التقرير» — جرّب الملء اليدوي`);
 
-  // ── تاريخ إصدار التقرير ───────────────────────────────────────────────────
+  // ── تاريخ إصدار التقرير — دائماً تاريخ اليوم ────────────────────────────
   const reportDateEl = findEl(inputs,
     /report.?date|reportdate|date.*report|تاريخ.*تقرير|تاريخ.*إصدار|تاريخ.*نشر|issuedate|publishdate/i,
   );
-  if (reportDateEl) await fillDate(session, buildSelector(reportDateEl), report.reportDate, "تاريخ إصدار التقرير");
+  const todayStr = (() => {
+    const d = new Date();
+    const dd = String(d.getDate()).padStart(2, "0");
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    return `${dd}/${mm}/${d.getFullYear()}`;
+  })();
+  if (reportDateEl) await fillDate(session, buildSelector(reportDateEl), todayStr, "تاريخ إصدار التقرير");
   else addLog(session, `⚠️ لم يُعثر على حقل «تاريخ إصدار التقرير»`);
 
   // ── تاريخ التقييم ─────────────────────────────────────────────────────────
