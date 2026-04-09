@@ -909,7 +909,8 @@ async function uploadPdf(
   report: any,
   state: { pdfUploaded: boolean },
 ): Promise<void> {
-  if (state.pdfUploaded) return;
+  // لا نتخطى حتى لو سبق الرفع — الملف قد يُمسح عند انتقال الصفحة في Angular
+  // فقط نتخطى إذا لم يكن هناك حقل رفع في الصفحة الحالية (تتحقق لاحقاً)
 
   // مسار احتياطي مؤقت عند غياب الملف في التقرير
   const FALLBACK_PDF = "C:\\Users\\Barcode Users\\Downloads\\DC26153222_3_31_2026 1_21_22 PM_compressed.pdf";
@@ -926,9 +927,8 @@ async function uploadPdf(
       addLog(session, `📂 استخدام الملف الاحتياطي: ${path.basename(FALLBACK_PDF)}`);
       resolvedPath = FALLBACK_PDF;
     } else {
-      addLog(session, `⏭️ الملف الاحتياطي غير موجود أيضاً — تجاوز رفع PDF.`);
-      state.pdfUploaded = true;
-      return;
+      addLog(session, `⏭️ الملف الاحتياطي غير موجود — تجاوز رفع PDF في هذه الصفحة.`);
+      return; // لا نضبط pdfUploaded=true حتى نسمح بإعادة المحاولة لاحقاً
     }
   }
 
