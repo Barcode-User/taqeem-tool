@@ -303,14 +303,11 @@ async function fillAngular(
   const val = String(value).trim();
   const { page } = session;
   try {
-    await page.waitForSelector(selector, { timeout: 4000 });
+    await page.waitForSelector(selector, { timeout: 3000 });
 
-    // طريقة 1: page.fill — أفضل طريقة مع Angular (تُطلق input events تلقائياً)
+    // طريقة 1: page.fill — فوري بدون تأخير حرفي
     try {
-      await page.click(selector);
-      await page.waitForTimeout(100);
       await page.fill(selector, val);
-      // أضف Angular events يدوياً
       await page.evaluate((sel: string) => {
         const el = document.querySelector(sel) as HTMLInputElement | null;
         if (!el) return;
@@ -322,12 +319,11 @@ async function fillAngular(
       return;
     } catch { /* ننتقل للطريقة 2 */ }
 
-    // طريقة 2: keyboard typing — احتياطية
+    // طريقة 2: keyboard — احتياطية
     await page.click(selector, { clickCount: 3 });
-    await page.waitForTimeout(100);
     await page.keyboard.press("Control+a");
     await page.keyboard.press("Delete");
-    await page.keyboard.type(val, { delay: 30 });
+    await page.keyboard.type(val, { delay: 0 });
     await page.keyboard.press("Tab");
     addLog(session, `✅ ${label}: ${val} (keyboard)`);
   } catch (err: any) {
@@ -348,23 +344,34 @@ async function fillDate(
   const { page } = session;
   try {
     await page.waitForSelector(selector, { timeout: 3000 });
-    await page.click(selector);
-    await page.waitForTimeout(150);
+
+    // طريقة 1: page.fill — فورية (لا تأخير حرفي)
+    try {
+      await page.fill(selector, formatted);
+      await page.evaluate((args: { sel: string; v: string }) => {
+        const el = document.querySelector(args.sel) as HTMLInputElement | null;
+        if (!el) return;
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+        if (setter) setter.call(el, args.v);
+        el.dispatchEvent(new Event("input",  { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        el.dispatchEvent(new Event("blur",   { bubbles: true }));
+      }, { sel: selector, v: formatted });
+      // تأكيد الكتابة
+      const actual = await page.$eval(selector, (el: HTMLInputElement) => el.value).catch(() => "");
+      if (actual) {
+        addLog(session, `✅ ${label}: ${formatted}`);
+        return;
+      }
+    } catch { /* ننتقل للطريقة 2 */ }
+
+    // طريقة 2: keyboard — احتياطية (بدون delay)
+    await page.click(selector, { clickCount: 3 });
     await page.keyboard.press("Control+a");
     await page.keyboard.press("Delete");
-    await page.keyboard.type(formatted, { delay: 50 });
-    await page.keyboard.press("Escape");
-    await page.waitForTimeout(150);
-    await page.evaluate((args: { sel: string; v: string }) => {
-      const el = document.querySelector(args.sel) as HTMLInputElement | null;
-      if (!el) return;
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
-      if (setter) setter.call(el, args.v); else el.value = args.v;
-      el.dispatchEvent(new Event("input",  { bubbles: true }));
-      el.dispatchEvent(new Event("change", { bubbles: true }));
-      el.dispatchEvent(new Event("blur",   { bubbles: true }));
-    }, { sel: selector, v: formatted });
-    addLog(session, `✅ ${label}: ${formatted}`);
+    await page.keyboard.type(formatted, { delay: 0 });
+    await page.keyboard.press("Tab");
+    addLog(session, `✅ ${label}: ${formatted} (keyboard)`);
   } catch {
     addLog(session, `⚠️ لم يُعبَّأ تاريخ "${label}"`);
   }
