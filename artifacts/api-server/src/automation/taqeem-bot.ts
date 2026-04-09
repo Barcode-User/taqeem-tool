@@ -896,19 +896,29 @@ async function uploadPdf(
 ): Promise<void> {
   if (state.pdfUploaded) return;
 
-  if (!report.pdfFilePath) {
-    addLog(session, "⏭️ لا يوجد ملف PDF مرتبط بهذا التقرير — أضف الملف من صفحة التفاصيل.");
-    state.pdfUploaded = true;
-    return;
-  }
-  if (!fs.existsSync(report.pdfFilePath)) {
-    addLog(session, `⚠️ ملف PDF غير موجود في المسار: ${report.pdfFilePath}`);
-    state.pdfUploaded = true;
-    return;
+  // مسار احتياطي مؤقت عند غياب الملف في التقرير
+  const FALLBACK_PDF = "C:\\Users\\Barcode Users\\Downloads\\DC26153222_3_31_2026 1_21_22 PM_compressed.pdf";
+
+  let resolvedPath: string = report.pdfFilePath ?? "";
+
+  if (!resolvedPath || !fs.existsSync(resolvedPath)) {
+    if (resolvedPath) {
+      addLog(session, `⚠️ ملف PDF غير موجود في المسار: ${resolvedPath}`);
+    } else {
+      addLog(session, "⚠️ لا يوجد ملف PDF مرتبط بهذا التقرير.");
+    }
+    if (fs.existsSync(FALLBACK_PDF)) {
+      addLog(session, `📂 استخدام الملف الاحتياطي: ${path.basename(FALLBACK_PDF)}`);
+      resolvedPath = FALLBACK_PDF;
+    } else {
+      addLog(session, `⏭️ الملف الاحتياطي غير موجود أيضاً — تجاوز رفع PDF.`);
+      state.pdfUploaded = true;
+      return;
+    }
   }
 
   const { page } = session;
-  const filePath = report.pdfFilePath as string;
+  const filePath = resolvedPath;
   const fileName = path.basename(filePath);
   addLog(session, `📎 محاولة رفع: ${fileName}`);
 
