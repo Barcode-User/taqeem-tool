@@ -276,7 +276,7 @@ function extractFields(body: Record<string, any>, filePath: string) {
 // يدعم طريقتين:
 //   1) Content-Type: application/json   → fileBytes (base64) + جميع الحقول كـ JSON
 //   2) Content-Type: multipart/form-data → file (binary) + جميع الحقول كـ form fields
-router.post("/api/datasystem/upload", (req, res, next) => {
+router.post("/datasystem/upload", (req, res, next) => {
   const ct = req.headers["content-type"] ?? "";
   if (ct.includes("application/json")) return next(); // JSON → تجاوز multer
   return upload.single("file")(req, res, next);        // multipart → multer
@@ -402,7 +402,7 @@ router.post("/api/datasystem/upload", (req, res, next) => {
 });
 
 // ─── GET /api/datasystem ───────────────────────────────────────────────────────
-router.get("/api/datasystem", async (_req, res) => {
+router.get("/datasystem", async (_req, res) => {
   try {
     const list = await sqliteListDataSystem();
     res.json(list);
@@ -412,7 +412,7 @@ router.get("/api/datasystem", async (_req, res) => {
 });
 
 // ─── GET /api/datasystem/:id ──────────────────────────────────────────────────
-router.get("/api/datasystem/:id", async (req, res) => {
+router.get("/datasystem/:id", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const ds = await sqliteGetDataSystemById(id);
