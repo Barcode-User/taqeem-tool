@@ -113,6 +113,85 @@ function getDb(): DatabaseSync {
   };
   addIfMissing("ValuationHypothesis", "TEXT");
 
+  // ─── جدول datasystem ──────────────────────────────────────────────────────
+  _db.exec(`
+    CREATE TABLE IF NOT EXISTS datasystem (
+      Id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+      FilePath                  TEXT,
+      ReportNumber              TEXT,
+      ReportDate                TEXT,
+      ValuationDate             TEXT,
+      InspectionDate            TEXT,
+      CommissionDate            TEXT,
+      RequestNumber             TEXT,
+      ValuerName                TEXT,
+      ValuerPercentage          REAL,
+      LicenseNumber             TEXT,
+      LicenseDate               TEXT,
+      MembershipNumber          TEXT,
+      MembershipType            TEXT,
+      SecondValuerName          TEXT,
+      SecondValuerPercentage    REAL,
+      SecondValuerLicenseNumber TEXT,
+      SecondValuerMembershipNumber TEXT,
+      TaqeemReportNumber        TEXT,
+      ClientName                TEXT,
+      ClientEmail               TEXT,
+      ClientPhone               TEXT,
+      IntendedUser              TEXT,
+      ReportType                TEXT,
+      ValuationPurpose          TEXT,
+      ValuationHypothesis       TEXT,
+      ValuationBasis            TEXT,
+      PropertyType              TEXT,
+      PropertySubType           TEXT,
+      Region                    TEXT,
+      City                      TEXT,
+      District                  TEXT,
+      Street                    TEXT,
+      BlockNumber               TEXT,
+      PlotNumber                TEXT,
+      PlanNumber                TEXT,
+      PropertyUse               TEXT,
+      DeedNumber                TEXT,
+      DeedDate                  TEXT,
+      OwnerName                 TEXT,
+      OwnershipType             TEXT,
+      BuildingPermitNumber      TEXT,
+      BuildingStatus            TEXT,
+      BuildingAge               TEXT,
+      LandArea                  REAL,
+      BuildingArea              REAL,
+      BasementArea              REAL,
+      AnnexArea                 REAL,
+      FloorsCount               INTEGER,
+      PermittedFloorsCount      INTEGER,
+      PermittedBuildingRatio    REAL,
+      StreetWidth               REAL,
+      StreetFacades             TEXT,
+      Utilities                 TEXT,
+      Coordinates               TEXT,
+      ValuationMethod           TEXT,
+      MarketValue               REAL,
+      IncomeValue               REAL,
+      CostValue                 REAL,
+      FinalValue                REAL,
+      PricePerMeter             REAL,
+      CompanyName               TEXT,
+      CommercialRegNumber       TEXT,
+      Notes                     TEXT,
+      LinkedReportId            INTEGER,
+      CreatedAt                 TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+
+  // إضافة FilePath لجدول Reports إن لم يكن موجوداً
+  const repCols: string[] = (_db.prepare("PRAGMA table_info(Reports)").all() as any[]).map((c: any) => c.name);
+  if (!repCols.includes("FilePath")) {
+    _db!.exec("ALTER TABLE Reports ADD COLUMN FilePath TEXT");
+    console.log("[DB] Migration: added column FilePath to Reports");
+  }
+
   console.log(`[DB] SQLite: ${DB_PATH}`);
   return _db;
 }
@@ -340,6 +419,220 @@ export async function sqliteUpdateReport(id: number, data: Partial<InsertReport>
 
   const row = db.prepare("SELECT * FROM Reports WHERE Id = ?").get(id) as any;
   return row ? rowToReport(row) : null;
+}
+
+// ─── DataSystem ───────────────────────────────────────────────────────────────
+
+export interface DataSystemRecord {
+  id: number;
+  filePath: string | null;
+  reportNumber: string | null;
+  reportDate: string | null;
+  valuationDate: string | null;
+  inspectionDate: string | null;
+  commissionDate: string | null;
+  requestNumber: string | null;
+  valuerName: string | null;
+  valuerPercentage: number | null;
+  licenseNumber: string | null;
+  licenseDate: string | null;
+  membershipNumber: string | null;
+  membershipType: string | null;
+  secondValuerName: string | null;
+  secondValuerPercentage: number | null;
+  secondValuerLicenseNumber: string | null;
+  secondValuerMembershipNumber: string | null;
+  taqeemReportNumber: string | null;
+  clientName: string | null;
+  clientEmail: string | null;
+  clientPhone: string | null;
+  intendedUser: string | null;
+  reportType: string | null;
+  valuationPurpose: string | null;
+  valuationHypothesis: string | null;
+  valuationBasis: string | null;
+  propertyType: string | null;
+  propertySubType: string | null;
+  region: string | null;
+  city: string | null;
+  district: string | null;
+  street: string | null;
+  blockNumber: string | null;
+  plotNumber: string | null;
+  planNumber: string | null;
+  propertyUse: string | null;
+  deedNumber: string | null;
+  deedDate: string | null;
+  ownerName: string | null;
+  ownershipType: string | null;
+  buildingPermitNumber: string | null;
+  buildingStatus: string | null;
+  buildingAge: string | null;
+  landArea: number | null;
+  buildingArea: number | null;
+  basementArea: number | null;
+  annexArea: number | null;
+  floorsCount: number | null;
+  permittedFloorsCount: number | null;
+  permittedBuildingRatio: number | null;
+  streetWidth: number | null;
+  streetFacades: string | null;
+  utilities: string | null;
+  coordinates: string | null;
+  valuationMethod: string | null;
+  marketValue: number | null;
+  incomeValue: number | null;
+  costValue: number | null;
+  finalValue: number | null;
+  pricePerMeter: number | null;
+  companyName: string | null;
+  commercialRegNumber: string | null;
+  notes: string | null;
+  linkedReportId: number | null;
+  createdAt: Date;
+}
+
+function rowToDataSystem(row: any): DataSystemRecord {
+  const num = (v: any) => (v != null ? Number(v) : null);
+  const str = (v: any) => (v != null ? String(v) : null);
+  return {
+    id: row.Id,
+    filePath: str(row.FilePath),
+    reportNumber: str(row.ReportNumber),
+    reportDate: str(row.ReportDate),
+    valuationDate: str(row.ValuationDate),
+    inspectionDate: str(row.InspectionDate),
+    commissionDate: str(row.CommissionDate),
+    requestNumber: str(row.RequestNumber),
+    valuerName: str(row.ValuerName),
+    valuerPercentage: num(row.ValuerPercentage),
+    licenseNumber: str(row.LicenseNumber),
+    licenseDate: str(row.LicenseDate),
+    membershipNumber: str(row.MembershipNumber),
+    membershipType: str(row.MembershipType),
+    secondValuerName: str(row.SecondValuerName),
+    secondValuerPercentage: num(row.SecondValuerPercentage),
+    secondValuerLicenseNumber: str(row.SecondValuerLicenseNumber),
+    secondValuerMembershipNumber: str(row.SecondValuerMembershipNumber),
+    taqeemReportNumber: str(row.TaqeemReportNumber),
+    clientName: str(row.ClientName),
+    clientEmail: str(row.ClientEmail),
+    clientPhone: str(row.ClientPhone),
+    intendedUser: str(row.IntendedUser),
+    reportType: str(row.ReportType),
+    valuationPurpose: str(row.ValuationPurpose),
+    valuationHypothesis: str(row.ValuationHypothesis),
+    valuationBasis: str(row.ValuationBasis),
+    propertyType: str(row.PropertyType),
+    propertySubType: str(row.PropertySubType),
+    region: str(row.Region),
+    city: str(row.City),
+    district: str(row.District),
+    street: str(row.Street),
+    blockNumber: str(row.BlockNumber),
+    plotNumber: str(row.PlotNumber),
+    planNumber: str(row.PlanNumber),
+    propertyUse: str(row.PropertyUse),
+    deedNumber: str(row.DeedNumber),
+    deedDate: str(row.DeedDate),
+    ownerName: str(row.OwnerName),
+    ownershipType: str(row.OwnershipType),
+    buildingPermitNumber: str(row.BuildingPermitNumber),
+    buildingStatus: str(row.BuildingStatus),
+    buildingAge: str(row.BuildingAge),
+    landArea: num(row.LandArea),
+    buildingArea: num(row.BuildingArea),
+    basementArea: num(row.BasementArea),
+    annexArea: num(row.AnnexArea),
+    floorsCount: row.FloorsCount != null ? parseInt(row.FloorsCount) : null,
+    permittedFloorsCount: row.PermittedFloorsCount != null ? parseInt(row.PermittedFloorsCount) : null,
+    permittedBuildingRatio: num(row.PermittedBuildingRatio),
+    streetWidth: num(row.StreetWidth),
+    streetFacades: str(row.StreetFacades),
+    utilities: str(row.Utilities),
+    coordinates: str(row.Coordinates),
+    valuationMethod: str(row.ValuationMethod),
+    marketValue: num(row.MarketValue),
+    incomeValue: num(row.IncomeValue),
+    costValue: num(row.CostValue),
+    finalValue: num(row.FinalValue),
+    pricePerMeter: num(row.PricePerMeter),
+    companyName: str(row.CompanyName),
+    commercialRegNumber: str(row.CommercialRegNumber),
+    notes: str(row.Notes),
+    linkedReportId: row.LinkedReportId != null ? Number(row.LinkedReportId) : null,
+    createdAt: new Date(row.CreatedAt),
+  };
+}
+
+export async function sqliteInsertDataSystem(data: Omit<DataSystemRecord, "id" | "createdAt">): Promise<DataSystemRecord> {
+  const db = getDb();
+  const now = new Date().toISOString();
+  const result = db.prepare(`
+    INSERT INTO datasystem (
+      FilePath, ReportNumber, ReportDate, ValuationDate, InspectionDate, CommissionDate,
+      RequestNumber, ValuerName, ValuerPercentage, LicenseNumber, LicenseDate,
+      MembershipNumber, MembershipType, SecondValuerName, SecondValuerPercentage,
+      SecondValuerLicenseNumber, SecondValuerMembershipNumber, TaqeemReportNumber,
+      ClientName, ClientEmail, ClientPhone, IntendedUser, ReportType, ValuationPurpose,
+      ValuationHypothesis, ValuationBasis, PropertyType, PropertySubType, Region, City,
+      District, Street, BlockNumber, PlotNumber, PlanNumber, PropertyUse, DeedNumber,
+      DeedDate, OwnerName, OwnershipType, BuildingPermitNumber, BuildingStatus, BuildingAge,
+      LandArea, BuildingArea, BasementArea, AnnexArea, FloorsCount, PermittedFloorsCount,
+      PermittedBuildingRatio, StreetWidth, StreetFacades, Utilities, Coordinates,
+      ValuationMethod, MarketValue, IncomeValue, CostValue, FinalValue, PricePerMeter,
+      CompanyName, CommercialRegNumber, Notes, LinkedReportId, CreatedAt
+    ) VALUES (
+      ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+    )
+  `).run(
+    data.filePath ?? null, data.reportNumber ?? null, data.reportDate ?? null,
+    data.valuationDate ?? null, data.inspectionDate ?? null, data.commissionDate ?? null,
+    data.requestNumber ?? null, data.valuerName ?? null, data.valuerPercentage ?? null,
+    data.licenseNumber ?? null, data.licenseDate ?? null,
+    data.membershipNumber ?? null, data.membershipType ?? null,
+    data.secondValuerName ?? null, data.secondValuerPercentage ?? null,
+    data.secondValuerLicenseNumber ?? null, data.secondValuerMembershipNumber ?? null,
+    data.taqeemReportNumber ?? null,
+    data.clientName ?? null, data.clientEmail ?? null, data.clientPhone ?? null,
+    data.intendedUser ?? null, data.reportType ?? null, data.valuationPurpose ?? null,
+    data.valuationHypothesis ?? null, data.valuationBasis ?? null,
+    data.propertyType ?? null, data.propertySubType ?? null,
+    data.region ?? null, data.city ?? null, data.district ?? null, data.street ?? null,
+    data.blockNumber ?? null, data.plotNumber ?? null, data.planNumber ?? null,
+    data.propertyUse ?? null, data.deedNumber ?? null, data.deedDate ?? null,
+    data.ownerName ?? null, data.ownershipType ?? null,
+    data.buildingPermitNumber ?? null, data.buildingStatus ?? null, data.buildingAge ?? null,
+    data.landArea ?? null, data.buildingArea ?? null,
+    data.basementArea ?? null, data.annexArea ?? null,
+    data.floorsCount ?? null, data.permittedFloorsCount ?? null,
+    data.permittedBuildingRatio ?? null, data.streetWidth ?? null,
+    data.streetFacades ?? null, data.utilities ?? null, data.coordinates ?? null,
+    data.valuationMethod ?? null, data.marketValue ?? null, data.incomeValue ?? null,
+    data.costValue ?? null, data.finalValue ?? null, data.pricePerMeter ?? null,
+    data.companyName ?? null, data.commercialRegNumber ?? null,
+    data.notes ?? null, data.linkedReportId ?? null, now
+  );
+  const id = Number(result.lastInsertRowid);
+  const row = db.prepare("SELECT * FROM datasystem WHERE Id = ?").get(id) as any;
+  return rowToDataSystem(row);
+}
+
+export async function sqliteGetDataSystemById(id: number): Promise<DataSystemRecord | null> {
+  const db = getDb();
+  const row = db.prepare("SELECT * FROM datasystem WHERE Id = ?").get(id) as any;
+  return row ? rowToDataSystem(row) : null;
+}
+
+export async function sqliteListDataSystem(): Promise<DataSystemRecord[]> {
+  const db = getDb();
+  const rows = db.prepare("SELECT * FROM datasystem ORDER BY CreatedAt DESC").all() as any[];
+  return rows.map(rowToDataSystem);
+}
+
+export async function sqliteUpdateDataSystemLinkedReport(id: number, reportId: number): Promise<void> {
+  const db = getDb();
+  db.prepare("UPDATE datasystem SET LinkedReportId = ? WHERE Id = ?").run(reportId, id);
 }
 
 export async function sqliteDeleteReport(id: number): Promise<void> {

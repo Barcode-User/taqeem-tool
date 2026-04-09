@@ -46,3 +46,10 @@ export const getReportStats = isPostgres
 
 export const hasPendingQueueDb = isPostgres
   ? pg.pgHasPendingQueue : sq.sqliteHasPendingQueue;
+
+// ─── DataSystem (SQLite فقط) ─────────────────────────────────────────────────
+export type { DataSystemRecord } from "./sqlite";
+export const sqliteInsertDataSystem = sq.sqliteInsertDataSystem;
+export const sqliteGetDataSystemById = sq.sqliteGetDataSystemById;
+export const sqliteListDataSystem = sq.sqliteListDataSystem;
+export const sqliteUpdateDataSystemLinkedReport = sq.sqliteUpdateDataSystemLinkedReport;

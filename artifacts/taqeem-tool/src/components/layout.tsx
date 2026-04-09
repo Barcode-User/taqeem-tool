@@ -1,6 +1,6 @@
 import { Link, useLocation } from "wouter";
 import { useEffect, useState } from "react";
-import { LayoutDashboard, UploadCloud, FileText, ShieldCheck, ShieldOff, Loader2 } from "lucide-react";
+import { LayoutDashboard, UploadCloud, FileText, ShieldCheck, ShieldOff, Loader2, GitCompare } from "lucide-react";
 
 type SessionStatus = "not_logged_in" | "logging_in" | "waiting_otp" | "authenticated" | "failed";
 
@@ -29,11 +29,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const navigation = [
     { name: "لوحة القيادة", href: "/", icon: LayoutDashboard },
     { name: "رفع تقرير جديد", href: "/upload", icon: UploadCloud },
+    { name: "مقارنة البيانات", href: "/datasystem", icon: GitCompare },
   ];
 
   const pageTitle =
     location === "/" ? "لوحة القيادة" :
     location === "/upload" ? "رفع تقرير جديد" :
+    location === "/datasystem" ? "مقارنة بيانات النظام" :
     location === "/taqeem-session" ? "إعدادات جلسة تقييم" :
     "تفاصيل التقرير";
 

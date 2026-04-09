@@ -9,6 +9,7 @@ import Upload from "@/pages/upload";
 import ReportDetails from "@/pages/report-details";
 import PreviewReport from "@/pages/preview-report";
 import TaqeemSessionPage from "@/pages/taqeem-session";
+import DatasystemCompare from "@/pages/datasystem-compare";
 
 const queryClient = new QueryClient();
 
@@ -21,6 +22,7 @@ function Router() {
         <Route path="/preview/:token" component={PreviewReport} />
         <Route path="/reports/:id" component={ReportDetails} />
         <Route path="/taqeem-session" component={TaqeemSessionPage} />
+        <Route path="/datasystem" component={DatasystemCompare} />
         <Route component={NotFound} />
       </Switch>
     </Layout>
