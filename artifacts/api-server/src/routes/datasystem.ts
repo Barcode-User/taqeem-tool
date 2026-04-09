@@ -196,86 +196,121 @@ const COMPARE_FIELDS: { key: string; label: string }[] = [
   { key: "commercialRegNumber", label: "رقم السجل التجاري" },
 ];
 
+// ─── دالة مساعدة: تحوّل الـ body (JSON أو multipart) إلى بيانات موحّدة ────────
+function extractFields(body: Record<string, any>, filePath: string) {
+  // في حالة JSON: القيم الرقمية تأتي صحيحة بدون تحويل
+  // في حالة multipart: كل شيء string فنحوّله
+  const n = (v: any) => (v != null && v !== "" ? Number(v) : null);
+  const s = (v: any) => (v != null && v !== "" ? String(v) : null);
+  const i = (v: any) => (v != null && v !== "" ? parseInt(String(v)) : null);
+
+  return {
+    filePath,
+    reportNumber:               s(body.reportNumber),
+    reportDate:                 s(body.reportDate),
+    valuationDate:              s(body.valuationDate),
+    inspectionDate:             s(body.inspectionDate),
+    commissionDate:             s(body.commissionDate),
+    requestNumber:              s(body.requestNumber),
+    valuerName:                 s(body.valuerName),
+    valuerPercentage:           n(body.valuerPercentage),
+    licenseNumber:              s(body.licenseNumber),
+    licenseDate:                s(body.licenseDate),
+    membershipNumber:           s(body.membershipNumber),
+    membershipType:             s(body.membershipType),
+    secondValuerName:           s(body.secondValuerName),
+    secondValuerPercentage:     n(body.secondValuerPercentage),
+    secondValuerLicenseNumber:  s(body.secondValuerLicenseNumber),
+    secondValuerMembershipNumber: s(body.secondValuerMembershipNumber),
+    taqeemReportNumber:         s(body.taqeemReportNumber),
+    clientName:                 s(body.clientName),
+    clientEmail:                s(body.clientEmail),
+    clientPhone:                s(body.clientPhone),
+    intendedUser:               s(body.intendedUser),
+    reportType:                 s(body.reportType),
+    valuationPurpose:           s(body.valuationPurpose),
+    valuationHypothesis:        s(body.valuationHypothesis),
+    valuationBasis:             s(body.valuationBasis),
+    propertyType:               s(body.propertyType),
+    propertySubType:            s(body.propertySubType),
+    region:                     s(body.region),
+    city:                       s(body.city),
+    district:                   s(body.district),
+    street:                     s(body.street),
+    blockNumber:                s(body.blockNumber),
+    plotNumber:                 s(body.plotNumber),
+    planNumber:                 s(body.planNumber),
+    propertyUse:                s(body.propertyUse),
+    deedNumber:                 s(body.deedNumber),
+    deedDate:                   s(body.deedDate),
+    ownerName:                  s(body.ownerName),
+    ownershipType:              s(body.ownershipType),
+    buildingPermitNumber:       s(body.buildingPermitNumber),
+    buildingStatus:             s(body.buildingStatus),
+    buildingAge:                s(body.buildingAge),
+    landArea:                   n(body.landArea),
+    buildingArea:               n(body.buildingArea),
+    basementArea:               n(body.basementArea),
+    annexArea:                  n(body.annexArea),
+    floorsCount:                i(body.floorsCount),
+    permittedFloorsCount:       i(body.permittedFloorsCount),
+    permittedBuildingRatio:     n(body.permittedBuildingRatio),
+    streetWidth:                n(body.streetWidth),
+    streetFacades:              s(body.streetFacades),
+    utilities:                  s(body.utilities),
+    coordinates:                s(body.coordinates),
+    valuationMethod:            s(body.valuationMethod),
+    marketValue:                n(body.marketValue),
+    incomeValue:                n(body.incomeValue),
+    costValue:                  n(body.costValue),
+    finalValue:                 n(body.finalValue),
+    pricePerMeter:              n(body.pricePerMeter),
+    companyName:                s(body.companyName),
+    commercialRegNumber:        s(body.commercialRegNumber),
+    notes:                      s(body.notes),
+    linkedReportId:             null as number | null,
+  };
+}
+
 // ─── POST /api/datasystem/upload ─────────────────────────────────────────────
-router.post("/api/datasystem/upload", upload.single("file"), async (req, res) => {
+// يدعم طريقتين:
+//   1) Content-Type: application/json   → fileBytes (base64) + جميع الحقول كـ JSON
+//   2) Content-Type: multipart/form-data → file (binary) + جميع الحقول كـ form fields
+router.post("/api/datasystem/upload", (req, res, next) => {
+  const ct = req.headers["content-type"] ?? "";
+  if (ct.includes("application/json")) return next(); // JSON → تجاوز multer
+  return upload.single("file")(req, res, next);        // multipart → multer
+}, async (req, res) => {
   try {
     const body = req.body as Record<string, any>;
-    const file = req.file;
+    const ct = req.headers["content-type"] ?? "";
+    let filePath: string;
+    let originalName: string;
 
-    if (!file) {
-      res.status(400).json({ error: "الملف مطلوب (field: file)" });
-      return;
+    if (ct.includes("application/json")) {
+      // ── وضع JSON: الملف في body.fileBytes (base64) ─────────────────────
+      const { fileBytes, fileName } = body;
+      if (!fileBytes) {
+        res.status(400).json({ error: "fileBytes مطلوب عند الإرسال بـ JSON" });
+        return;
+      }
+      originalName = fileName ?? "report.pdf";
+      const unique = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      filePath = path.join(UPLOADS_DIR, `ds_${unique}_${originalName}`);
+      fs.writeFileSync(filePath, Buffer.from(fileBytes, "base64"));
+    } else {
+      // ── وضع multipart: الملف في req.file ───────────────────────────────
+      const file = (req as any).file as Express.Multer.File | undefined;
+      if (!file) {
+        res.status(400).json({ error: "الملف مطلوب (field: file)" });
+        return;
+      }
+      filePath = file.path;
+      originalName = file.originalname;
     }
 
-    const filePath = file.path;
-
     // ── 1: حفظ بيانات الشاشة في datasystem ────────────────────────────────
-    const dsData = {
-      filePath,
-      reportNumber: body.reportNumber ?? null,
-      reportDate: body.reportDate ?? null,
-      valuationDate: body.valuationDate ?? null,
-      inspectionDate: body.inspectionDate ?? null,
-      commissionDate: body.commissionDate ?? null,
-      requestNumber: body.requestNumber ?? null,
-      valuerName: body.valuerName ?? null,
-      valuerPercentage: body.valuerPercentage ? Number(body.valuerPercentage) : null,
-      licenseNumber: body.licenseNumber ?? null,
-      licenseDate: body.licenseDate ?? null,
-      membershipNumber: body.membershipNumber ?? null,
-      membershipType: body.membershipType ?? null,
-      secondValuerName: body.secondValuerName ?? null,
-      secondValuerPercentage: body.secondValuerPercentage ? Number(body.secondValuerPercentage) : null,
-      secondValuerLicenseNumber: body.secondValuerLicenseNumber ?? null,
-      secondValuerMembershipNumber: body.secondValuerMembershipNumber ?? null,
-      taqeemReportNumber: body.taqeemReportNumber ?? null,
-      clientName: body.clientName ?? null,
-      clientEmail: body.clientEmail ?? null,
-      clientPhone: body.clientPhone ?? null,
-      intendedUser: body.intendedUser ?? null,
-      reportType: body.reportType ?? null,
-      valuationPurpose: body.valuationPurpose ?? null,
-      valuationHypothesis: body.valuationHypothesis ?? null,
-      valuationBasis: body.valuationBasis ?? null,
-      propertyType: body.propertyType ?? null,
-      propertySubType: body.propertySubType ?? null,
-      region: body.region ?? null,
-      city: body.city ?? null,
-      district: body.district ?? null,
-      street: body.street ?? null,
-      blockNumber: body.blockNumber ?? null,
-      plotNumber: body.plotNumber ?? null,
-      planNumber: body.planNumber ?? null,
-      propertyUse: body.propertyUse ?? null,
-      deedNumber: body.deedNumber ?? null,
-      deedDate: body.deedDate ?? null,
-      ownerName: body.ownerName ?? null,
-      ownershipType: body.ownershipType ?? null,
-      buildingPermitNumber: body.buildingPermitNumber ?? null,
-      buildingStatus: body.buildingStatus ?? null,
-      buildingAge: body.buildingAge ?? null,
-      landArea: body.landArea ? Number(body.landArea) : null,
-      buildingArea: body.buildingArea ? Number(body.buildingArea) : null,
-      basementArea: body.basementArea ? Number(body.basementArea) : null,
-      annexArea: body.annexArea ? Number(body.annexArea) : null,
-      floorsCount: body.floorsCount ? parseInt(body.floorsCount) : null,
-      permittedFloorsCount: body.permittedFloorsCount ? parseInt(body.permittedFloorsCount) : null,
-      permittedBuildingRatio: body.permittedBuildingRatio ? Number(body.permittedBuildingRatio) : null,
-      streetWidth: body.streetWidth ? Number(body.streetWidth) : null,
-      streetFacades: body.streetFacades ?? null,
-      utilities: body.utilities ?? null,
-      coordinates: body.coordinates ?? null,
-      valuationMethod: body.valuationMethod ?? null,
-      marketValue: body.marketValue ? Number(body.marketValue) : null,
-      incomeValue: body.incomeValue ? Number(body.incomeValue) : null,
-      costValue: body.costValue ? Number(body.costValue) : null,
-      finalValue: body.finalValue ? Number(body.finalValue) : null,
-      pricePerMeter: body.pricePerMeter ? Number(body.pricePerMeter) : null,
-      companyName: body.companyName ?? null,
-      commercialRegNumber: body.commercialRegNumber ?? null,
-      notes: body.notes ?? null,
-      linkedReportId: null,
-    };
+    const dsData = extractFields(body, filePath);
 
     const dsRecord = await sqliteInsertDataSystem(dsData);
 
@@ -332,7 +367,7 @@ router.post("/api/datasystem/upload", upload.single("file"), async (req, res) =>
     const reportRecord = await insertReport({
       ...extracted,
       pdfFilePath: filePath,
-      pdfFileName: file.originalname,
+      pdfFileName: originalName,
       status: "extracted",
       automationStatus: "pending",
     });

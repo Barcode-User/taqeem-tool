@@ -1,107 +1,124 @@
 =====================================================
   POST /api/datasystem/upload
+  يدعم طريقتين للإرسال
+=====================================================
+
+
+══════════════════════════════════════════════════
+  الطريقة 1 (الأفضل): JSON
+  Content-Type: application/json
+══════════════════════════════════════════════════
+
+{
+  "fileBytes": "base64string...",    ← الملف PDF محوّل لـ base64  (مطلوب)
+  "fileName":  "report.pdf",         ← اسم الملف                  (اختياري)
+
+  "reportNumber":               "DC26153222",
+  "reportDate":                 "2026-03-31",
+  "valuationDate":              "2026-03-31",
+  "inspectionDate":             "2026-03-28",
+  "commissionDate":             "2026-03-20",
+  "requestNumber":              "REQ-001",
+  "reportType":                 "تقرير تقييم عقاري",
+  "valuationPurpose":           "بيع",
+  "valuationHypothesis":        "القيمة السوقية",
+  "valuationBasis":             "القيمة السوقية العادلة",
+
+  "valuerName":                 "أحمد محمد",
+  "valuerPercentage":           100,
+  "licenseNumber":              "1301",
+  "licenseDate":                "2024-01-01",
+  "membershipNumber":           "MEM-001",
+  "membershipType":             "عضو كامل",
+  "secondValuerName":           null,
+  "secondValuerPercentage":     null,
+  "secondValuerLicenseNumber":  null,
+  "secondValuerMembershipNumber": null,
+  "companyName":                "شركة باركود للتقييم",
+  "commercialRegNumber":        "1234567890",
+
+  "clientName":                 "محمد علي",
+  "clientEmail":                "client@email.com",
+  "clientPhone":                "0501234567",
+  "intendedUser":               "البنك الأهلي",
+
+  "propertyType":               "فيلا",
+  "propertySubType":            "سكني",
+  "region":                     "منطقة الرياض",
+  "city":                       "الرياض",
+  "district":                   "النرجس",
+  "street":                     "شارع الأمير محمد",
+  "blockNumber":                "5",
+  "plotNumber":                 "123",
+  "planNumber":                 "1234",
+  "propertyUse":                "سكني",
+  "coordinates":                "24.7136,46.6753",
+
+  "deedNumber":                 "123456789",
+  "deedDate":                   "2020-01-15",
+  "ownerName":                  "خالد العبدالله",
+  "ownershipType":              "ملكية فردية",
+
+  "buildingPermitNumber":       "BP-12345",
+  "buildingStatus":             "مكتمل",
+  "buildingAge":                "5 سنوات",
+  "landArea":                   500.0,
+  "buildingArea":               350.0,
+  "basementArea":               0,
+  "annexArea":                  50.0,
+  "floorsCount":                2,
+  "permittedFloorsCount":       3,
+  "permittedBuildingRatio":     60.0,
+  "streetWidth":                15.0,
+  "streetFacades":              "واجهة واحدة",
+  "utilities":                  "كهرباء، ماء، صرف صحي",
+
+  "valuationMethod":            "أسلوب المقارنة",
+  "marketValue":                1500000,
+  "incomeValue":                null,
+  "costValue":                  null,
+  "finalValue":                 1500000,
+  "pricePerMeter":              3000,
+
+  "notes":                      null
+}
+
+
+══════════════════════════════════════════════════
+  الطريقة 2: multipart/form-data
   Content-Type: multipart/form-data
-=====================================================
+══════════════════════════════════════════════════
 
-الحقل                          | الوصف
--------------------------------|----------------------------------
-file                           | ملف PDF (مطلوب)
+file              ← ملف PDF مباشر       (مطلوب)
+reportNumber      ← رقم التقرير
+reportDate        ← تاريخ التقرير
+... (نفس أسماء الحقول في الجدول أعلاه، كلها كـ string)
 
---- بيانات التقرير ---
-reportNumber                   | رقم التقرير
-reportDate                     | تاريخ التقرير (YYYY-MM-DD)
-valuationDate                  | تاريخ التقييم (YYYY-MM-DD)
-inspectionDate                 | تاريخ المعاينة (YYYY-MM-DD)
-commissionDate                 | تاريخ التكليف (YYYY-MM-DD)
-requestNumber                  | رقم الطلب
-reportType                     | نوع التقرير
-valuationPurpose               | الغرض من التقييم
-valuationHypothesis            | فرضية القيمة
-valuationBasis                 | أساس القيمة
-
---- بيانات المقيم ---
-valuerName                     | اسم المقيم المعتمد
-valuerPercentage               | نسبة مشاركة المقيم % (رقم)
-licenseNumber                  | رقم الترخيص
-licenseDate                    | تاريخ الترخيص (YYYY-MM-DD)
-membershipNumber               | رقم العضوية
-membershipType                 | نوع العضوية
-secondValuerName               | اسم المقيم الثاني
-secondValuerPercentage         | نسبة المقيم الثاني % (رقم)
-secondValuerLicenseNumber      | رقم ترخيص المقيم الثاني
-secondValuerMembershipNumber   | رقم عضوية المقيم الثاني
-companyName                    | اسم شركة التقييم
-commercialRegNumber            | رقم السجل التجاري
-
---- بيانات العميل ---
-clientName                     | اسم العميل
-clientEmail                    | البريد الإلكتروني للعميل
-clientPhone                    | هاتف العميل
-intendedUser                   | المستخدم المقصود
-
---- بيانات العقار ---
-propertyType                   | نوع العقار
-propertySubType                | النوع الفرعي للعقار
-region                         | المنطقة الإدارية
-city                           | المدينة
-district                       | الحي
-street                         | الشارع
-blockNumber                    | رقم البلك
-plotNumber                     | رقم القطعة
-planNumber                     | رقم المخطط
-propertyUse                    | استخدام العقار
-coordinates                    | الإحداثيات الجغرافية
-
---- الصك والملكية ---
-deedNumber                     | رقم الصك
-deedDate                       | تاريخ الصك (YYYY-MM-DD)
-ownerName                      | اسم المالك
-ownershipType                  | نوع الملكية
-
---- بيانات البناء ---
-buildingPermitNumber           | رقم رخصة البناء
-buildingStatus                 | حالة البناء
-buildingAge                    | عمر البناء
-landArea                       | مساحة الأرض م² (رقم)
-buildingArea                   | مساحة البناء م² (رقم)
-basementArea                   | مساحة القبو م² (رقم)
-annexArea                      | مساحة الملاحق م² (رقم)
-floorsCount                    | عدد الأدوار الفعلية (رقم صحيح)
-permittedFloorsCount           | عدد الأدوار المصرح بها (رقم صحيح)
-permittedBuildingRatio         | نسبة البناء المصرح بها % (رقم)
-streetWidth                    | عرض الشارع م (رقم)
-streetFacades                  | الواجهات المطلة
-utilities                      | المرافق المتاحة
-
---- القيمة ---
-valuationMethod                | أسلوب التقييم
-marketValue                    | القيمة السوقية (رقم)
-incomeValue                    | قيمة الدخل (رقم)
-costValue                      | قيمة التكلفة (رقم)
-finalValue                     | القيمة النهائية (رقم)
-pricePerMeter                  | سعر المتر (رقم)
-
---- ملاحظات ---
-notes                          | ملاحظات إضافية
 
 =====================================================
-  الاستجابة (JSON)
+  الاستجابة (JSON) — نفسها في الطريقتين
 =====================================================
 
 {
-  "datasystemId": 1,          // رقم السجل في جدول datasystem
-  "reportId": 5,              // رقم التقرير المستخرج في جدول reports
-  "datasystem": { ... },      // بيانات النظام المُرسَلة
-  "report": { ... },          // بيانات OpenAI المستخرجة
+  "datasystemId": 1,
+  "reportId":     5,
+  "datasystem":   { ... بيانات الشاشة المحفوظة ... },
+  "report":       { ... بيانات OpenAI المستخرجة ... },
   "comparison": [
     {
-      "key": "reportNumber",
-      "label": "رقم التقرير",
-      "datasystemValue": "DC26153222",
-      "reportValue": "DC26153222",
-      "score": 100            // نسبة التطابق من 100
+      "key":              "reportNumber",
+      "label":            "رقم التقرير",
+      "datasystemValue":  "DC26153222",
+      "reportValue":      "DC26153222",
+      "score":            100
     },
-    ...
+    {
+      "key":              "city",
+      "label":            "المدينة",
+      "datasystemValue":  "الرياض",
+      "reportValue":      "رياض",
+      "score":            72
+    }
   ],
-  "averageScore": 87          // معدل التطابق الإجمالي من 100
+  "averageScore": 87
 }
