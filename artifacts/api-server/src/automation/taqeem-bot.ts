@@ -915,17 +915,19 @@ async function uploadPdf(
   // مجلد التنزيلات الافتراضي على جهاز Windows
   const DOWNLOADS_DIR = "C:\\Users\\Barcode Users\\Downloads";
 
-  // دالة: ابحث عن أحدث PDF يبدأ بـ prefix في مجلد التنزيلات
-  function findLatestPdfByPrefix(prefix: string): string | null {
-    if (!prefix || !fs.existsSync(DOWNLOADS_DIR)) return null;
+  // دالة: ابحث عن ملف PDF في مجلد التنزيلات باسم رقم التقرير
+  function findPdfInDownloads(reportNum: string): string | null {
+    if (!reportNum || !fs.existsSync(DOWNLOADS_DIR)) return null;
     try {
+      // أولاً: المطابقة التامة  رقم_التقرير.pdf
+      const exact = path.join(DOWNLOADS_DIR, `${reportNum}.pdf`);
+      if (fs.existsSync(exact)) return exact;
+
+      // ثانياً: أي ملف يبدأ بـ رقم التقرير (احتياط)
       const files = fs.readdirSync(DOWNLOADS_DIR)
-        .filter(f => f.toLowerCase().startsWith(prefix.toLowerCase()) && f.toLowerCase().endsWith(".pdf"))
-        .map(f => ({
-          name: f,
-          mtime: fs.statSync(path.join(DOWNLOADS_DIR, f)).mtimeMs,
-        }))
-        .sort((a, b) => b.mtime - a.mtime); // الأحدث أولاً
+        .filter(f => f.toLowerCase().startsWith(reportNum.toLowerCase()) && f.toLowerCase().endsWith(".pdf"))
+        .map(f => ({ name: f, mtime: fs.statSync(path.join(DOWNLOADS_DIR, f)).mtimeMs }))
+        .sort((a, b) => b.mtime - a.mtime);
       return files.length > 0 ? path.join(DOWNLOADS_DIR, files[0].name) : null;
     } catch { return null; }
   }
@@ -939,16 +941,15 @@ async function uploadPdf(
       addLog(session, "⚠️ لا يوجد ملف PDF مرتبط بهذا التقرير.");
     }
 
-    // ابحث في مجلد التنزيلات عن ملف يبدأ برقم التقرير
     const reportNum = (report.reportNumber ?? "").trim();
     let fallback: string | null = null;
 
     if (reportNum) {
-      fallback = findLatestPdfByPrefix(reportNum);
+      fallback = findPdfInDownloads(reportNum);
       if (fallback) {
-        addLog(session, `📂 تم إيجاد ملف برقم التقرير (${reportNum}): ${path.basename(fallback)}`);
+        addLog(session, `📂 تم إيجاد ملف PDF: ${path.basename(fallback)}`);
       } else {
-        addLog(session, `🔍 لم يُوجد ملف يبدأ بـ "${reportNum}" في مجلد التنزيلات.`);
+        addLog(session, `🔍 لم يُوجد "${reportNum}.pdf" في مجلد التنزيلات.`);
       }
     }
 
@@ -956,7 +957,7 @@ async function uploadPdf(
       resolvedPath = fallback;
     } else {
       addLog(session, `⏭️ لا يوجد ملف PDF متاح — تجاوز رفع PDF في هذه الصفحة.`);
-      return; // لا نضبط pdfUploaded=true حتى نسمح بإعادة المحاولة لاحقاً
+      return;
     }
   }
 
