@@ -62,7 +62,9 @@ import {
   Terminal,
   ShieldCheck,
   ShieldOff,
-  Settings
+  Settings,
+  GitCompare,
+  BarChart3
 } from "lucide-react";
 import { Link } from "wouter";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -155,6 +157,118 @@ const statusMap: Record<string, { label: string, color: string, next: string | n
   submitted: { label: "تم الرفع", color: "bg-green-100 text-green-800 border-green-200", next: null, action: "" },
 };
 
+// ─── تعريف مجموعات الحقول للمقارنة ──────────────────────────────────────────
+const COMPARE_GROUPS = [
+  {
+    title: "بيانات التقرير الأساسية",
+    fields: [
+      { key: "reportNumber",       label: "رقم التقرير" },
+      { key: "reportDate",         label: "تاريخ التقرير" },
+      { key: "valuationDate",      label: "تاريخ التقييم" },
+      { key: "inspectionDate",     label: "تاريخ المعاينة" },
+      { key: "commissionDate",     label: "تاريخ التكليف" },
+      { key: "requestNumber",      label: "رقم الطلب" },
+      { key: "reportType",         label: "نوع التقرير" },
+      { key: "valuationPurpose",   label: "الغرض من التقييم" },
+      { key: "valuationHypothesis",label: "فرضية القيمة" },
+      { key: "valuationBasis",     label: "أساس القيمة" },
+    ],
+  },
+  {
+    title: "بيانات المقيم",
+    fields: [
+      { key: "valuerName",                  label: "اسم المقيم" },
+      { key: "valuerPercentage",            label: "نسبة المقيم %" },
+      { key: "licenseNumber",               label: "رقم الترخيص" },
+      { key: "licenseDate",                 label: "تاريخ الترخيص" },
+      { key: "membershipNumber",            label: "رقم العضوية" },
+      { key: "membershipType",              label: "نوع العضوية" },
+      { key: "secondValuerName",            label: "المقيم الثاني" },
+      { key: "secondValuerPercentage",      label: "نسبة المقيم الثاني %" },
+      { key: "secondValuerLicenseNumber",   label: "ترخيص المقيم الثاني" },
+      { key: "secondValuerMembershipNumber",label: "عضوية المقيم الثاني" },
+      { key: "companyName",                 label: "اسم شركة التقييم" },
+      { key: "commercialRegNumber",         label: "رقم السجل التجاري" },
+    ],
+  },
+  {
+    title: "بيانات العميل",
+    fields: [
+      { key: "clientName",   label: "اسم العميل" },
+      { key: "clientEmail",  label: "البريد الإلكتروني" },
+      { key: "clientPhone",  label: "الهاتف" },
+      { key: "intendedUser", label: "المستخدم المقصود" },
+    ],
+  },
+  {
+    title: "بيانات العقار",
+    fields: [
+      { key: "propertyType",    label: "نوع العقار" },
+      { key: "propertySubType", label: "النوع الفرعي" },
+      { key: "region",          label: "المنطقة" },
+      { key: "city",            label: "المدينة" },
+      { key: "district",        label: "الحي" },
+      { key: "street",          label: "الشارع" },
+      { key: "blockNumber",     label: "رقم البلك" },
+      { key: "plotNumber",      label: "رقم القطعة" },
+      { key: "planNumber",      label: "رقم المخطط" },
+      { key: "propertyUse",     label: "استخدام العقار" },
+      { key: "coordinates",     label: "الإحداثيات" },
+    ],
+  },
+  {
+    title: "الصك والملكية",
+    fields: [
+      { key: "deedNumber",    label: "رقم الصك" },
+      { key: "deedDate",      label: "تاريخ الصك" },
+      { key: "ownerName",     label: "اسم المالك" },
+      { key: "ownershipType", label: "نوع الملكية" },
+    ],
+  },
+  {
+    title: "بيانات البناء",
+    fields: [
+      { key: "buildingPermitNumber",    label: "رقم رخصة البناء" },
+      { key: "buildingStatus",          label: "حالة البناء" },
+      { key: "buildingAge",             label: "عمر البناء" },
+      { key: "landArea",                label: "مساحة الأرض م²" },
+      { key: "buildingArea",            label: "مساحة البناء م²" },
+      { key: "basementArea",            label: "مساحة القبو م²" },
+      { key: "annexArea",               label: "مساحة الملاحق م²" },
+      { key: "floorsCount",             label: "عدد الأدوار" },
+      { key: "permittedFloorsCount",    label: "الأدوار المصرح بها" },
+      { key: "permittedBuildingRatio",  label: "نسبة البناء المصرح بها %" },
+      { key: "streetWidth",             label: "عرض الشارع م" },
+      { key: "streetFacades",           label: "الواجهات" },
+      { key: "utilities",               label: "المرافق" },
+    ],
+  },
+  {
+    title: "القيمة",
+    fields: [
+      { key: "valuationMethod", label: "أسلوب التقييم" },
+      { key: "marketValue",     label: "القيمة السوقية" },
+      { key: "incomeValue",     label: "قيمة الدخل" },
+      { key: "costValue",       label: "قيمة التكلفة" },
+      { key: "finalValue",      label: "القيمة النهائية" },
+      { key: "pricePerMeter",   label: "سعر المتر" },
+    ],
+  },
+];
+
+function scoreBg(score: number) {
+  if (score >= 80) return "bg-green-50 border-green-300 text-green-800";
+  if (score >= 60) return "bg-yellow-50 border-yellow-300 text-yellow-800";
+  if (score >= 40) return "bg-orange-50 border-orange-300 text-orange-800";
+  return "bg-red-50 border-red-300 text-red-800";
+}
+function scoreBar(score: number) {
+  if (score >= 80) return "bg-green-500";
+  if (score >= 60) return "bg-yellow-500";
+  if (score >= 40) return "bg-orange-500";
+  return "bg-red-500";
+}
+
 function ScoreBadge({ score }: { score?: number }) {
   if (score == null) return null;
   const cls =
@@ -229,8 +343,9 @@ export default function ReportDetails() {
   const [taqeemSession, setTaqeemSession] = useState<{ status: string; username?: string } | null>(null);
   const apiBase = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
 
-  // datasystem field scores
+  // datasystem field scores + full record
   const [dsFieldScores, setDsFieldScores] = useState<Record<string, number> | null>(null);
+  const [dsRecord, setDsRecord] = useState<any>(null);
 
   // PDF upload state
   const [pdfUploading, setPdfUploading] = useState(false);
@@ -298,14 +413,16 @@ export default function ReportDetails() {
     fetchTaqeemSession();
   }, [id]);
 
-  // جلب نقاط تطابق datasystem لهذا التقرير (فلتر سريع بدلاً من جلب الكل)
+  // جلب سجل datasystem الكامل لهذا التقرير
   useEffect(() => {
     if (!id) return;
     fetch(`${apiBase}/api/datasystem?linkedReportId=${id}`)
       .then(r => r.json())
       .then((list: any[]) => {
         const match = list[0];
-        if (match?.fieldScores) setDsFieldScores(match.fieldScores);
+        if (!match) return;
+        if (match.fieldScores) setDsFieldScores(match.fieldScores);
+        setDsRecord(match);
       })
       .catch(() => {});
   }, [id]);
@@ -520,6 +637,15 @@ export default function ReportDetails() {
             <Bot className="h-4 w-4" />
             رفع آلي
           </TabsTrigger>
+          {dsRecord && (
+            <TabsTrigger value="compare" className="gap-2">
+              <GitCompare className="h-4 w-4" />
+              مقارنة النظام
+              <span className="ml-1 inline-flex items-center justify-center rounded-full bg-blue-100 text-blue-700 text-[10px] font-bold w-5 h-5">
+                {dsRecord.averageScore ?? ""}%
+              </span>
+            </TabsTrigger>
+          )}
         </TabsList>
 
         {/* TAQEEM Submission Tab */}
@@ -1154,6 +1280,141 @@ export default function ReportDetails() {
         </form>
       </Form>
         </TabsContent>
+
+        {/* ── تبويب مقارنة النظام ── */}
+        <TabsContent value="compare" className="space-y-4">
+          {dsRecord ? (
+            <>
+              {/* ملخص نسبة التطابق */}
+              <Card className="border-blue-200 bg-blue-50/60">
+                <CardContent className="pt-4 pb-4">
+                  <div className="flex items-center justify-between flex-wrap gap-4">
+                    <div className="flex items-center gap-3">
+                      <BarChart3 className="h-6 w-6 text-blue-600" />
+                      <div>
+                        <p className="font-bold text-base text-blue-900">معدل التطابق الإجمالي</p>
+                        <p className="text-xs text-blue-700 mt-0.5">بيانات النظام مقابل بيانات التقرير المستخرج</p>
+                      </div>
+                    </div>
+                    <div className="text-4xl font-black text-blue-700">{dsRecord.averageScore ?? "—"}%</div>
+                  </div>
+                  <div className="mt-3 h-2.5 bg-blue-200 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all ${scoreBar(dsRecord.averageScore ?? 0)}`}
+                      style={{ width: `${dsRecord.averageScore ?? 0}%` }}
+                    />
+                  </div>
+                  <div className="mt-3 flex gap-3 flex-wrap text-xs">
+                    <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded bg-green-500" />≥80% تطابق ممتاز</span>
+                    <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded bg-yellow-500" />60-79% تطابق جيد</span>
+                    <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded bg-orange-500" />40-59% تطابق متوسط</span>
+                    <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded bg-red-500" />&lt;40% تطابق ضعيف</span>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* رأس الأعمدة */}
+              <div className="grid grid-cols-[180px_1fr_1fr_90px] gap-0 rounded-t-lg border overflow-hidden text-sm font-semibold bg-gray-100">
+                <div className="p-3 border-l text-gray-700">الحقل</div>
+                <div className="p-3 border-l text-blue-700 flex items-center gap-1.5">
+                  <span className="inline-block w-2.5 h-2.5 rounded-full bg-blue-500" />
+                  بيانات النظام
+                </div>
+                <div className="p-3 border-l text-purple-700 flex items-center gap-1.5">
+                  <span className="inline-block w-2.5 h-2.5 rounded-full bg-purple-500" />
+                  بيانات التقرير
+                  <span className="text-[10px] text-gray-400 font-normal">(للقراءة)</span>
+                </div>
+                <div className="p-3 text-center text-gray-700">التطابق</div>
+              </div>
+
+              {/* صفوف المقارنة مجمّعة */}
+              <div className="border border-t-0 rounded-b-lg overflow-hidden divide-y">
+                {COMPARE_GROUPS.map((group) => {
+                  // تحقق إذا كان للمجموعة أي بيانات
+                  const hasData = group.fields.some(
+                    ({ key }) => dsRecord[key] != null || (report as any)?.[key] != null
+                  );
+                  if (!hasData) return null;
+                  return (
+                    <div key={group.title}>
+                      {/* عنوان المجموعة */}
+                      <div className="bg-gray-50 px-3 py-2 text-xs font-bold text-gray-500 uppercase tracking-wider border-b">
+                        {group.title}
+                      </div>
+                      {/* صفوف الحقول */}
+                      {group.fields.map(({ key, label }, i) => {
+                        const sysVal  = dsRecord[key];
+                        const repVal  = (report as any)?.[key];
+                        const score   = dsRecord.fieldScores?.[key] as number | undefined;
+                        const isEmpty = sysVal == null && repVal == null;
+                        if (isEmpty) return null;
+                        return (
+                          <div
+                            key={key}
+                            className={`grid grid-cols-[180px_1fr_1fr_90px] gap-0 text-sm border-b last:border-b-0 ${i % 2 === 0 ? "bg-white" : "bg-gray-50/40"} hover:bg-blue-50/20 transition-colors`}
+                          >
+                            {/* اسم الحقل */}
+                            <div className="p-2.5 border-l text-xs text-gray-600 font-medium flex items-center">
+                              {label}
+                            </div>
+                            {/* قيمة النظام */}
+                            <div className="p-2.5 border-l flex items-center">
+                              {sysVal != null ? (
+                                <span className="text-blue-800 bg-blue-50 border border-blue-200 rounded px-2 py-0.5 text-xs max-w-xs break-words">
+                                  {String(sysVal)}
+                                </span>
+                              ) : (
+                                <span className="text-gray-300 text-xs italic">—</span>
+                              )}
+                            </div>
+                            {/* قيمة التقرير (للقراءة فقط) */}
+                            <div className="p-2.5 border-l flex items-center">
+                              {repVal != null ? (
+                                <span className="text-purple-800 bg-purple-50 border border-purple-200 rounded px-2 py-0.5 text-xs max-w-xs break-words">
+                                  {String(repVal)}
+                                </span>
+                              ) : (
+                                <span className="text-gray-300 text-xs italic">—</span>
+                              )}
+                            </div>
+                            {/* نسبة التطابق */}
+                            <div className="p-2.5 flex flex-col items-center justify-center gap-1">
+                              {score != null ? (
+                                <>
+                                  <span className={`text-xs font-bold border rounded px-1.5 py-0.5 leading-4 ${scoreBg(score)}`}>
+                                    {score}%
+                                  </span>
+                                  <div className="w-14 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                                    <div
+                                      className={`h-full rounded-full ${scoreBar(score)}`}
+                                      style={{ width: `${score}%` }}
+                                    />
+                                  </div>
+                                </>
+                              ) : (
+                                <span className="text-gray-300 text-xs">—</span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          ) : (
+            <Card>
+              <CardContent className="pt-12 pb-12 text-center">
+                <GitCompare className="h-12 w-12 mx-auto mb-3 text-gray-300" />
+                <p className="text-muted-foreground">لا يوجد سجل نظام مرتبط بهذا التقرير</p>
+                <p className="text-xs text-gray-400 mt-1">ارفع بيانات النظام من صفحة «مقارنة النظام» لتفعيل هذه الميزة</p>
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
       </Tabs>
     </div>
   );
