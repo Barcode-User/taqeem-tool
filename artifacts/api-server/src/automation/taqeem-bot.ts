@@ -64,6 +64,13 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
 
     addLog(session, "بدء عملية الرفع الآلي...");
 
+    // ── تتبع كل تغييرات URL تلقائياً ──────────────────────────────────────
+    page.on("framenavigated", (frame) => {
+      if (frame === page.mainFrame()) {
+        addLog(session, `🔀 URL تغيّر → ${frame.url()}`);
+      }
+    });
+
     // ════════════════════════════════════════════════════════
     // الصفحة 1 — البيانات الأساسية للتقرير
     // ════════════════════════════════════════════════════════
@@ -105,19 +112,15 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     await clickSaveAndContinue(session);
 
     // ════════════════════════════════════════════════════════
-    // الصفحة 2 — معلومات الأصل والموقع (Screens 3 & 4)
+    // الخطوة 2 — معلومات الأصل والموقع
     // ════════════════════════════════════════════════════════
-    await waitForPageTransition(page, session, urlBefore2, "الصفحة 2");
+    await waitForPageTransition(page, session, urlBefore2, "الخطوة 2");
+    await ensureOnStep(page, session, 2);
 
     const els2 = await scanElements(page);
     await saveDebug(reportId, "page2", els2);
     await screenshot(page, `page2_before_${reportId}`);
-
-    // تحقق من أن الصفحة تغيرت فعلاً (وليست نفس عناصر الصفحة 1)
-    if (els2.length === 0) {
-      addLog(session, "⚠️ الصفحة 2 لا تحتوي عناصر — قد يكون حدث خطأ في الحفظ");
-    }
-
+    addLog(session, `📋 عدد عناصر الخطوة 2: ${els2.length}`);
     await fillPage2(session, report, els2, pdfState);
     await screenshot(page, `page2_after_${reportId}`);
 
@@ -125,18 +128,15 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     await clickSaveAndContinue(session);
 
     // ════════════════════════════════════════════════════════
-    // الصفحة 3 — البيانات الإضافية (Screen 5)
+    // الخطوة 3 — البيانات الإضافية
     // ════════════════════════════════════════════════════════
-    await waitForPageTransition(page, session, urlBefore3, "الصفحة 3");
+    await waitForPageTransition(page, session, urlBefore3, "الخطوة 3");
+    await ensureOnStep(page, session, 3);
 
     const els3 = await scanElements(page);
     await saveDebug(reportId, "page3", els3);
     await screenshot(page, `page3_before_${reportId}`);
-
-    if (els3.length === 0) {
-      addLog(session, "⚠️ الصفحة 3 لا تحتوي عناصر — قد يكون حدث خطأ في الحفظ");
-    }
-
+    addLog(session, `📋 عدد عناصر الخطوة 3: ${els3.length}`);
     await fillPage3(session, report, els3, pdfState);
     await screenshot(page, `page3_after_${reportId}`);
 
@@ -144,13 +144,37 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
       addLog(session, "⚠️ لم يُرفع PDF في أي صفحة — يرجى رفعه يدوياً في المتصفح.");
     }
 
-    const urlBeforeReview = page.url();
-    await clickSaveAndContinue(session);
+    // ════════════════════════════════════════════════════════
+    // الخطوات 4 و 5 — إذا وُجدت في الـ wizard
+    // ════════════════════════════════════════════════════════
+    for (const step of [4, 5]) {
+      const urlBeforeStep = page.url();
+      const stepNum = extractStepFromUrl(urlBeforeStep);
+      if (stepNum !== null && stepNum >= 6) break; // وصلنا للمراجعة
+      if (stepNum !== null && stepNum < step) continue; // تخطّينا هذه الخطوة
+
+      await clickSaveAndContinue(session);
+      await waitForPageTransition(page, session, urlBeforeStep, `الخطوة ${step}`);
+
+      const afterStep = extractStepFromUrl(page.url());
+      if (afterStep !== null && afterStep >= 6) break; // وصلنا للمراجعة
+
+      const elsExtra = await scanElements(page);
+      addLog(session, `📋 الخطوة ${step}: ${elsExtra.length} عنصر — تخطّي (لا يوجد محتوى مُعرَّف)`);
+      await saveDebug(reportId, `page${step}`, elsExtra);
+      await screenshot(page, `page${step}_${reportId}`);
+    }
 
     // ════════════════════════════════════════════════════════
     // صفحة المراجعة النهائية — توقف هنا للمراجعة اليدوية
     // ════════════════════════════════════════════════════════
-    await waitForPageTransition(page, session, urlBeforeReview, "صفحة المراجعة");
+    const urlBeforeReview = page.url();
+    const currentStepBeforeReview = extractStepFromUrl(urlBeforeReview);
+    if (currentStepBeforeReview === null || currentStepBeforeReview < 6) {
+      await clickSaveAndContinue(session);
+      await waitForPageTransition(page, session, urlBeforeReview, "صفحة المراجعة");
+    }
+
     await screenshot(page, `page_review_${reportId}`);
     addLog(session, `✅ صفحة المراجعة جاهزة: ${page.url()}`);
     addLog(session, "🔵 اكتمل الإدخال — راجع البيانات ثم اضغط «إرسال التقرير» يدوياً.");
@@ -175,7 +199,7 @@ async function waitForAngular(page: Page, extra = 2000): Promise<void> {
   await page.waitForTimeout(extra);
 }
 
-// ينتظر انتهاء الانتقال بين الصفحات — أكثر موثوقية من timeout ثابت
+// ينتظر انتهاء الانتقال بين الصفحات
 async function waitForPageTransition(
   page: Page,
   session: AutomationSession,
@@ -184,7 +208,7 @@ async function waitForPageTransition(
 ): Promise<void> {
   addLog(session, `⏳ انتظار الانتقال إلى ${label}...`);
 
-  // انتظر تغيير الـ URL أولاً (يُشير إلى أن Angular قبِل الحفظ)
+  // انتظر تغيير الـ URL أولاً
   const transitioned = await page
     .waitForFunction(
       (prev: string) => window.location.href !== prev,
@@ -194,12 +218,8 @@ async function waitForPageTransition(
     .then(() => true)
     .catch(() => false);
 
-  if (transitioned) {
-    addLog(session, `🔗 تغيّر URL → ${page.url()}`);
-  } else {
-    // إذا لم يتغير الـ URL (نفس صفحة Angular)، نُعطي وقتاً إضافياً
-    addLog(session, `⚠️ URL لم يتغير — قد يكون wizard بدون URL change`);
-    await page.waitForTimeout(3000);
+  if (!transitioned) {
+    addLog(session, `⚠️ URL لم يتغير بعد 20 ثانية — نتابع على نفس الصفحة`);
   }
 
   // انتظر استقرار الشبكة
@@ -210,6 +230,70 @@ async function waitForPageTransition(
   // انتظر إضافي ليُكمل Angular تهيئة النموذج
   await page.waitForTimeout(2500);
   addLog(session, `✅ ${label} جاهزة: ${page.url()}`);
+}
+
+// استخراج رقم الخطوة من الـ URL
+// مثال: /report/create/3/13  →  3
+//        /report/edit/12345/4 →  4
+function extractStepFromUrl(url: string): number | null {
+  // نمط: /report/create/{step}/{typeId} — مثل /report/create/2/13
+  const m1 = url.match(/\/report\/create\/(\d+)\/\d+/);
+  if (m1) return parseInt(m1[1], 10);
+  // نمط: /report/edit/{reportId}/{step}
+  const m2 = url.match(/\/report\/edit\/\d+\/(\d+)/);
+  if (m2) return parseInt(m2[1], 10);
+  // نمط: /report/update/{step}/...
+  const m3 = url.match(/\/report\/[a-z]+\/\d+\/(\d+)/);
+  if (m3) return parseInt(m3[1], 10);
+  return null;
+}
+
+// إذا تخطّى الـ wizard خطوة معينة، انتقل إليها مباشرة
+async function ensureOnStep(
+  page: Page,
+  session: AutomationSession,
+  expectedStep: number,
+): Promise<boolean> {
+  const currentUrl = page.url();
+  const currentStep = extractStepFromUrl(currentUrl);
+
+  addLog(session, `🔍 URL الحالي: ${currentUrl} | الخطوة المكتشفة: ${currentStep ?? "غير معروف"} | المتوقعة: ${expectedStep}`);
+
+  if (currentStep === null || currentStep === expectedStep) {
+    return true; // لا تدخل لازم
+  }
+
+  if (currentStep > expectedStep) {
+    // الـ wizard تخطّى الخطوة — حاول الانتقال إليها مباشرة
+    const targetUrl = currentUrl.replace(
+      new RegExp(`(\/report\/(?:create|edit|update)\/)?(\\d+)(\/)(\\d+)`),
+      (_, prefix, a, sep, b) => {
+        // نعرّف أيّ الرقمين هو رقم الخطوة
+        const aNum = parseInt(a, 10);
+        const bNum = parseInt(b, 10);
+        if (aNum === currentStep) {
+          return `${prefix ?? ""}${expectedStep}${sep}${b}`;
+        } else if (bNum === currentStep) {
+          return `${prefix ?? ""}${a}${sep}${expectedStep}`;
+        }
+        return _;
+      },
+    );
+
+    // أو: ابنِ URL مباشر باستبدال رقم الخطوة فقط
+    const directUrl = currentUrl.replace(`/${currentStep}/`, `/${expectedStep}/`);
+    addLog(session, `↩️ الـ wizard تخطّى الخطوة — أحاول الانتقال المباشر: ${directUrl}`);
+    try {
+      await page.goto(directUrl, { waitUntil: "networkidle", timeout: 20000 });
+      await page.waitForTimeout(2000);
+      const newStep = extractStepFromUrl(page.url());
+      addLog(session, `🔗 بعد الانتقال: ${page.url()} | الخطوة: ${newStep}`);
+      return newStep === expectedStep;
+    } catch (e: any) {
+      addLog(session, `⚠️ فشل الانتقال المباشر: ${e.message}`);
+    }
+  }
+  return false;
 }
 
 async function scanElements(page: Page): Promise<any[]> {
