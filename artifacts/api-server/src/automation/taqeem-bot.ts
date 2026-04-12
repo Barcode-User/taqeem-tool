@@ -72,9 +72,11 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     });
 
     // ════════════════════════════════════════════════════════
-    // الصفحة 1 — البيانات الأساسية للتقرير
+    // نموذج إنشاء التقرير — صفحة واحدة تحتوي جميع الحقول
+    // URL: /report/create/1/13
+    // بعد الضغط على "continue" → /report/{id} (صفحة التقرير)
     // ════════════════════════════════════════════════════════
-    addLog(session, "▶ الصفحة 1: فتح صفحة إنشاء تقرير جديد...");
+    addLog(session, "▶ فتح نموذج إنشاء تقرير جديد...");
     await page.goto(`${TAQEEM_URL}/report/create/1/13`, {
       waitUntil: "networkidle",
       timeout: 30000,
@@ -84,100 +86,63 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     if (page.url().includes("/login") || page.url().includes("sso.taqeem")) {
       throw new Error("انتهت الجلسة — يرجى تسجيل الدخول مجدداً من صفحة الإعدادات.");
     }
-    addLog(session, `✅ الصفحة 1 جاهزة: ${page.url()}`);
+    addLog(session, `✅ النموذج جاهز: ${page.url()}`);
 
-    // حالة مشتركة — يتتبع ما إذا تم رفع PDF بنجاح في أيّ صفحة
     const pdfState = { pdfUploaded: false };
 
     const els1 = await scanElements(page);
-    await saveDebug(reportId, "page1", els1);
-    await screenshot(page, `page1_before_${reportId}`);
-    await fillPage1(session, report, els1, pdfState);
-    await screenshot(page, `page1_after_${reportId}`);
+    await saveDebug(reportId, "form", els1);
+    await screenshot(page, `form_before_${reportId}`);
+    addLog(session, `📋 عدد الحقول: ${els1.length}`);
 
-    // ── إعادة محاولة رفع PDF إذا لم يُرفع في fillPage1 ──────────────────────
+    // ── تعبئة جميع حقول النموذج ──────────────────────────────────────────
+    await fillFormPage(session, report, els1, pdfState);
+    await screenshot(page, `form_after_${reportId}`);
+
+    // ── رفع PDF إذا لم يُرفع ──────────────────────────────────────────────
     if (!pdfState.pdfUploaded) {
-      addLog(session, "🔄 لم يُرفع PDF — إعادة المحاولة قبل الحفظ...");
+      addLog(session, "🔄 لم يُرفع PDF — إعادة المحاولة...");
       for (let r = 1; r <= 3 && !pdfState.pdfUploaded; r++) {
         addLog(session, `  ↳ محاولة ${r}/3`);
         await page.waitForTimeout(1200);
         await uploadPdf(session, report, pdfState);
       }
       if (!pdfState.pdfUploaded) {
-        addLog(session, "⚠️ لم يُرفع PDF — المتابعة بدونه (قد تفشل الصفحة)");
+        addLog(session, "⚠️ لم يُرفع PDF — المتابعة بدونه (قد تفشل صفحة التقييم)");
       }
     }
 
-    const urlBefore2 = page.url();
-    await clickSaveAndContinue(session);
+    // ── ضغط «حفظ واستمرار» — input[name="continue"] بالتحديد ─────────────
+    const urlBeforeSubmit = page.url();
+    await clickContinueButton(session);
 
-    // ════════════════════════════════════════════════════════
-    // الخطوة 2 — معلومات الأصل والموقع
-    // ════════════════════════════════════════════════════════
-    await waitForPageTransition(page, session, urlBefore2, "الخطوة 2");
-    await ensureOnStep(page, session, 2);
+    // ── انتظار الانتقال لصفحة التقرير /report/{id} ───────────────────────
+    addLog(session, "⏳ انتظار إنشاء التقرير...");
+    const submitted = await page
+      .waitForFunction(
+        (prev: string) => window.location.href !== prev,
+        urlBeforeSubmit,
+        { timeout: 30000 },
+      )
+      .then(() => true)
+      .catch(() => false);
 
-    const els2 = await scanElements(page);
-    await saveDebug(reportId, "page2", els2);
-    await screenshot(page, `page2_before_${reportId}`);
-    addLog(session, `📋 عدد عناصر الخطوة 2: ${els2.length}`);
-    await fillPage2(session, report, els2, pdfState);
-    await screenshot(page, `page2_after_${reportId}`);
-
-    const urlBefore3 = page.url();
-    await clickSaveAndContinue(session);
-
-    // ════════════════════════════════════════════════════════
-    // الخطوة 3 — البيانات الإضافية
-    // ════════════════════════════════════════════════════════
-    await waitForPageTransition(page, session, urlBefore3, "الخطوة 3");
-    await ensureOnStep(page, session, 3);
-
-    const els3 = await scanElements(page);
-    await saveDebug(reportId, "page3", els3);
-    await screenshot(page, `page3_before_${reportId}`);
-    addLog(session, `📋 عدد عناصر الخطوة 3: ${els3.length}`);
-    await fillPage3(session, report, els3, pdfState);
-    await screenshot(page, `page3_after_${reportId}`);
-
-    if (!pdfState.pdfUploaded && report.pdfFilePath) {
-      addLog(session, "⚠️ لم يُرفع PDF في أي صفحة — يرجى رفعه يدوياً في المتصفح.");
+    if (!submitted) {
+      // قد يكون هناك خطأ في التحقق — سجّل عناصر الخطأ
+      const errMsg = await page.evaluate(() => {
+        const errs = Array.from(document.querySelectorAll(".alert-danger, .error-message, .text-danger, [class*='error']"));
+        return errs.map(e => e.textContent?.trim()).filter(Boolean).join(" | ");
+      }).catch(() => "");
+      throw new Error(`فشل إرسال النموذج${errMsg ? `: ${errMsg}` : " — تحقق من الحقول المطلوبة"}`);
     }
 
-    // ════════════════════════════════════════════════════════
-    // الخطوات 4 و 5 — إذا وُجدت في الـ wizard
-    // ════════════════════════════════════════════════════════
-    for (const step of [4, 5]) {
-      const urlBeforeStep = page.url();
-      const stepNum = extractStepFromUrl(urlBeforeStep);
-      if (stepNum !== null && stepNum >= 6) break; // وصلنا للمراجعة
-      if (stepNum !== null && stepNum < step) continue; // تخطّينا هذه الخطوة
+    await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
+    await page.waitForTimeout(2000);
 
-      await clickSaveAndContinue(session);
-      await waitForPageTransition(page, session, urlBeforeStep, `الخطوة ${step}`);
-
-      const afterStep = extractStepFromUrl(page.url());
-      if (afterStep !== null && afterStep >= 6) break; // وصلنا للمراجعة
-
-      const elsExtra = await scanElements(page);
-      addLog(session, `📋 الخطوة ${step}: ${elsExtra.length} عنصر — تخطّي (لا يوجد محتوى مُعرَّف)`);
-      await saveDebug(reportId, `page${step}`, elsExtra);
-      await screenshot(page, `page${step}_${reportId}`);
-    }
-
-    // ════════════════════════════════════════════════════════
-    // صفحة المراجعة النهائية — توقف هنا للمراجعة اليدوية
-    // ════════════════════════════════════════════════════════
-    const urlBeforeReview = page.url();
-    const currentStepBeforeReview = extractStepFromUrl(urlBeforeReview);
-    if (currentStepBeforeReview === null || currentStepBeforeReview < 6) {
-      await clickSaveAndContinue(session);
-      await waitForPageTransition(page, session, urlBeforeReview, "صفحة المراجعة");
-    }
-
-    await screenshot(page, `page_review_${reportId}`);
-    addLog(session, `✅ صفحة المراجعة جاهزة: ${page.url()}`);
-    addLog(session, "🔵 اكتمل الإدخال — راجع البيانات ثم اضغط «إرسال التقرير» يدوياً.");
+    const finalUrl = page.url();
+    await screenshot(page, `report_created_${reportId}`);
+    addLog(session, `✅ تم إنشاء التقرير: ${finalUrl}`);
+    addLog(session, "🔵 اكتمل الإدخال — راجع التقرير في المتصفح ثم أرسله يدوياً.");
 
     await updateReport(reportId, { automationStatus: "waiting_review", automationError: null });
     closeSession(session.sessionId);
@@ -676,7 +641,212 @@ async function clickSaveAndContinue(session: AutomationSession): Promise<void> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// الصفحة 1 — البيانات الأساسية للتقرير
+// ضغط زر "continue" تحديداً — input[name="continue"]
+// ─────────────────────────────────────────────────────────────────────────────
+async function clickContinueButton(session: AutomationSession): Promise<void> {
+  const { page } = session;
+  addLog(session, "🖱️ ضغط زر «المتابعة» (continue)...");
+
+  // الأولوية 1: input[name="continue"] بالاسم المباشر
+  try {
+    const btn = await page.$('input[name="continue"]');
+    if (btn) {
+      const visible = await btn.isVisible().catch(() => false);
+      if (visible) {
+        await btn.scrollIntoViewIfNeeded().catch(() => {});
+        await btn.click();
+        addLog(session, `✅ تم الضغط: input[name="continue"]`);
+        return;
+      }
+    }
+  } catch { /* تابع */ }
+
+  // الأولوية 2: button أو input بنص يحتوي "continue" أو "استمرار" أو "التالي"
+  try {
+    const clicked = await page.evaluate(() => {
+      const candidates = Array.from(
+        document.querySelectorAll("input[type='submit'], button[type='submit'], button"),
+      );
+      // افضّل الزر الأخير (عادةً continue) على الأول (save)
+      const target = [...candidates].reverse().find(b => {
+        const txt = ((b as HTMLInputElement).value ?? b.textContent ?? "").trim().toLowerCase();
+        return txt.includes("continue") || txt.includes("استمرار") || txt.includes("التالي") || txt.includes("next");
+      }) ?? candidates[candidates.length - 1] as HTMLElement | undefined;
+      if (target) { (target as HTMLElement).click(); return true; }
+      return false;
+    });
+    if (clicked) {
+      addLog(session, "✅ تم الضغط على زر المتابعة (آخر زر إرسال)");
+      return;
+    }
+  } catch { /* تابع */ }
+
+  addLog(session, "⚠️ لم يُعثر على زر «المتابعة» — قد يحتاج تدخل يدوي");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// تعبئة نموذج إنشاء التقرير — كل الحقول في صفحة واحدة
+// الحقول المعروفة من السجل الفعلي:
+//   title, purpose_id, value_premise_id, value_base_id, report_type (radio)
+//   valued_at, submitted_at, assumptions, special_assumptions, value, currency_id
+//   report_file, client[0][name], client[0][telephone], client[0][email]
+//   has_user (checkbox), valuer[0][id], valuer[0][contribution]
+// ─────────────────────────────────────────────────────────────────────────────
+async function fillFormPage(
+  session: AutomationSession,
+  report: any,
+  els: any[],
+  pdfState: { pdfUploaded: boolean },
+): Promise<void> {
+  logElements(session, els, "نموذج التقرير");
+
+  // helper: ملء حقل بـ name مباشرة
+  const fillByName = (name: string, value: any, label: string) =>
+    fillAngular(session, `[name="${name}"]`, value, label);
+
+  const selectByName = (name: string, value: any, label: string) =>
+    selectNativeByName(session, name, value, label);
+
+  // ── عنوان التقرير ────────────────────────────────────────────────────────
+  await fillByName("title", report.reportNumber, "عنوان التقرير");
+
+  // ── الغرض من التقييم ─────────────────────────────────────────────────────
+  await selectByName("purpose_id", report.valuationPurpose, "الغرض من التقييم");
+
+  // ── فرضية القيمة ─────────────────────────────────────────────────────────
+  await selectByName("value_premise_id", report.valuationHypothesis, "فرضية القيمة");
+
+  // ── أساس القيمة ──────────────────────────────────────────────────────────
+  await selectByName("value_base_id", report.valuationBasis, "أساس القيمة");
+
+  // ── نوع التقرير (أزرار راديو) ────────────────────────────────────────────
+  if (report.reportType) {
+    const rt = String(report.reportType).trim();
+    try {
+      const clicked = await session.page.evaluate((rt: string) => {
+        const radios = Array.from(
+          document.querySelectorAll<HTMLInputElement>('input[type="radio"][name="report_type"]'),
+        );
+        const target = radios.find(r => {
+          const lbl = (r.closest("label")?.textContent ?? r.labels?.[0]?.textContent ?? "").trim();
+          return lbl === rt || lbl.includes(rt) || rt.includes(lbl);
+        }) ?? radios[0]; // fallback: التقرير المفصل
+        if (target) { target.click(); return target.value || "ok"; }
+        return null;
+      }, rt);
+      if (clicked) addLog(session, `✅ نوع التقرير: ${clicked}`);
+    } catch { addLog(session, `⚠️ تعذّر تحديد نوع التقرير`); }
+  }
+
+  // ── تاريخ التقييم ─────────────────────────────────────────────────────────
+  await fillDate(session, '[name="valued_at"]', report.valuationDate, "تاريخ التقييم");
+
+  // ── تاريخ إصدار التقرير ───────────────────────────────────────────────────
+  await fillDate(session, '[name="submitted_at"]', report.reportDate, "تاريخ إصدار التقرير");
+
+  // ── الافتراضات ────────────────────────────────────────────────────────────
+  if (report.assumptions) {
+    await fillByName("assumptions", report.assumptions, "الافتراضات");
+  }
+
+  // ── الافتراضات الخاصة ────────────────────────────────────────────────────
+  if (report.specialAssumptions) {
+    await fillByName("special_assumptions", report.specialAssumptions, "الافتراضات الخاصة");
+  }
+
+  // ── الرأي النهائي في القيمة ───────────────────────────────────────────────
+  await fillByName("value", report.finalValue, "الرأي النهائي في القيمة");
+
+  // ── عملة التقييم (افتراضي: ريال سعودي) ──────────────────────────────────
+  await selectByName("currency_id", report.currency ?? "ريال سعودي", "عملة التقييم");
+
+  // ── اسم العميل ───────────────────────────────────────────────────────────
+  await fillByName("client[0][name]", report.clientName, "اسم العميل");
+
+  // ── رقم الهاتف ───────────────────────────────────────────────────────────
+  await fillByName("client[0][telephone]", report.clientPhone, "رقم الهاتف");
+
+  // ── البريد الإلكتروني ─────────────────────────────────────────────────────
+  await fillByName("client[0][email]", report.clientEmail, "البريد الإلكتروني");
+
+  // ── اسم المقيم (أول خيار متاح إذا لم يكن محدداً) ───────────────────────
+  if (report.valuerName) {
+    await selectByName("valuer[0][id]", report.valuerName, "اسم المقيم");
+  } else {
+    // اختر الخيار الأول المتاح
+    try {
+      await session.page.evaluate(() => {
+        const sel = document.querySelector<HTMLSelectElement>('[name="valuer[0][id]"]');
+        if (sel && sel.options.length > 1) {
+          sel.selectedIndex = 1;
+          sel.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+      });
+      addLog(session, "✅ اسم المقيم: اختيار تلقائي (أول خيار)");
+    } catch { addLog(session, "⚠️ لم يُحدد اسم المقيم"); }
+  }
+
+  // ── نسبة المساهمة (افتراضي 100%) ─────────────────────────────────────────
+  await selectByName("valuer[0][contribution]", report.valuerContribution ?? "100%", "نسبة المساهمة");
+
+  // ── رفع PDF ───────────────────────────────────────────────────────────────
+  await uploadPdf(session, report, pdfState);
+}
+
+// تعبئة native select بالـ name مباشرة (بالنص أو بالقيمة)
+async function selectNativeByName(
+  session: AutomationSession,
+  name: string,
+  value: string | null | undefined,
+  label: string,
+): Promise<void> {
+  if (!value || value.trim() === "") {
+    addLog(session, `⏭️ تخطي "${label}" — لا توجد قيمة`);
+    return;
+  }
+  const sel = `[name="${name}"]`;
+  try {
+    await session.page.waitForSelector(sel, { timeout: 3000 });
+    // حاول بالنص ثم بالقيمة
+    const chosen = await session.page
+      .selectOption(sel, { label: value })
+      .catch(() => session.page.selectOption(sel, { value }).catch(() => []));
+    if (Array.isArray(chosen) && chosen.length > 0) {
+      await session.page.evaluate((s: string) => {
+        document.querySelector(s)?.dispatchEvent(new Event("change", { bubbles: true }));
+      }, sel);
+      addLog(session, `✅ ${label}: ${value}`);
+      return;
+    }
+    // إذا لم يطابق بالضبط، ابحث جزئياً
+    const matched = await session.page.evaluate(
+      (args: { sel: string; val: string }) => {
+        const el = document.querySelector<HTMLSelectElement>(args.sel);
+        if (!el) return null;
+        const opt = Array.from(el.options).find(o =>
+          o.text.trim().includes(args.val) || args.val.includes(o.text.trim()),
+        );
+        if (opt) {
+          el.value = opt.value;
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+          return opt.text;
+        }
+        return null;
+      },
+      { sel, val: value },
+    );
+    if (matched) {
+      addLog(session, `✅ ${label}: ${matched} (مطابقة جزئية)`);
+    } else {
+      addLog(session, `⚠️ "${label}": الخيار "${value}" غير موجود`);
+    }
+  } catch {
+    addLog(session, `⚠️ لم يُحدَّد "${label}"`);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// الدوال القديمة (محتفظ بها كمرجع — لم تعد تُستخدم في runAutomation)
 // ─────────────────────────────────────────────────────────────────────────────
 // دالة مساعدة للبحث عن عنصر — تبحث في كل الحقول المتاحة
 function findEl(arr: any[], rx: RegExp): any {
