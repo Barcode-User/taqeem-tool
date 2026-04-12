@@ -568,13 +568,18 @@ async function screenshot(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: p, fullPage: true }).catch(() => {});
 }
 
-// تحويل التاريخ إلى DD/MM/YYYY
+// تحويل التاريخ إلى YYYY-MM-DD (المطلوب من حقول <input type="date"> في قيمة)
 function formatDate(raw: string | null | undefined): string | null {
   if (!raw) return null;
   const s = raw.trim();
-  if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s)) return s;
-  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (m) return `${m[3]}/${m[2]}/${m[1]}`;
+  // الصيغة المثالية YYYY-MM-DD — لا تعديل
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  // صيغة DD/MM/YYYY → YYYY-MM-DD
+  const dmy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`;
+  // صيغة MM/DD/YYYY → YYYY-MM-DD (احتياطي)
+  const mdy = s.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+  if (mdy) return `${mdy[3]}-${mdy[1].padStart(2, "0")}-${mdy[2].padStart(2, "0")}`;
   return s;
 }
 
