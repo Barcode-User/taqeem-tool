@@ -439,6 +439,94 @@ function setSharedContext(browser: Browser, context: BrowserContext) {
   sharedContext = context;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// سياق معزول لكل عملية أتمتة — مستقل تماماً عن السياق المشترك
+// يستخدم ملف المصادقة المحفوظ (cookies) دون المساس بالجلسة الرئيسية
+// ─────────────────────────────────────────────────────────────────────────────
+export async function createIsolatedAutomationContext(): Promise<{
+  context: BrowserContext;
+  cleanup: () => Promise<void>;
+} | null> {
+  // تحقق من وجود جلسة محفوظة
+  const meta = loadMeta();
+  if (!meta || !fs.existsSync(STORAGE_STATE_FILE)) {
+    return null; // لا توجد جلسة — يجب تسجيل الدخول أولاً
+  }
+
+  // نستخدم نفس المتصفح المشترك (إن كان متاحاً) لتوفير الموارد
+  // أو نُنشئ متصفحاً جديداً خفياً مخصصاً للأتمتة
+  const isReplit = !!process.env.REPL_ID || !!process.env.REPLIT_ID;
+  let automationBrowser: Browser;
+  let ownsBrowser = false; // هل نحن من أنشأ المتصفح (ونحتاج إغلاقه)؟
+
+  if (sharedBrowser) {
+    // استخدم نفس المتصفح — فقط أنشئ context جديد معزول
+    automationBrowser = sharedBrowser;
+    ownsBrowser = false;
+  } else {
+    // لا يوجد متصفح مشترك — أنشئ واحداً مخصصاً للأتمتة
+    const chromiumExec = getChromiumExecutable();
+    let newBrowser: Browser | null = null;
+
+    if (!isReplit) {
+      try {
+        newBrowser = await chromium.launch({
+          headless: false,
+          channel: "chrome",
+          slowMo: 80,
+          args: [
+            "--disable-blink-features=AutomationControlled",
+            "--no-first-run",
+            "--no-default-browser-check",
+          ],
+        });
+      } catch { newBrowser = null; }
+    }
+
+    if (!newBrowser) {
+      newBrowser = await chromium.launch({
+        headless: isReplit,
+        slowMo: isReplit ? 0 : 80,
+        args: isReplit
+          ? ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
+          : ["--disable-blink-features=AutomationControlled", "--no-first-run"],
+        ...(chromiumExec ? { executablePath: chromiumExec } : {}),
+      });
+    }
+
+    automationBrowser = newBrowser;
+    ownsBrowser = true;
+  }
+
+  // إنشاء context جديد معزول بملف المصادقة المحفوظ
+  const isolatedContext = await automationBrowser.newContext({
+    locale: "ar-SA",
+    timezoneId: "Asia/Riyadh",
+    viewport: { width: 1280, height: 900 },
+    storageState: STORAGE_STATE_FILE as any,
+    ...(isReplit ? {
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    } : {}),
+  });
+
+  // إخفاء علامات الأتمتة
+  await isolatedContext.addInitScript(() => {
+    Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+    (globalThis as any).window ??= {};
+    (globalThis as any).window.chrome = { runtime: {} };
+  });
+
+  // دالة التنظيف: تُغلق السياق المعزول فقط (لا تمس الجلسة الرئيسية)
+  const cleanup = async () => {
+    try { await isolatedContext.close(); } catch {}
+    if (ownsBrowser) {
+      try { await automationBrowser.close(); } catch {}
+    }
+  };
+
+  return { context: isolatedContext, cleanup };
+}
+
 export function submitLoginOtp(loginId: string, otp: string): boolean {
   if (!activeFlow || activeFlow.loginId !== loginId) return false;
   if (!activeFlow.otpResolver) return false;

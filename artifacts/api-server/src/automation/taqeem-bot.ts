@@ -8,7 +8,7 @@ import {
   addLog,
   type AutomationSession,
 } from "./session-manager";
-import { getAuthenticatedContext } from "./taqeem-session-store";
+import { createIsolatedAutomationContext } from "./taqeem-session-store";
 import type { Page } from "playwright";
 
 const TAQEEM_URL = "https://qima.taqeem.gov.sa";
@@ -27,25 +27,14 @@ export async function startAutomation(
   reportId: number,
   options: AutomationOptions = {},
 ): Promise<string> {
-  const context = await getAuthenticatedContext();
-  if (!context) {
+  // ── إنشاء سياق معزول خاص بهذه العملية فقط ──────────────────────────────
+  // لا يتداخل مع أي جلسة مستخدم أو عملية أتمتة أخرى
+  const isolated = await createIsolatedAutomationContext();
+  if (!isolated) {
     throw new Error("لا توجد جلسة مسجّلة. يرجى تسجيل الدخول أولاً من صفحة الإعدادات.");
   }
 
-  // ── أغلق جميع صفحات تقارير TAQEEM المفتوحة من جلسات سابقة ──────────────
-  // (نبقي صفحات تسجيل الدخول/الرئيسية — نغلق صفحات /report/ فقط)
-  const existingPages = context.pages();
-  for (const p of existingPages) {
-    const u = p.url();
-    if (u.includes(TAQEEM_URL) && (
-      u.includes("/report/") ||
-      u.includes("/asset/") ||
-      u.includes("/attribute/")
-    )) {
-      await p.close().catch(() => {});
-    }
-  }
-
+  const { context, cleanup } = isolated;
   const sessionId = randomUUID();
   const page = await context.newPage();
   const session = createSession(sessionId, reportId, null as any, context, page);
@@ -56,12 +45,17 @@ export async function startAutomation(
     automationSessionId: sessionId,
   });
 
-  runAutomation(session, reportId).catch(async (err) => {
-    addLog(session, `Fatal error: ${err.message}`);
-    await updateReport(reportId, { automationStatus: "failed", automationError: err.message });
-    try { await page.close(); } catch {}
-    closeSession(sessionId);
-  });
+  // شغّل الأتمتة وأغلق السياق المعزول عند الانتهاء (نجاح أو فشل)
+  runAutomation(session, reportId)
+    .catch(async (err) => {
+      addLog(session, `Fatal error: ${err.message}`);
+      await updateReport(reportId, { automationStatus: "failed", automationError: err.message });
+      closeSession(sessionId);
+    })
+    .finally(async () => {
+      // إغلاق السياق المعزول — لا يؤثر على الجلسة الرئيسية أو أي مستخدم آخر
+      await cleanup();
+    });
 
   return sessionId;
 }
