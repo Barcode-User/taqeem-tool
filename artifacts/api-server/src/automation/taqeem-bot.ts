@@ -69,10 +69,10 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     // ════════════════════════════════════════════════════════
     addLog(session, "▶ الصفحة 1: فتح صفحة إنشاء تقرير جديد...");
     await page.goto(`${TAQEEM_URL}/report/create/1/13`, {
-      waitUntil: "domcontentloaded",
+      waitUntil: "networkidle",
       timeout: 30000,
     });
-    await waitForAngular(page);
+    await waitForAngular(page, 2000);
 
     if (page.url().includes("/login") || page.url().includes("sso.taqeem")) {
       throw new Error("انتهت الجلسة — يرجى تسجيل الدخول مجدداً من صفحة الإعدادات.");
@@ -89,7 +89,6 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     await screenshot(page, `page1_after_${reportId}`);
 
     // ── إعادة محاولة رفع PDF إذا لم يُرفع في fillPage1 ──────────────────────
-    // pdfUploaded=false يعني الملف موجود لكن الرفع فشل
     if (!pdfState.pdfUploaded) {
       addLog(session, "🔄 لم يُرفع PDF — إعادة المحاولة قبل الحفظ...");
       for (let r = 1; r <= 3 && !pdfState.pdfUploaded; r++) {
@@ -98,36 +97,46 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
         await uploadPdf(session, report, pdfState);
       }
       if (!pdfState.pdfUploaded) {
-        throw new Error("❌ فشل رفع ملف PDF بعد 3 محاولات — خانة «أصل التقرير» مطلوبة.");
+        addLog(session, "⚠️ لم يُرفع PDF — المتابعة بدونه (قد تفشل الصفحة)");
       }
     }
 
+    const urlBefore2 = page.url();
     await clickSaveAndContinue(session);
 
     // ════════════════════════════════════════════════════════
     // الصفحة 2 — معلومات الأصل والموقع (Screens 3 & 4)
     // ════════════════════════════════════════════════════════
-    addLog(session, "▶ الصفحة 2: انتظار تحميل صفحة معلومات الأصل...");
-    await waitForAngular(page, 4000);
-    addLog(session, `✅ الصفحة 2 جاهزة: ${page.url()}`);
+    await waitForPageTransition(page, session, urlBefore2, "الصفحة 2");
 
     const els2 = await scanElements(page);
     await saveDebug(reportId, "page2", els2);
     await screenshot(page, `page2_before_${reportId}`);
+
+    // تحقق من أن الصفحة تغيرت فعلاً (وليست نفس عناصر الصفحة 1)
+    if (els2.length === 0) {
+      addLog(session, "⚠️ الصفحة 2 لا تحتوي عناصر — قد يكون حدث خطأ في الحفظ");
+    }
+
     await fillPage2(session, report, els2, pdfState);
     await screenshot(page, `page2_after_${reportId}`);
+
+    const urlBefore3 = page.url();
     await clickSaveAndContinue(session);
 
     // ════════════════════════════════════════════════════════
     // الصفحة 3 — البيانات الإضافية (Screen 5)
     // ════════════════════════════════════════════════════════
-    addLog(session, "▶ الصفحة 3: انتظار تحميل صفحة البيانات الإضافية...");
-    await waitForAngular(page, 4000);
-    addLog(session, `✅ الصفحة 3 جاهزة: ${page.url()}`);
+    await waitForPageTransition(page, session, urlBefore3, "الصفحة 3");
 
     const els3 = await scanElements(page);
     await saveDebug(reportId, "page3", els3);
     await screenshot(page, `page3_before_${reportId}`);
+
+    if (els3.length === 0) {
+      addLog(session, "⚠️ الصفحة 3 لا تحتوي عناصر — قد يكون حدث خطأ في الحفظ");
+    }
+
     await fillPage3(session, report, els3, pdfState);
     await screenshot(page, `page3_after_${reportId}`);
 
@@ -135,14 +144,14 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
       addLog(session, "⚠️ لم يُرفع PDF في أي صفحة — يرجى رفعه يدوياً في المتصفح.");
     }
 
+    const urlBeforeReview = page.url();
     await clickSaveAndContinue(session);
 
     // ════════════════════════════════════════════════════════
-    // الصفحة 6 — مراجعة نهائية (Screen 6) — توقف هنا
+    // صفحة المراجعة النهائية — توقف هنا للمراجعة اليدوية
     // ════════════════════════════════════════════════════════
-    addLog(session, "▶ انتظار صفحة المراجعة النهائية...");
-    await waitForAngular(page, 4000);
-    await screenshot(page, `page6_review_${reportId}`);
+    await waitForPageTransition(page, session, urlBeforeReview, "صفحة المراجعة");
+    await screenshot(page, `page_review_${reportId}`);
     addLog(session, `✅ صفحة المراجعة جاهزة: ${page.url()}`);
     addLog(session, "🔵 اكتمل الإدخال — راجع البيانات ثم اضغط «إرسال التقرير» يدوياً.");
 
@@ -162,8 +171,45 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
 // أدوات مساعدة مشتركة
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function waitForAngular(page: Page, extra = 3000): Promise<void> {
+async function waitForAngular(page: Page, extra = 2000): Promise<void> {
   await page.waitForTimeout(extra);
+}
+
+// ينتظر انتهاء الانتقال بين الصفحات — أكثر موثوقية من timeout ثابت
+async function waitForPageTransition(
+  page: Page,
+  session: AutomationSession,
+  prevUrl: string,
+  label: string,
+): Promise<void> {
+  addLog(session, `⏳ انتظار الانتقال إلى ${label}...`);
+
+  // انتظر تغيير الـ URL أولاً (يُشير إلى أن Angular قبِل الحفظ)
+  const transitioned = await page
+    .waitForFunction(
+      (prev: string) => window.location.href !== prev,
+      prevUrl,
+      { timeout: 20000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+
+  if (transitioned) {
+    addLog(session, `🔗 تغيّر URL → ${page.url()}`);
+  } else {
+    // إذا لم يتغير الـ URL (نفس صفحة Angular)، نُعطي وقتاً إضافياً
+    addLog(session, `⚠️ URL لم يتغير — قد يكون wizard بدون URL change`);
+    await page.waitForTimeout(3000);
+  }
+
+  // انتظر استقرار الشبكة
+  await page
+    .waitForLoadState("networkidle", { timeout: 15000 })
+    .catch(() => {});
+
+  // انتظر إضافي ليُكمل Angular تهيئة النموذج
+  await page.waitForTimeout(2500);
+  addLog(session, `✅ ${label} جاهزة: ${page.url()}`);
 }
 
 async function scanElements(page: Page): Promise<any[]> {
@@ -496,25 +542,53 @@ async function selectRadio(
 async function clickSaveAndContinue(session: AutomationSession): Promise<void> {
   const { page } = session;
   addLog(session, "🖱️ ضغط «حفظ واستمرار»...");
+
   const btnSelectors = [
     'button:has-text("حفظ واستمرار")',
     'button:has-text("حفظ و استمرار")',
+    'button:has-text("Save & Continue")',
     'button:has-text("Save")',
     'button[type="submit"]',
     'input[type="submit"]',
   ];
+
   for (const sel of btnSelectors) {
     try {
       const btn = await page.$(sel);
-      if (btn) {
-        await btn.click();
-        await page.waitForTimeout(500);
-        addLog(session, `✅ تم الضغط على الزر: ${sel}`);
-        return;
-      }
+      if (!btn) continue;
+
+      // تأكد من أن الزر مرئي وقابل للنقر
+      const isVisible = await btn.isVisible().catch(() => false);
+      const isEnabled = await btn.isEnabled().catch(() => false);
+      if (!isVisible || !isEnabled) continue;
+
+      await btn.scrollIntoViewIfNeeded().catch(() => {});
+      await btn.click();
+      await page.waitForTimeout(800); // انتظر بسيط ثم waitForPageTransition يتولى الباقي
+      addLog(session, `✅ تم الضغط على الزر: ${sel}`);
+      return;
     } catch { /* جرّب التالي */ }
   }
-  addLog(session, "⚠️ لم يُعثر على زر «حفظ واستمرار»");
+
+  // محاولة أخيرة: ابحث في الصفحة بالنص العربي مباشرة
+  try {
+    const clicked = await page.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll("button, input[type='submit']"));
+      const target = btns.find(b => {
+        const t = (b.textContent ?? (b as HTMLInputElement).value ?? "").trim();
+        return t.includes("حفظ") || t.includes("Save") || t.includes("استمرار");
+      }) as HTMLElement | undefined;
+      if (target) { target.click(); return true; }
+      return false;
+    });
+    if (clicked) {
+      await page.waitForTimeout(800);
+      addLog(session, "✅ تم الضغط على زر الحفظ (بحث مباشر)");
+      return;
+    }
+  } catch { /* تجاهل */ }
+
+  addLog(session, "⚠️ لم يُعثر على زر «حفظ واستمرار» — المتابعة بدون ضغط");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -550,6 +624,7 @@ function logElements(session: AutomationSession, els: any[], pageLabel: string):
 async function fillPage1(session: AutomationSession, report: any, els: any[], pdfState: { pdfUploaded: boolean }): Promise<void> {
   logElements(session, els, "الصفحة 1 — البيانات الأساسية");
 
+  const { page } = session;
   const inputs  = els.filter(e => e.tag === "INPUT" && !["file","radio","checkbox"].includes(e.type));
   const selects = els.filter(e => e.tag === "SELECT" || e.tag === "MAT-SELECT");
 
