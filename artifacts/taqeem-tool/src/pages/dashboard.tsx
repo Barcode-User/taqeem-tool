@@ -26,50 +26,50 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const statusMap: Record<string, { label: string, color: string }> = {
-  pending: { label: "قيد الانتظار", color: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400 border-yellow-200" },
+  pending:   { label: "قيد الانتظار", color: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400 border-yellow-200" },
   extracted: { label: "تم الاستخراج", color: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 border-blue-200" },
-  reviewed: { label: "تمت المراجعة", color: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400 border-purple-200" },
-  submitted: { label: "تم الرفع", color: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border-green-200" },
+  reviewed:  { label: "تمت المراجعة", color: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400 border-purple-200" },
+  submitted: { label: "تم الرفع",     color: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border-green-200" },
 };
 
-function ScoreBar({ score }: { score: number }) {
+function FieldScore({ score }: { score: number | undefined }) {
+  if (score == null) return null;
   const color =
-    score >= 80 ? "bg-green-500" :
-    score >= 60 ? "bg-yellow-500" :
-    score >= 40 ? "bg-orange-500" :
-    "bg-red-500";
-  const textColor =
-    score >= 80 ? "text-green-700" :
-    score >= 60 ? "text-yellow-700" :
-    score >= 40 ? "text-orange-700" :
-    "text-red-700";
-
+    score >= 80 ? "text-green-600 bg-green-50 border-green-200" :
+    score >= 60 ? "text-yellow-600 bg-yellow-50 border-yellow-200" :
+    score >= 40 ? "text-orange-600 bg-orange-50 border-orange-200" :
+    "text-red-600 bg-red-50 border-red-200";
   return (
-    <div className="flex items-center gap-2 min-w-[90px]">
-      <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
-        <div className={`h-2 ${color} rounded-full transition-all`} style={{ width: `${score}%` }} />
-      </div>
-      <span className={`text-xs font-bold w-8 text-right ${textColor}`}>{score}%</span>
-    </div>
+    <span className={`inline-block mt-1 text-[10px] font-bold border rounded px-1 py-0 leading-4 ${color}`}>
+      {score}%
+    </span>
   );
 }
+
+type DsEntry = {
+  averageScore: number | null;
+  fieldScores: Record<string, number> | null;
+};
 
 export default function Dashboard() {
   const { data: reports, isLoading: reportsLoading } = useListReports();
   const { data: stats, isLoading: statsLoading } = useGetReportStats();
 
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchQuery,  setSearchQuery]  = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [dsMap, setDsMap] = useState<Record<number, { averageScore: number | null }>>({});
+  const [dsMap, setDsMap] = useState<Record<number, DsEntry>>({});
 
   useEffect(() => {
     fetch("/api/datasystem")
       .then((r) => r.json())
       .then((list: any[]) => {
-        const map: Record<number, { averageScore: number | null }> = {};
+        const map: Record<number, DsEntry> = {};
         list.forEach((ds) => {
           if (ds.linkedReportId != null) {
-            map[ds.linkedReportId] = { averageScore: ds.averageScore ?? null };
+            map[ds.linkedReportId] = {
+              averageScore: ds.averageScore ?? null,
+              fieldScores:  ds.fieldScores  ?? null,
+            };
           }
         });
         setDsMap(map);
@@ -78,14 +78,12 @@ export default function Dashboard() {
   }, []);
 
   const filteredReports = reports?.filter((report) => {
-    const matchesSearch = 
-      !searchQuery || 
-      (report.reportNumber?.includes(searchQuery)) || 
-      (report.clientName?.includes(searchQuery)) ||
-      (report.propertyType?.includes(searchQuery));
-      
+    const matchesSearch =
+      !searchQuery ||
+      report.reportNumber?.includes(searchQuery) ||
+      report.clientName?.includes(searchQuery)   ||
+      report.propertyType?.includes(searchQuery);
     const matchesStatus = statusFilter === "all" || report.status === statusFilter;
-    
     return matchesSearch && matchesStatus;
   });
 
@@ -104,6 +102,7 @@ export default function Dashboard() {
         </Link>
       </div>
 
+      {/* ── بطاقات الإحصائيات ── */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card className="border-t-4 border-t-slate-500 shadow-sm">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -113,11 +112,7 @@ export default function Dashboard() {
             </div>
           </CardHeader>
           <CardContent>
-            {statsLoading ? (
-              <Skeleton className="h-8 w-16" />
-            ) : (
-              <div className="text-3xl font-bold">{stats?.total || 0}</div>
-            )}
+            {statsLoading ? <Skeleton className="h-8 w-16" /> : <div className="text-3xl font-bold">{stats?.total || 0}</div>}
           </CardContent>
         </Card>
         <Card className="border-t-4 border-t-yellow-500 shadow-sm">
@@ -128,11 +123,7 @@ export default function Dashboard() {
             </div>
           </CardHeader>
           <CardContent>
-            {statsLoading ? (
-              <Skeleton className="h-8 w-16" />
-            ) : (
-              <div className="text-3xl font-bold">{(stats?.pending || 0) + (stats?.extracted || 0)}</div>
-            )}
+            {statsLoading ? <Skeleton className="h-8 w-16" /> : <div className="text-3xl font-bold">{(stats?.pending || 0) + (stats?.extracted || 0)}</div>}
           </CardContent>
         </Card>
         <Card className="border-t-4 border-t-purple-500 shadow-sm">
@@ -143,11 +134,7 @@ export default function Dashboard() {
             </div>
           </CardHeader>
           <CardContent>
-            {statsLoading ? (
-              <Skeleton className="h-8 w-16" />
-            ) : (
-              <div className="text-3xl font-bold">{stats?.reviewed || 0}</div>
-            )}
+            {statsLoading ? <Skeleton className="h-8 w-16" /> : <div className="text-3xl font-bold">{stats?.reviewed || 0}</div>}
           </CardContent>
         </Card>
         <Card className="border-t-4 border-t-green-500 shadow-sm">
@@ -158,15 +145,12 @@ export default function Dashboard() {
             </div>
           </CardHeader>
           <CardContent>
-            {statsLoading ? (
-              <Skeleton className="h-8 w-16" />
-            ) : (
-              <div className="text-3xl font-bold">{stats?.submitted || 0}</div>
-            )}
+            {statsLoading ? <Skeleton className="h-8 w-16" /> : <div className="text-3xl font-bold">{stats?.submitted || 0}</div>}
           </CardContent>
         </Card>
       </div>
 
+      {/* ── جدول التقارير ── */}
       <Card className="shadow-sm">
         <CardHeader className="pb-4">
           <CardTitle>أحدث التقارير</CardTitle>
@@ -176,8 +160,8 @@ export default function Dashboard() {
           <div className="flex flex-col sm:flex-row gap-4 mb-6">
             <div className="relative flex-1 max-w-sm">
               <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input 
-                placeholder="بحث برقم التقرير، اسم العميل..." 
+              <Input
+                placeholder="بحث برقم التقرير، اسم العميل..."
                 className="pl-3 pr-10"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
@@ -202,12 +186,10 @@ export default function Dashboard() {
 
           {reportsLoading ? (
             <div className="space-y-4">
-              {[1, 2, 3, 4, 5].map((i) => (
-                <Skeleton key={i} className="h-12 w-full" />
-              ))}
+              {[1,2,3,4,5].map((i) => <Skeleton key={i} className="h-12 w-full" />)}
             </div>
           ) : filteredReports && filteredReports.length > 0 ? (
-            <div className="rounded-md border">
+            <div className="rounded-md border overflow-x-auto">
               <Table>
                 <TableHeader className="bg-muted/50">
                   <TableRow>
@@ -217,41 +199,59 @@ export default function Dashboard() {
                     <TableHead className="text-right">تاريخ التقرير</TableHead>
                     <TableHead className="text-right">الحالة</TableHead>
                     <TableHead className="text-right">مصدر البيانات</TableHead>
-                    <TableHead className="text-right">نسبة التطابق</TableHead>
+                    <TableHead className="text-right">التطابق الكلي</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {filteredReports.map((report) => {
-                    const ds = dsMap[report.id!];
-                    const hasDs = ds !== undefined;
-                    const score = ds?.averageScore;
+                    const ds          = dsMap[report.id!];
+                    const hasDs       = ds !== undefined;
+                    const fs          = ds?.fieldScores ?? null;
+                    const avgScore    = ds?.averageScore ?? null;
+
                     return (
-                      <TableRow key={report.id} className="cursor-pointer hover:bg-muted/50 transition-colors">
+                      <TableRow key={report.id} className="cursor-pointer hover:bg-muted/50 transition-colors align-top">
+
+                        {/* رقم التقرير */}
                         <TableCell className="font-medium">
                           <Link href={`/reports/${report.id}`}>
-                            <div className="block w-full py-1 text-primary hover:underline">{report.reportNumber || "—"}</div>
+                            <div className="py-1 text-primary hover:underline">{report.reportNumber || "—"}</div>
                           </Link>
+                          <FieldScore score={fs?.reportNumber} />
                         </TableCell>
+
+                        {/* اسم العميل */}
                         <TableCell>
                           <Link href={`/reports/${report.id}`}>
-                            <div className="block w-full py-1">{report.clientName || "—"}</div>
+                            <div className="py-1">{report.clientName || "—"}</div>
                           </Link>
+                          <FieldScore score={fs?.clientName} />
                         </TableCell>
+
+                        {/* نوع العقار */}
                         <TableCell>
                           <Link href={`/reports/${report.id}`}>
-                            <div className="block w-full py-1">{report.propertyType || "—"}</div>
+                            <div className="py-1">{report.propertyType || "—"}</div>
                           </Link>
+                          <FieldScore score={fs?.propertyType} />
                         </TableCell>
+
+                        {/* تاريخ التقرير */}
                         <TableCell>
                           <Link href={`/reports/${report.id}`}>
-                            <div className="block w-full py-1 text-muted-foreground">
-                              {report.reportDate ? format(new Date(report.reportDate), "dd MMMM yyyy", { locale: arSA }) : "—"}
+                            <div className="py-1 text-muted-foreground">
+                              {report.reportDate
+                                ? format(new Date(report.reportDate), "dd MMMM yyyy", { locale: arSA })
+                                : "—"}
                             </div>
                           </Link>
+                          <FieldScore score={fs?.reportDate} />
                         </TableCell>
+
+                        {/* الحالة */}
                         <TableCell>
                           <Link href={`/reports/${report.id}`}>
-                            <div className="block w-full py-1">
+                            <div className="py-1">
                               <Badge variant="outline" className={`${statusMap[report.status]?.color} px-2 py-0.5 rounded-full font-normal`}>
                                 {statusMap[report.status]?.label || report.status}
                               </Badge>
@@ -259,28 +259,47 @@ export default function Dashboard() {
                           </Link>
                         </TableCell>
 
-                        {/* عمود مصدر البيانات */}
+                        {/* مصدر البيانات */}
                         <TableCell>
                           {hasDs ? (
                             <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 gap-1 px-2 py-0.5 rounded-full font-normal flex items-center w-fit">
                               <Database className="h-3 w-3" />
-                              مرتبط بالنظام
+                              مرتبط
                             </Badge>
                           ) : (
                             <span className="text-muted-foreground text-sm">—</span>
                           )}
                         </TableCell>
 
-                        {/* عمود نسبة التطابق */}
+                        {/* التطابق الكلي */}
                         <TableCell>
-                          {hasDs && score != null ? (
-                            <ScoreBar score={score} />
+                          {hasDs && avgScore != null ? (
+                            <div className="flex items-center gap-2 min-w-[90px]">
+                              <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
+                                <div
+                                  className={`h-2 rounded-full transition-all ${
+                                    avgScore >= 80 ? "bg-green-500" :
+                                    avgScore >= 60 ? "bg-yellow-500" :
+                                    avgScore >= 40 ? "bg-orange-500" : "bg-red-500"
+                                  }`}
+                                  style={{ width: `${avgScore}%` }}
+                                />
+                              </div>
+                              <span className={`text-xs font-bold w-8 text-right ${
+                                avgScore >= 80 ? "text-green-700" :
+                                avgScore >= 60 ? "text-yellow-700" :
+                                avgScore >= 40 ? "text-orange-700" : "text-red-700"
+                              }`}>
+                                {avgScore}%
+                              </span>
+                            </div>
                           ) : hasDs ? (
-                            <span className="text-muted-foreground text-sm text-xs">لم يُحسب</span>
+                            <span className="text-muted-foreground text-xs">لم يُحسب</span>
                           ) : (
                             <span className="text-muted-foreground text-sm">—</span>
                           )}
                         </TableCell>
+
                       </TableRow>
                     );
                   })}

@@ -411,14 +411,18 @@ router.get("/datasystem", async (_req, res) => {
     const list = await sqliteListDataSystem();
     const withScores = await Promise.all(
       list.map(async (ds) => {
-        if (!ds.linkedReportId) return { ...ds, averageScore: null };
+        if (!ds.linkedReportId) return { ...ds, averageScore: null, fieldScores: null };
         const report = await getReportById(ds.linkedReportId);
-        if (!report) return { ...ds, averageScore: null };
-        const scores = COMPARE_FIELDS.map(({ key }) =>
-          calcMatchScore((ds as any)[key], (report as any)[key])
-        );
-        const avg = Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
-        return { ...ds, averageScore: avg };
+        if (!report) return { ...ds, averageScore: null, fieldScores: null };
+        const fieldScores: Record<string, number> = {};
+        const scoreValues: number[] = [];
+        COMPARE_FIELDS.forEach(({ key }) => {
+          const s = calcMatchScore((ds as any)[key], (report as any)[key]);
+          fieldScores[key] = s;
+          scoreValues.push(s);
+        });
+        const avg = Math.round(scoreValues.reduce((a, b) => a + b, 0) / scoreValues.length);
+        return { ...ds, averageScore: avg, fieldScores };
       })
     );
     res.json(withScores);
