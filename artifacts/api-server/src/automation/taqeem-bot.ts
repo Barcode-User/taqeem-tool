@@ -710,39 +710,92 @@ async function clickContinueButton(session: AutomationSession): Promise<void> {
   const { page } = session;
   addLog(session, "🖱️ ضغط زر «المتابعة» (continue)...");
 
-  // الأولوية 1: input[name="continue"] بالاسم المباشر
-  try {
-    const btn = await page.$('input[name="continue"]');
-    if (btn) {
-      const visible = await btn.isVisible().catch(() => false);
-      if (visible) {
-        await btn.scrollIntoViewIfNeeded().catch(() => {});
-        await btn.click();
-        addLog(session, `✅ تم الضغط: input[name="continue"]`);
-        return;
-      }
-    }
-  } catch { /* تابع */ }
+  // ── سجّل جميع أزرار الإرسال الموجودة في الصفحة ─────────────────────────
+  const btnDebug = await page.evaluate(() =>
+    Array.from(document.querySelectorAll<HTMLInputElement | HTMLButtonElement>(
+      "input[type='submit'], button[type='submit'], button",
+    )).map(b => ({
+      tag: b.tagName,
+      name: (b as HTMLInputElement).name ?? "",
+      value: (b as HTMLInputElement).value ?? "",
+      text: b.textContent?.trim().slice(0, 40) ?? "",
+      disabled: (b as HTMLInputElement).disabled,
+    }))
+  ).catch(() => []);
+  btnDebug.forEach((b, i) =>
+    addLog(session, `  [btn${i}] name="${b.name}" value="${b.value}" text="${b.text}" disabled=${b.disabled}`)
+  );
 
-  // الأولوية 2: button أو input بنص يحتوي "continue" أو "استمرار" أو "التالي"
+  // ── الأولوية 1: input[name="continue"] مباشرة ────────────────────────────
   try {
-    const clicked = await page.evaluate(() => {
-      const candidates = Array.from(
-        document.querySelectorAll("input[type='submit'], button[type='submit'], button"),
-      );
-      // افضّل الزر الأخير (عادةً continue) على الأول (save)
-      const target = [...candidates].reverse().find(b => {
-        const txt = ((b as HTMLInputElement).value ?? b.textContent ?? "").trim().toLowerCase();
-        return txt.includes("continue") || txt.includes("استمرار") || txt.includes("التالي") || txt.includes("next");
-      }) ?? candidates[candidates.length - 1] as HTMLElement | undefined;
-      if (target) { (target as HTMLElement).click(); return true; }
-      return false;
-    });
-    if (clicked) {
-      addLog(session, "✅ تم الضغط على زر المتابعة (آخر زر إرسال)");
+    const btn = page.locator('input[name="continue"]').first();
+    const exists = await btn.count().catch(() => 0);
+    if (exists > 0) {
+      await btn.scrollIntoViewIfNeeded().catch(() => {});
+      await btn.click({ force: true, timeout: 5000 });
+      addLog(session, `✅ تم الضغط: input[name="continue"]`);
+      return;
+    }
+    addLog(session, `  ↳ input[name="continue"] غير موجود في DOM`);
+  } catch (e: any) {
+    addLog(session, `  ↳ خطأ input[name="continue"]: ${e.message}`);
+  }
+
+  // ── الأولوية 2: button[name="continue"] ──────────────────────────────────
+  try {
+    const btn = page.locator('button[name="continue"]').first();
+    if (await btn.count().catch(() => 0) > 0) {
+      await btn.click({ force: true });
+      addLog(session, `✅ تم الضغط: button[name="continue"]`);
       return;
     }
   } catch { /* تابع */ }
+
+  // ── الأولوية 3: زر يحتوي نص "continue" / "استمرار" / "التالي" ──────────
+  const txtPatterns = ["continue", "استمرار", "التالي", "next", "متابعة"];
+  for (const txt of txtPatterns) {
+    try {
+      const loc = page.locator(`input[value*="${txt}" i], button:has-text("${txt}")`).first();
+      if (await loc.count().catch(() => 0) > 0) {
+        await loc.click({ force: true });
+        addLog(session, `✅ تم الضغط: زر يحتوي "${txt}"`);
+        return;
+      }
+    } catch { /* تابع */ }
+  }
+
+  // ── الأولوية 4: آخر زر submit في الصفحة (استثناء) ───────────────────────
+  try {
+    const clicked = await page.evaluate(() => {
+      const all = Array.from(document.querySelectorAll<HTMLInputElement | HTMLButtonElement>(
+        "input[type='submit'], button[type='submit']",
+      ));
+      // تجاهل زر "save" إذا وُجد continue
+      const cont = all.find(b => {
+        const v = ((b as HTMLInputElement).name ?? "").toLowerCase();
+        return v === "continue";
+      });
+      const target = cont ?? all[all.length - 1];
+      if (target) { target.click(); return (target as HTMLInputElement).name ?? "?"; }
+      return null;
+    });
+    if (clicked) {
+      addLog(session, `✅ تم الضغط (آخر زر submit): name="${clicked}"`);
+      return;
+    }
+  } catch { /* تابع */ }
+
+  // ── تشخيص: اعرض أخطاء التحقق إن وجدت ──────────────────────────────────
+  const validationErrs = await page.evaluate(() => {
+    const errs = Array.from(document.querySelectorAll(
+      ".alert-danger, .text-danger, [class*='error'], mat-error, .invalid-feedback"
+    ));
+    return errs.map(e => e.textContent?.trim()).filter(Boolean).slice(0, 5);
+  }).catch(() => [] as string[]);
+  if (validationErrs.length > 0) {
+    addLog(session, "⚠️ أخطاء تحقق في النموذج:");
+    validationErrs.forEach(e => addLog(session, `   • ${e}`));
+  }
 
   addLog(session, "⚠️ لم يُعثر على زر «المتابعة» — قد يحتاج تدخل يدوي");
 }
@@ -1488,21 +1541,15 @@ async function uploadPdf(
   report: any,
   state: { pdfUploaded: boolean },
 ): Promise<void> {
-  // لا نتخطى حتى لو سبق الرفع — الملف قد يُمسح عند انتقال الصفحة في Angular
-  // فقط نتخطى إذا لم يكن هناك حقل رفع في الصفحة الحالية (تتحقق لاحقاً)
-
   // مجلد التنزيلات الافتراضي على جهاز Windows
   const DOWNLOADS_DIR = "C:\\Users\\Barcode Users\\Downloads";
 
-  // دالة: ابحث عن ملف PDF في مجلد التنزيلات باسم رقم التقرير
+  // ── إيجاد مسار ملف PDF ───────────────────────────────────────────────────
   function findPdfInDownloads(reportNum: string): string | null {
     if (!reportNum || !fs.existsSync(DOWNLOADS_DIR)) return null;
     try {
-      // أولاً: المطابقة التامة  رقم_التقرير.pdf
       const exact = path.join(DOWNLOADS_DIR, `${reportNum}.pdf`);
       if (fs.existsSync(exact)) return exact;
-
-      // ثانياً: أي ملف يبدأ بـ رقم التقرير (احتياط)
       const files = fs.readdirSync(DOWNLOADS_DIR)
         .filter(f => f.toLowerCase().startsWith(reportNum.toLowerCase()) && f.toLowerCase().endsWith(".pdf"))
         .map(f => ({ name: f, mtime: fs.statSync(path.join(DOWNLOADS_DIR, f)).mtimeMs }))
@@ -1514,28 +1561,14 @@ async function uploadPdf(
   let resolvedPath: string = report.pdfFilePath ?? "";
 
   if (!resolvedPath || !fs.existsSync(resolvedPath)) {
-    if (resolvedPath) {
-      addLog(session, `⚠️ ملف PDF غير موجود في المسار: ${resolvedPath}`);
-    } else {
-      addLog(session, "⚠️ لا يوجد ملف PDF مرتبط بهذا التقرير.");
-    }
-
     const reportNum = (report.reportNumber ?? "").trim();
-    let fallback: string | null = null;
-
-    if (reportNum) {
-      fallback = findPdfInDownloads(reportNum);
-      if (fallback) {
-        addLog(session, `📂 تم إيجاد ملف PDF: ${path.basename(fallback)}`);
-      } else {
-        addLog(session, `🔍 لم يُوجد "${reportNum}.pdf" في مجلد التنزيلات.`);
-      }
-    }
-
+    const fallback = reportNum ? findPdfInDownloads(reportNum) : null;
     if (fallback) {
+      addLog(session, `📂 تم إيجاد ملف PDF: ${path.basename(fallback)}`);
       resolvedPath = fallback;
     } else {
-      addLog(session, `⏭️ لا يوجد ملف PDF متاح — تجاوز رفع PDF في هذه الصفحة.`);
+      if (resolvedPath) addLog(session, `⚠️ ملف PDF غير موجود: ${resolvedPath}`);
+      else addLog(session, "⚠️ لا يوجد مسار PDF — تجاوز رفع الملف.");
       return;
     }
   }
@@ -1543,127 +1576,127 @@ async function uploadPdf(
   const { page } = session;
   const filePath = resolvedPath;
   const fileName = path.basename(filePath);
-  addLog(session, `📎 محاولة رفع: ${fileName}`);
+  addLog(session, `📎 رفع PDF: ${fileName}`);
 
-  // ── فحص وجود حقل الرفع في الصفحة ────────────────────────────────────────
-  const inputCount = await page.$$eval('input[type="file"]', (els) => els.length).catch(() => 0);
-  if (inputCount === 0) {
+  // ── فحص وجود حقل file في الصفحة ─────────────────────────────────────────
+  const fileInputs = await page.evaluate(() =>
+    Array.from(document.querySelectorAll<HTMLInputElement>('input[type="file"]')).map(el => ({
+      name: el.name, id: el.id, accept: el.accept,
+    }))
+  ).catch(() => [] as { name: string; id: string; accept: string }[]);
+
+  if (fileInputs.length === 0) {
     addLog(session, "⏭️ لا يوجد حقل رفع ملف في هذه الصفحة");
     return;
   }
+  fileInputs.forEach((f, i) => addLog(session, `  [file${i}] name="${f.name}" accept="${f.accept}"`));
 
-  // سجّل معلومات الحقل
-  const fileInfos = await page.evaluate(() =>
-    Array.from(document.querySelectorAll<HTMLInputElement>('input[type="file"]')).map((el) => {
-      let lbl = "";
-      let p: Element | null = el.parentElement;
-      for (let i = 0; i < 8 && p; i++) {
-        const found = p.querySelector("label, mat-label, span");
-        if (found) { lbl = found.textContent?.trim().slice(0, 40) ?? ""; break; }
-        p = p.parentElement;
-      }
-      return { name: el.name, id: el.id, accept: el.accept, lbl };
-    }),
-  ).catch(() => []);
-  fileInfos.forEach((f, i) =>
-    addLog(session, `  [file${i}] name="${f.name}" id="${f.id}" label="${f.lbl}" accept="${f.accept}"`),
-  );
+  // المحدد المفضل: report_file أو أول input[type=file]
+  const preferredName = fileInputs.find(f => f.name === "report_file")?.name ?? fileInputs[0].name;
+  const fileSel = preferredName ? `input[name="${preferredName}"]` : 'input[type="file"]';
 
-  // ══ الطريقة 1: إظهار الحقل المخفي والنقر عليه مباشرة (FileChooser) ══════════
-  // الأكثر موثوقية — تحاكي نقر المستخدم الحقيقي على الحقل فيسجّله Angular
-  addLog(session, `  ↳ [1] FileChooser على input مباشرة (بعد إظهاره)`);
+  // ══ الطريقة 1: إظهار الحقل ثم FileChooser (الأكثر موثوقية مع Angular) ════
+  addLog(session, `  ↳ [1] FileChooser مع إظهار الحقل: ${fileSel}`);
   try {
-    // أظهر الحقل المخفي مؤقتاً حتى يمكن النقر عليه
-    await page.evaluate(() => {
-      const inp = document.querySelector<HTMLInputElement>('input[name="report_file"]');
-      if (!inp) return;
-      inp.style.cssText = "display:block!important;opacity:1!important;position:fixed!important;" +
-        "top:0!important;left:0!important;width:120px!important;height:40px!important;" +
-        "z-index:999999!important;";
-    });
-    await page.waitForTimeout(300);
+    await page.evaluate((sel) => {
+      const inp = document.querySelector<HTMLInputElement>(sel);
+      if (inp) inp.style.cssText = "display:block!important;opacity:1!important;" +
+        "position:fixed!important;top:10px!important;left:10px!important;" +
+        "width:150px!important;height:50px!important;z-index:999999!important;";
+    }, fileSel);
+    await page.waitForTimeout(400);
+
     const [fc] = await Promise.all([
-      page.waitForEvent("filechooser", { timeout: 4000 }),
-      page.click('input[name="report_file"]'),
+      page.waitForEvent("filechooser", { timeout: 5000 }),
+      page.click(fileSel, { force: true }),
     ]);
     await fc.setFiles(filePath);
-    await page.waitForTimeout(1000);
-    // أعد إخفاء الحقل
-    await page.evaluate(() => {
-      const inp = document.querySelector<HTMLInputElement>('input[name="report_file"]');
+    await page.waitForTimeout(1200);
+
+    // أعد الإخفاء
+    await page.evaluate((sel) => {
+      const inp = document.querySelector<HTMLInputElement>(sel);
       if (inp) inp.style.cssText = "";
-    });
-    const count1 = await page.$eval(
-      'input[name="report_file"]',
-      (el: HTMLInputElement) => el.files?.length ?? 0,
-    ).catch(() => 1); // نفترض نجاحاً إذا لم نستطع القياس
-    addLog(session, `  ↳ [1] files.length = ${count1}`);
-    addLog(session, `✅ تم رفع PDF [1-FileChooser-direct]: ${fileName}`);
+    }, fileSel).catch(() => {});
+
+    addLog(session, `✅ تم رفع PDF [1-FileChooser]: ${fileName}`);
     state.pdfUploaded = true;
     return;
   } catch (e: any) {
     addLog(session, `  ↳ [1] فشل: ${e.message}`);
-    // أعد إخفاء الحقل عند الفشل
-    await page.evaluate(() => {
-      const inp = document.querySelector<HTMLInputElement>('input[name="report_file"]');
+    await page.evaluate((sel) => {
+      const inp = document.querySelector<HTMLInputElement>(sel);
       if (inp) inp.style.cssText = "";
-    }).catch(() => {});
+    }, fileSel).catch(() => {});
   }
 
-  // ══ الطريقة 2: page.setInputFiles + page.dispatchEvent ════════════════════
-  addLog(session, `  ↳ [2] page.setInputFiles`);
+  // ══ الطريقة 2: setInputFiles مباشرة + dispatch AngularEvents ═══════════
+  addLog(session, `  ↳ [2] setInputFiles مباشرة: ${fileSel}`);
   try {
-    await page.setInputFiles('input[name="report_file"]', filePath);
-    await page.waitForTimeout(500);
-    // استخدم dispatchEvent من Playwright (أكثر موثوقية من evaluate)
-    await page.dispatchEvent('input[name="report_file"]', "change");
-    await page.dispatchEvent('input[name="report_file"]', "input");
-    await page.waitForTimeout(500);
-    const count2 = await page.$eval(
-      'input[name="report_file"]',
-      (el: HTMLInputElement) => el.files?.length ?? 0,
-    ).catch(() => 0);
-    addLog(session, `  ↳ [2] files.length = ${count2}`);
-    if (count2 > 0) {
+    // كشف الحقل أولاً حتى لا يرفض Playwright الحقول المخفية
+    await page.evaluate((sel) => {
+      const inp = document.querySelector<HTMLInputElement>(sel);
+      if (inp) { inp.removeAttribute("hidden"); inp.style.display = "block"; }
+    }, fileSel);
+
+    await page.setInputFiles(fileSel, filePath);
+    await page.waitForTimeout(600);
+
+    // أطلق أحداث Angular
+    await page.evaluate((sel) => {
+      const inp = document.querySelector<HTMLInputElement>(sel);
+      if (!inp) return;
+      inp.dispatchEvent(new Event("input",  { bubbles: true }));
+      inp.dispatchEvent(new Event("change", { bubbles: true }));
+    }, fileSel);
+    await page.waitForTimeout(800);
+
+    // تحقق من الرفع بالنظر لاسم الملف المعروض أو files.length
+    const verified = await page.evaluate((sel) => {
+      const inp = document.querySelector<HTMLInputElement>(sel);
+      return (inp?.files?.length ?? 0) > 0;
+    }, fileSel).catch(() => false);
+
+    if (verified) {
       addLog(session, `✅ تم رفع PDF [2-setInputFiles]: ${fileName}`);
       state.pdfUploaded = true;
       return;
     }
+    addLog(session, `  ↳ [2] files.length=0 بعد setInputFiles`);
   } catch (e: any) {
     addLog(session, `  ↳ [2] فشل: ${e.message}`);
   }
 
-  // ══ الطريقة 3: FileChooser عبر label أو button مرتبط بالحقل ══════════════
+  // ══ الطريقة 3: FileChooser عبر label أو زر رفع ═════════════════════════
   addLog(session, `  ↳ [3] FileChooser عبر label/button`);
-  const rfId = await page.$eval('input[name="report_file"]', (el) => el.id ?? "").catch(() => "");
+  const rfId = await page.$eval(fileSel, (el) => el.id ?? "").catch(() => "");
   const clickTargets = [
     ...(rfId ? [`label[for="${rfId}"]`] : []),
-    'label:has-text("ملف أصل التقرير")',
-    'label:has-text("ملف التقرير")',
+    'label:has-text("ملف")',
     'button:has-text("رفع")',
     'button:has-text("اختر")',
-    'button:has-text("اختر ملف")',
-    'label:has-text("رفع")',
+    'button:has-text("Browse")',
     '[class*="upload"]:not(input)',
+    '[class*="file"]:not(input)',
   ];
   for (const sel of clickTargets) {
     const el = await page.$(sel).catch(() => null);
     if (!el) continue;
-    addLog(session, `  ↳ [3] FileChooser عبر: ${sel}`);
+    addLog(session, `  ↳ [3] جرب: ${sel}`);
     try {
       const [fc] = await Promise.all([
         page.waitForEvent("filechooser", { timeout: 3000 }),
-        el.click(),
+        el.click({ force: true }),
       ]);
       await fc.setFiles(filePath);
       await page.waitForTimeout(800);
-      addLog(session, `✅ تم رفع PDF [3-FileChooser]: ${fileName}`);
+      addLog(session, `✅ تم رفع PDF [3-label/button]: ${fileName}`);
       state.pdfUploaded = true;
       return;
     } catch { /* جرّب التالي */ }
   }
 
-  addLog(session, "⚠️ لم يُرفع PDF في هذه الصفحة — سيُحاوَل في الصفحة التالية.");
+  addLog(session, "⚠️ لم يُرفع PDF — المتابعة بدونه");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
