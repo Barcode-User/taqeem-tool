@@ -350,6 +350,9 @@ export default function ReportDetails() {
   // PDF upload state
   const [pdfUploading, setPdfUploading] = useState(false);
 
+  // Re-extract state
+  const [reExtracting, setReExtracting] = useState(false);
+
   const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !id) return;
@@ -376,6 +379,25 @@ export default function ReportDetails() {
     } finally {
       setPdfUploading(false);
       e.target.value = "";
+    }
+  };
+
+  const handleReExtract = async () => {
+    if (!id || reExtracting) return;
+    setReExtracting(true);
+    try {
+      const resp = await fetch(`${apiBase}/api/reports/${id}/re-extract`, { method: "POST" });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data.error ?? "فشلت إعادة الاستخراج");
+      const label = data._usedDatasystem
+        ? "✅ تم إعادة الاستخراج بمساعدة بيانات النظام"
+        : "✅ تم إعادة الاستخراج من التقرير";
+      toast({ title: label });
+      queryClient.invalidateQueries({ queryKey: getGetReportQueryKey(id) });
+    } catch (err: any) {
+      toast({ title: "خطأ", description: err.message, variant: "destructive" });
+    } finally {
+      setReExtracting(false);
     }
   };
 
@@ -593,6 +615,25 @@ export default function ReportDetails() {
         </div>
         
         <div className="flex items-center gap-2 w-full sm:w-auto">
+          {/* زر إعادة الاستخراج — يظهر فقط عند وجود PDF */}
+          {report.pdfFileName && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleReExtract}
+              disabled={reExtracting}
+              title={dsRecord
+                ? "إعادة الاستخراج باستخدام بيانات النظام كمرجع للذكاء الاصطناعي"
+                : "إعادة استخراج البيانات من ملف PDF"}
+              className={`flex-1 sm:flex-none text-xs ${dsRecord ? "border-emerald-400 text-emerald-700 hover:bg-emerald-50" : "border-blue-300 text-blue-700 hover:bg-blue-50"}`}
+            >
+              {reExtracting
+                ? <Loader2 className="h-3.5 w-3.5 animate-spin ml-1.5" />
+                : <RefreshCw className="h-3.5 w-3.5 ml-1.5" />}
+              {reExtracting ? "جارٍ الاستخراج..." : dsRecord ? "إعادة استخراج (بمساعدة النظام)" : "إعادة استخراج"}
+            </Button>
+          )}
+
           {isEditable && (
             <Button 
               variant="outline" 

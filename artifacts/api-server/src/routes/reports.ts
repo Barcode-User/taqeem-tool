@@ -9,6 +9,8 @@ import {
   updateReport,
   deleteReport,
   getReportStats,
+  sqliteGetDataSystemByReportId,
+  type DataSystemRecord,
 } from "@workspace/db";
 import { openai, getAIModel } from "@workspace/integrations-openai-ai-server";
 import { extractPdf } from "../lib/pdf-extractor.js";
@@ -269,6 +271,83 @@ function supportsJsonMode(): boolean {
   return true;
 }
 
+/**
+ * يحوّل سجل النظام إلى نص عربي مُنسَّق للذكاء الاصطناعي
+ * يُعيد فقط الحقول غير الفارغة بصيغة:  "key: قيمة"
+ */
+function datasystemToText(ds: DataSystemRecord): string {
+  const FIELD_LABELS: Record<string, string> = {
+    reportNumber: "رقم التقرير",
+    reportDate: "تاريخ التقرير",
+    valuationDate: "تاريخ التقييم",
+    inspectionDate: "تاريخ المعاينة",
+    commissionDate: "تاريخ التكليف",
+    requestNumber: "رقم الطلب",
+    valuerName: "اسم المقيّم",
+    valuerPercentage: "نسبة المقيّم",
+    licenseNumber: "رقم الرخصة",
+    licenseDate: "تاريخ الرخصة",
+    membershipNumber: "رقم العضوية",
+    membershipType: "نوع العضوية",
+    secondValuerName: "اسم المقيّم الثاني",
+    secondValuerPercentage: "نسبة المقيّم الثاني",
+    secondValuerLicenseNumber: "رقم رخصة المقيّم الثاني",
+    secondValuerMembershipNumber: "رقم عضوية المقيّم الثاني",
+    clientName: "اسم العميل",
+    clientPhone: "هاتف العميل",
+    intendedUser: "المستخدم المقصود",
+    reportType: "نوع التقرير",
+    valuationPurpose: "الغرض من التقييم",
+    valuationBasis: "أساس القيمة",
+    valuationHypothesis: "فرضية القيمة",
+    propertyType: "نوع العقار",
+    propertySubType: "النوع الفرعي",
+    region: "المنطقة",
+    city: "المدينة",
+    district: "الحي",
+    street: "الشارع",
+    blockNumber: "رقم البلك",
+    plotNumber: "رقم القطعة",
+    planNumber: "رقم المخطط",
+    propertyUse: "استخدام العقار",
+    deedNumber: "رقم الصك",
+    deedDate: "تاريخ الصك",
+    ownerName: "اسم المالك",
+    ownershipType: "نوع الملكية",
+    buildingPermitNumber: "رقم رخصة البناء",
+    buildingStatus: "حالة البناء",
+    buildingAge: "عمر البناء",
+    landArea: "مساحة الأرض",
+    buildingArea: "مساحة البناء",
+    basementArea: "مساحة القبو",
+    annexArea: "مساحة الملاحق",
+    floorsCount: "عدد الأدوار",
+    permittedFloorsCount: "الأدوار المصرح بها",
+    permittedBuildingRatio: "نسبة البناء المصرح بها",
+    streetWidth: "عرض الشارع",
+    streetFacades: "الواجهات",
+    utilities: "المرافق",
+    coordinates: "الإحداثيات",
+    valuationMethod: "أسلوب التقييم",
+    marketValue: "القيمة السوقية",
+    incomeValue: "قيمة الدخل",
+    costValue: "قيمة التكلفة",
+    finalValue: "القيمة النهائية",
+    pricePerMeter: "سعر المتر",
+    companyName: "اسم شركة التقييم",
+    commercialRegNumber: "رقم السجل التجاري",
+  };
+
+  const lines: string[] = [];
+  for (const [key, label] of Object.entries(FIELD_LABELS)) {
+    const val = (ds as any)[key];
+    if (val != null && val !== "") {
+      lines.push(`${key}: ${val}  (${label})`);
+    }
+  }
+  return lines.join("\n");
+}
+
 /** يستدعي AI بنمط النص ويدمج نتائج Regex لتعزيز الحقول الصعبة */
 async function extractWithText(text: string) {
   // خطوة 1: استخراج بالأنماط النصية (سريع ودقيق لحقول محددة)
@@ -298,6 +377,75 @@ async function extractWithText(text: string) {
       console.log(`[regex-boost] ${key} = "${val}"`);
     }
   }
+  return merged;
+}
+
+/**
+ * استخراج موجَّه ببيانات النظام (الوضع الذكي)
+ * ─────────────────────────────────────────────
+ * يُرسل للذكاء الاصطناعي:
+ *   (أ) بيانات النظام الحكومي كمرجع موثوق
+ *   (ب) نص التقرير PDF
+ * التعليمات: لكل حقل في بيانات النظام → ابحث عنه في التقرير
+ *   - وجدته (أو ما يشابهه) → استخدم قيمة النظام كما هي (أدق)
+ *   - لم تجده → استخرج من التقرير
+ *   - الحقول غير الموجودة في النظام → استخرج من التقرير مباشرة
+ */
+async function extractWithDatasystem(text: string, ds: DataSystemRecord): Promise<Record<string, any>> {
+  const regexResults = preExtractFromText(text);
+  const dsText = datasystemToText(ds);
+  const useJsonMode = supportsJsonMode();
+
+  const DATASYSTEM_PROMPT = `${SYSTEM_PROMPT}
+
+═══════════════════════════════════════════════════
+مهمة خاصة: لديك بيانات موثوقة من النظام الحكومي
+═══════════════════════════════════════════════════
+البيانات التالية مصدرها النظام الحكومي (TAQEEM) — وهي أكثر دقة من قراءة التقرير مباشرة.
+
+قاعدة العمل لكل حقل:
+1. إذا كان الحقل موجوداً في بيانات النظام أدناه:
+   → ابحث عن هذه القيمة (أو ما يشابهها) في نص التقرير
+   → إذا وجدتها أو وجدت ما يقاربها: استخدم قيمة النظام كما هي بالضبط (لا تعدّلها)
+   → إذا لم تجدها في التقرير: استخدم أيضاً قيمة النظام (ربما القيمة مختصرة أو مختلفة الكتابة)
+2. إذا كان الحقل غير موجود في بيانات النظام (null أو غائب):
+   → استخرجه من نص التقرير كالمعتاد
+
+بيانات النظام الحكومي:
+───────────────────────
+${dsText}
+───────────────────────`;
+
+  const response = await openai.chat.completions.create({
+    model: getAIModel(),
+    max_tokens: 4096,
+    ...(useJsonMode ? { response_format: { type: "json_object" } } : {}),
+    messages: [
+      { role: "system", content: DATASYSTEM_PROMPT },
+      {
+        role: "user",
+        content: `استخرج الحقول التالية من نص التقرير مع مراعاة بيانات النظام المذكورة أعلاه.
+Schema (use EXACT English keys):
+${FIELDS_SCHEMA}
+
+نص التقرير:
+${text.slice(0, 15000)}`,
+      },
+    ],
+  });
+
+  const aiResults = parseAIResponse(response.choices[0]?.message?.content ?? "{}");
+
+  // دمج النتائج: AI له الأولوية، Regex يملأ الفراغات
+  const merged: Record<string, any> = { ...aiResults };
+  for (const [key, val] of Object.entries(regexResults)) {
+    if (val != null && (merged[key] == null || merged[key] === "")) {
+      merged[key] = val;
+      console.log(`[regex-boost-ds] ${key} = "${val}"`);
+    }
+  }
+
+  console.log(`[datasystem-extract] Used datasystem data from record #${ds.id} for guidance`);
   return merged;
 }
 
@@ -635,6 +783,68 @@ router.post("/reports/:id/upload-pdf", upload.single("pdf"), async (req, res) =>
   } catch (err) {
     req.log.error({ err }, "Failed to upload PDF");
     res.status(500).json({ error: "خطأ في رفع الملف" });
+  }
+});
+
+// POST /reports/:id/re-extract — إعادة الاستخراج من ملف PDF الموجود
+// إذا كان التقرير مرتبطاً بسجل في النظام → يُستخدم كمرجع لتوجيه الذكاء الاصطناعي
+router.post("/reports/:id/re-extract", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) { res.status(400).json({ error: "Invalid ID" }); return; }
+
+    const report = await getReportById(id);
+    if (!report) { res.status(404).json({ error: "التقرير غير موجود" }); return; }
+
+    const pdfPath: string | null = (report as any).pdfFilePath ?? null;
+    if (!pdfPath || !fs.existsSync(pdfPath)) {
+      res.status(400).json({ error: "لا يوجد ملف PDF مرفق بهذا التقرير" });
+      return;
+    }
+
+    // جلب سجل النظام المرتبط (إن وُجد)
+    const dsRecord = await sqliteGetDataSystemByReportId(id);
+
+    req.log.info({ reportId: id, hasDatasystem: !!dsRecord }, "Re-extract started");
+
+    // استخراج المحتوى من PDF
+    const extraction = await extractPdf(pdfPath, 8);
+    let raw: any;
+
+    if (extraction.mode === "vision" && !process.env.GROQ_API_KEY) {
+      // وضع الصور: لا يدعم datasystem حالياً → استخراج عادي
+      raw = await extractWithVision(extraction.images);
+    } else {
+      let text = extraction.mode === "text" ? extraction.text : null;
+      if (!text || text.trim().length < 50) {
+        const { default: pdfParse } = await import("pdf-parse") as any;
+        try {
+          const buf = fs.readFileSync(pdfPath);
+          const parsed = await pdfParse(buf);
+          text = parsed.text ?? "";
+        } catch {}
+      }
+      if (!text || text.trim().length < 50) {
+        res.status(422).json({ error: "الملف لا يحتوي على نص قابل للقراءة" });
+        return;
+      }
+      // اختيار طريقة الاستخراج حسب وجود سجل النظام
+      if (dsRecord) {
+        raw = await extractWithDatasystem(text, dsRecord);
+      } else {
+        raw = await extractWithText(text);
+      }
+    }
+
+    const fields = parseExtracted(raw);
+    const updated = await updateReport(id, { ...fields, status: "extracted" });
+
+    req.log.info({ reportId: id, usedDatasystem: !!dsRecord }, "Re-extract completed");
+    res.json({ ...updated, _usedDatasystem: !!dsRecord });
+  } catch (err: any) {
+    req.log.error({ err }, "Re-extract failed");
+    const code = err?.code === 422 ? 422 : 500;
+    res.status(code).json({ error: "حدث خطأ أثناء إعادة الاستخراج", detail: err?.message ?? String(err) });
   }
 });
 
