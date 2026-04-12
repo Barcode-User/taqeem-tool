@@ -129,28 +129,40 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
     await page.waitForTimeout(2000);
 
-    // ── استخراج رقم التقرير من URL الصفحة 2 ──────────────────────────────
+    // ── استخراج رقم التقرير من URL الصفحة 2 والتحقق منه ─────────────────
     const page2Url = page.url();
     addLog(session, `🔗 URL الصفحة 2: ${page2Url}`);
 
     // نمط: /report/asset/create/1694177
-    const taqeemIdMatch = page2Url.match(/\/report\/asset\/create\/(\d+)/);
+    const taqeemIdMatch = page2Url.match(/\/report\/(?:asset\/)?create\/(\d+)/);
     if (!taqeemIdMatch) {
-      // إذا لم يكن على صفحة 2 المتوقعة، سجّل رسالة توضيحية
       addLog(session, `⚠️ URL غير متوقع: ${page2Url}`);
       addLog(session, "⚠️ قد يكون هناك خطأ في التحقق بالصفحة 1 — تحقق من الحقول المطلوبة");
       throw new Error(`لم يُعثر على رقم التقرير في URL: ${page2Url}`);
     }
     const taqeemReportId = taqeemIdMatch[1];
-    addLog(session, `✅ رقم التقرير في TAQEEM: ${taqeemReportId}`);
+    addLog(session, `🆔 رقم التقرير في TAQEEM: ${taqeemReportId}  ← سيُستخدم في كل الخطوات`);
+
+    // ── حفظ رقم التقرير في قاعدة البيانات فوراً ──────────────────────────
+    await updateReport(reportId, { taqeemReportNumber: taqeemReportId });
+    addLog(session, `💾 تم حفظ taqeemReportId=${taqeemReportId} في قاعدة البيانات`);
+
+    // ── التأكد من أننا على صفحة الأصل الصحيحة ────────────────────────────
+    const expectedPage2 = `${TAQEEM_URL}/report/asset/create/${taqeemReportId}`;
+    if (!page2Url.includes(`/report/asset/create/${taqeemReportId}`)) {
+      addLog(session, `↩️ التنقل المباشر لصفحة الأصل: ${expectedPage2}`);
+      await page.goto(expectedPage2, { waitUntil: "networkidle", timeout: 30000 });
+      await page.waitForTimeout(1500);
+    }
+    addLog(session, `✅ تأكيد URL الصفحة 2: ${page.url()}`);
 
     // ════════════════════════════════════════════════════════════════════════
     // الصفحة 2: /report/asset/create/{taqeemReportId}
     // بيانات الأصل والموقع
     // ════════════════════════════════════════════════════════════════════════
-    addLog(session, "═══════════════════════════════════════");
-    addLog(session, "▶ الصفحة 2: بيانات الأصل والموقع");
-    addLog(session, "═══════════════════════════════════════");
+    addLog(session, "═══════════════════════════════════════════════");
+    addLog(session, `▶ الصفحة 2 [ID: ${taqeemReportId}]: بيانات الأصل والموقع`);
+    addLog(session, "═══════════════════════════════════════════════");
 
     const elsPage2 = await scanElements(page);
     await saveDebug(reportId, "page2", elsPage2);
@@ -158,36 +170,50 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     addLog(session, `📋 عدد حقول الصفحة 2: ${elsPage2.length}`);
 
     await fillAssetPage(session, report, elsPage2);
-
     await screenshot(page, `p2_after_${reportId}`);
 
     // ── ضغط زر "continue" للانتقال للصفحة 3 ──────────────────────────────
     const urlBeforePage3 = page.url();
     await clickContinueButton(session);
 
-    // ── انتظار الانتقال لـ /report/attribute/create/{id} ─────────────────
+    // ── انتظار الانتقال لـ /report/attribute/create/{taqeemReportId} ──────
     addLog(session, "⏳ انتظار الانتقال لصفحة السمات...");
+    const expectedPage3 = `${TAQEEM_URL}/report/attribute/create/${taqeemReportId}`;
+
     await page
-      .waitForURL(`${TAQEEM_URL}/report/attribute/create/**`, { timeout: 30000 })
+      .waitForURL(`${TAQEEM_URL}/report/attribute/create/**`, { timeout: 25000 })
       .catch(async () => {
+        // fallback: انتظر أي تغيير في URL
         await page.waitForFunction(
           (prev: string) => window.location.href !== prev,
           urlBeforePage3,
-          { timeout: 30000 },
+          { timeout: 25000 },
         ).catch(() => {});
       });
 
     await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
-    await page.waitForTimeout(2000);
-    addLog(session, `🔗 URL الصفحة 3: ${page.url()}`);
+    await page.waitForTimeout(1500);
+
+    // ── تحقق من تطابق الرقم في صفحة 3 ───────────────────────────────────
+    const page3ActualUrl = page.url();
+    addLog(session, `🔗 URL الصفحة 3 الفعلي: ${page3ActualUrl}`);
+    addLog(session, `🔗 URL الصفحة 3 المتوقع: ${expectedPage3}`);
+
+    if (!page3ActualUrl.includes(`/report/attribute/create/${taqeemReportId}`)) {
+      addLog(session, `⚠️ عدم تطابق — ID الفعلي في URL: ${page3ActualUrl.match(/\/(\d+)$/)?.[1] ?? "غير موجود"}`);
+      addLog(session, `↩️ التنقل المباشر لصفحة السمات بـ ID الصحيح: ${taqeemReportId}`);
+      await page.goto(expectedPage3, { waitUntil: "networkidle", timeout: 30000 });
+      await page.waitForTimeout(1500);
+    }
+    addLog(session, `✅ تأكيد URL الصفحة 3 [ID: ${taqeemReportId}]: ${page.url()}`);
 
     // ════════════════════════════════════════════════════════════════════════
     // الصفحة 3: /report/attribute/create/{taqeemReportId}
     // البيانات الإضافية وسمات الأصل
     // ════════════════════════════════════════════════════════════════════════
-    addLog(session, "═══════════════════════════════════════");
-    addLog(session, "▶ الصفحة 3: السمات والبيانات الإضافية");
-    addLog(session, "═══════════════════════════════════════");
+    addLog(session, "═══════════════════════════════════════════════");
+    addLog(session, `▶ الصفحة 3 [ID: ${taqeemReportId}]: السمات والبيانات الإضافية`);
+    addLog(session, "═══════════════════════════════════════════════");
 
     const elsPage3 = await scanElements(page);
     await saveDebug(reportId, "page3", elsPage3);
@@ -195,7 +221,6 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     addLog(session, `📋 عدد حقول الصفحة 3: ${elsPage3.length}`);
 
     await fillAttributePage(session, report, elsPage3);
-
     await screenshot(page, `p3_after_${reportId}`);
 
     // ── ضغط زر "continue" — صفحة المراجعة ───────────────────────────────
@@ -204,7 +229,11 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     await page.waitForTimeout(2000);
 
     await screenshot(page, `review_${reportId}`);
-    addLog(session, `✅ الانتهاء: ${page.url()}`);
+    const finalUrl = page.url();
+    const finalIdMatch = finalUrl.match(/\/(\d+)(?:\/|$)/);
+    const finalId = finalIdMatch ? finalIdMatch[1] : "غير معروف";
+    addLog(session, `✅ الانتهاء — URL: ${finalUrl}`);
+    addLog(session, `🆔 تأكيد التسلسل: TAQEEM ID = ${taqeemReportId} | ID في URL النهائي = ${finalId}`);
     addLog(session, "🔵 اكتمل الإدخال — راجع البيانات ثم أرسل التقرير يدوياً.");
 
     await updateReport(reportId, { automationStatus: "waiting_review", automationError: null });
