@@ -67,82 +67,145 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     // ── تتبع كل تغييرات URL تلقائياً ──────────────────────────────────────
     page.on("framenavigated", (frame) => {
       if (frame === page.mainFrame()) {
-        addLog(session, `🔀 URL تغيّر → ${frame.url()}`);
+        addLog(session, `🔀 URL → ${frame.url()}`);
       }
     });
 
-    // ════════════════════════════════════════════════════════
-    // نموذج إنشاء التقرير — صفحة واحدة تحتوي جميع الحقول
-    // URL: /report/create/1/13
-    // بعد الضغط على "continue" → /report/{id} (صفحة التقرير)
-    // ════════════════════════════════════════════════════════
-    addLog(session, "▶ فتح نموذج إنشاء تقرير جديد...");
+    // ════════════════════════════════════════════════════════════════════════
+    // الصفحة 1: /report/create/1/13
+    // البيانات الأساسية للتقرير
+    // ════════════════════════════════════════════════════════════════════════
+    addLog(session, "═══════════════════════════════════════");
+    addLog(session, "▶ الصفحة 1: البيانات الأساسية للتقرير");
+    addLog(session, "═══════════════════════════════════════");
+
     await page.goto(`${TAQEEM_URL}/report/create/1/13`, {
       waitUntil: "networkidle",
       timeout: 30000,
     });
-    await waitForAngular(page, 2000);
+    await page.waitForTimeout(2000);
 
     if (page.url().includes("/login") || page.url().includes("sso.taqeem")) {
       throw new Error("انتهت الجلسة — يرجى تسجيل الدخول مجدداً من صفحة الإعدادات.");
     }
-    addLog(session, `✅ النموذج جاهز: ${page.url()}`);
+    addLog(session, `✅ الصفحة 1 جاهزة: ${page.url()}`);
 
     const pdfState = { pdfUploaded: false };
+    const elsPage1 = await scanElements(page);
+    await saveDebug(reportId, "page1", elsPage1);
+    await screenshot(page, `p1_before_${reportId}`);
+    addLog(session, `📋 عدد حقول الصفحة 1: ${elsPage1.length}`);
 
-    const els1 = await scanElements(page);
-    await saveDebug(reportId, "form", els1);
-    await screenshot(page, `form_before_${reportId}`);
-    addLog(session, `📋 عدد الحقول: ${els1.length}`);
+    await fillFormPage(session, report, elsPage1, pdfState);
 
-    // ── تعبئة جميع حقول النموذج ──────────────────────────────────────────
-    await fillFormPage(session, report, els1, pdfState);
-    await screenshot(page, `form_after_${reportId}`);
-
-    // ── رفع PDF إذا لم يُرفع ──────────────────────────────────────────────
+    // ── إعادة محاولة رفع PDF ──────────────────────────────────────────────
     if (!pdfState.pdfUploaded) {
-      addLog(session, "🔄 لم يُرفع PDF — إعادة المحاولة...");
+      addLog(session, "🔄 إعادة محاولة رفع PDF...");
       for (let r = 1; r <= 3 && !pdfState.pdfUploaded; r++) {
-        addLog(session, `  ↳ محاولة ${r}/3`);
-        await page.waitForTimeout(1200);
+        await page.waitForTimeout(1000);
         await uploadPdf(session, report, pdfState);
       }
-      if (!pdfState.pdfUploaded) {
-        addLog(session, "⚠️ لم يُرفع PDF — المتابعة بدونه (قد تفشل صفحة التقييم)");
-      }
     }
 
-    // ── ضغط «حفظ واستمرار» — input[name="continue"] بالتحديد ─────────────
-    const urlBeforeSubmit = page.url();
+    await screenshot(page, `p1_after_${reportId}`);
+
+    // ── ضغط زر "continue" للانتقال للصفحة 2 ──────────────────────────────
+    const urlBeforePage2 = page.url();
     await clickContinueButton(session);
 
-    // ── انتظار الانتقال لصفحة التقرير /report/{id} ───────────────────────
-    addLog(session, "⏳ انتظار إنشاء التقرير...");
-    const submitted = await page
-      .waitForFunction(
-        (prev: string) => window.location.href !== prev,
-        urlBeforeSubmit,
-        { timeout: 30000 },
-      )
-      .then(() => true)
-      .catch(() => false);
-
-    if (!submitted) {
-      // قد يكون هناك خطأ في التحقق — سجّل عناصر الخطأ
-      const errMsg = await page.evaluate(() => {
-        const errs = Array.from(document.querySelectorAll(".alert-danger, .error-message, .text-danger, [class*='error']"));
-        return errs.map(e => e.textContent?.trim()).filter(Boolean).join(" | ");
-      }).catch(() => "");
-      throw new Error(`فشل إرسال النموذج${errMsg ? `: ${errMsg}` : " — تحقق من الحقول المطلوبة"}`);
-    }
+    // ── انتظار الانتقال لـ /report/asset/create/{id} ─────────────────────
+    addLog(session, "⏳ انتظار الانتقال لصفحة الأصل...");
+    await page
+      .waitForURL(`${TAQEEM_URL}/report/asset/create/**`, { timeout: 30000 })
+      .catch(async () => {
+        // fallback: انتظر أي تغيير في URL
+        await page.waitForFunction(
+          (prev: string) => window.location.href !== prev,
+          urlBeforePage2,
+          { timeout: 30000 },
+        ).catch(() => {});
+      });
 
     await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
     await page.waitForTimeout(2000);
 
-    const finalUrl = page.url();
-    await screenshot(page, `report_created_${reportId}`);
-    addLog(session, `✅ تم إنشاء التقرير: ${finalUrl}`);
-    addLog(session, "🔵 اكتمل الإدخال — راجع التقرير في المتصفح ثم أرسله يدوياً.");
+    // ── استخراج رقم التقرير من URL الصفحة 2 ──────────────────────────────
+    const page2Url = page.url();
+    addLog(session, `🔗 URL الصفحة 2: ${page2Url}`);
+
+    // نمط: /report/asset/create/1694177
+    const taqeemIdMatch = page2Url.match(/\/report\/asset\/create\/(\d+)/);
+    if (!taqeemIdMatch) {
+      // إذا لم يكن على صفحة 2 المتوقعة، سجّل رسالة توضيحية
+      addLog(session, `⚠️ URL غير متوقع: ${page2Url}`);
+      addLog(session, "⚠️ قد يكون هناك خطأ في التحقق بالصفحة 1 — تحقق من الحقول المطلوبة");
+      throw new Error(`لم يُعثر على رقم التقرير في URL: ${page2Url}`);
+    }
+    const taqeemReportId = taqeemIdMatch[1];
+    addLog(session, `✅ رقم التقرير في TAQEEM: ${taqeemReportId}`);
+
+    // ════════════════════════════════════════════════════════════════════════
+    // الصفحة 2: /report/asset/create/{taqeemReportId}
+    // بيانات الأصل والموقع
+    // ════════════════════════════════════════════════════════════════════════
+    addLog(session, "═══════════════════════════════════════");
+    addLog(session, "▶ الصفحة 2: بيانات الأصل والموقع");
+    addLog(session, "═══════════════════════════════════════");
+
+    const elsPage2 = await scanElements(page);
+    await saveDebug(reportId, "page2", elsPage2);
+    await screenshot(page, `p2_before_${reportId}`);
+    addLog(session, `📋 عدد حقول الصفحة 2: ${elsPage2.length}`);
+
+    await fillAssetPage(session, report, elsPage2);
+
+    await screenshot(page, `p2_after_${reportId}`);
+
+    // ── ضغط زر "continue" للانتقال للصفحة 3 ──────────────────────────────
+    const urlBeforePage3 = page.url();
+    await clickContinueButton(session);
+
+    // ── انتظار الانتقال لـ /report/attribute/create/{id} ─────────────────
+    addLog(session, "⏳ انتظار الانتقال لصفحة السمات...");
+    await page
+      .waitForURL(`${TAQEEM_URL}/report/attribute/create/**`, { timeout: 30000 })
+      .catch(async () => {
+        await page.waitForFunction(
+          (prev: string) => window.location.href !== prev,
+          urlBeforePage3,
+          { timeout: 30000 },
+        ).catch(() => {});
+      });
+
+    await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
+    await page.waitForTimeout(2000);
+    addLog(session, `🔗 URL الصفحة 3: ${page.url()}`);
+
+    // ════════════════════════════════════════════════════════════════════════
+    // الصفحة 3: /report/attribute/create/{taqeemReportId}
+    // البيانات الإضافية وسمات الأصل
+    // ════════════════════════════════════════════════════════════════════════
+    addLog(session, "═══════════════════════════════════════");
+    addLog(session, "▶ الصفحة 3: السمات والبيانات الإضافية");
+    addLog(session, "═══════════════════════════════════════");
+
+    const elsPage3 = await scanElements(page);
+    await saveDebug(reportId, "page3", elsPage3);
+    await screenshot(page, `p3_before_${reportId}`);
+    addLog(session, `📋 عدد حقول الصفحة 3: ${elsPage3.length}`);
+
+    await fillAttributePage(session, report, elsPage3);
+
+    await screenshot(page, `p3_after_${reportId}`);
+
+    // ── ضغط زر "continue" — صفحة المراجعة ───────────────────────────────
+    await clickContinueButton(session);
+    await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
+    await page.waitForTimeout(2000);
+
+    await screenshot(page, `review_${reportId}`);
+    addLog(session, `✅ الانتهاء: ${page.url()}`);
+    addLog(session, "🔵 اكتمل الإدخال — راجع البيانات ثم أرسل التقرير يدوياً.");
 
     await updateReport(reportId, { automationStatus: "waiting_review", automationError: null });
     closeSession(session.sessionId);
@@ -842,6 +905,193 @@ async function selectNativeByName(
     }
   } catch {
     addLog(session, `⚠️ لم يُحدَّد "${label}"`);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// الصفحة 2: /report/asset/create/{id}
+// بيانات الأصل والموقع
+// (أسماء الحقول تُكتشف من scanElements — نستخدم name إن عُرف أو labelText كاحتياط)
+// ─────────────────────────────────────────────────────────────────────────────
+async function fillAssetPage(
+  session: AutomationSession,
+  report: any,
+  els: any[],
+): Promise<void> {
+  logElements(session, els, "الصفحة 2 — بيانات الأصل والموقع");
+
+  const selects   = els.filter(e => e.tag === "SELECT" || e.tag === "MAT-SELECT");
+  const inputs    = els.filter(e => e.tag === "INPUT" && !["file","radio","checkbox"].includes(e.type));
+  const checkboxes = els.filter(e => e.type === "checkbox");
+
+  // دالة مساعدة: ابحث بـ name أولاً ثم بـ label
+  const byName = (name: string) => els.find(e => e.name === name);
+  const byLabel = (rx: RegExp) => findEl(els, rx);
+
+  // ── نوع الأصل ────────────────────────────────────────────────────────────
+  const assetTypeEl = byName("asset_type_id") ?? byName("property_type_id") ??
+    byLabel(/asset.?type|property.?type|نوع.*أصل|نوع.*عقار/i);
+  if (assetTypeEl) {
+    await (assetTypeEl.isMat
+      ? selectAngular(session, buildSelector(assetTypeEl), report.propertyType, "نوع الأصل", true)
+      : selectNativeByName(session, assetTypeEl.name || "", report.propertyType, "نوع الأصل"));
+  } else addLog(session, "⚠️ لم يُعثر على «نوع الأصل»");
+
+  // ── استخدام/قطاع الأصل ───────────────────────────────────────────────────
+  const assetUseEl = byName("asset_use_id") ?? byName("property_use_id") ??
+    byLabel(/usage|sector|استخدام|قطاع/i);
+  if (assetUseEl) {
+    await (assetUseEl.isMat
+      ? selectAngular(session, buildSelector(assetUseEl), report.propertyUse, "استخدام الأصل", true)
+      : selectNativeByName(session, assetUseEl.name || "", report.propertyUse, "استخدام الأصل"));
+  }
+
+  // ── تاريخ المعاينة ────────────────────────────────────────────────────────
+  const inspEl = byName("inspection_date") ?? byName("inspected_at") ??
+    byLabel(/inspection.?date|معاينة|تاريخ.*معاينة/i);
+  if (inspEl) await fillDate(session, buildSelector(inspEl), report.inspectionDate, "تاريخ المعاينة");
+  else addLog(session, "⚠️ لم يُعثر على «تاريخ المعاينة»");
+
+  // ── أسلوب التقييم (checkbox أو select) ──────────────────────────────────
+  const methodEl = byName("valuation_method_id") ??
+    byLabel(/method|approach|أسلوب.*تقييم|طريقة/i);
+  if (methodEl && (methodEl.tag === "SELECT" || methodEl.tag === "MAT-SELECT")) {
+    await (methodEl.isMat
+      ? selectAngular(session, buildSelector(methodEl), report.valuationMethod, "أسلوب التقييم", true)
+      : selectNativeByName(session, methodEl.name || "", report.valuationMethod, "أسلوب التقييم"));
+  }
+
+  // ── الدولة (ثابت: المملكة العربية السعودية) ──────────────────────────────
+  const countryEl = byName("country_id") ?? byLabel(/country|دولة|بلد/i);
+  if (countryEl) {
+    await (countryEl.isMat
+      ? selectAngular(session, buildSelector(countryEl), "المملكة العربية السعودية", "الدولة", true)
+      : selectNativeByName(session, countryEl.name || "", "المملكة العربية السعودية", "الدولة"));
+  }
+
+  // ── المنطقة ───────────────────────────────────────────────────────────────
+  const regionEl = byName("region_id") ?? byLabel(/region|province|منطقة|محافظة/i);
+  if (regionEl) {
+    await (regionEl.isMat
+      ? selectAngular(session, buildSelector(regionEl), report.region, "المنطقة", true)
+      : selectNativeByName(session, regionEl.name || "", report.region, "المنطقة"));
+    await session.page.waitForTimeout(1000); // انتظر تحميل المدن
+  } else addLog(session, "⚠️ لم يُعثر على «المنطقة»");
+
+  // ── المدينة ───────────────────────────────────────────────────────────────
+  const cityEl = byName("city_id") ?? byLabel(/city|مدينة/i);
+  if (cityEl) {
+    await (cityEl.isMat
+      ? selectAngular(session, buildSelector(cityEl), report.city, "المدينة", true)
+      : selectNativeByName(session, cityEl.name || "", report.city, "المدينة"));
+    await session.page.waitForTimeout(800);
+  } else addLog(session, "⚠️ لم يُعثر على «المدينة»");
+
+  // ── الحي ─────────────────────────────────────────────────────────────────
+  const districtEl = byName("district") ?? byName("neighborhood") ??
+    byLabel(/district|neighborhood|حي/i);
+  if (districtEl) await fillAngular(session, buildSelector(districtEl), report.district, "الحي");
+
+  // ── الشارع ────────────────────────────────────────────────────────────────
+  const streetEl = byName("street") ?? byName("street_name") ??
+    byLabel(/street|شارع/i);
+  if (streetEl) await fillAngular(session, buildSelector(streetEl), report.street, "الشارع");
+
+  // ── الإحداثيات ───────────────────────────────────────────────────────────
+  if (report.coordinates) {
+    const parts = String(report.coordinates).split(",").map((s: string) => s.trim());
+    if (parts.length === 2) {
+      const latEl = byName("lat") ?? byName("latitude") ?? byLabel(/lat\b|خط.*عرض/i);
+      const lngEl = byName("lng") ?? byName("longitude") ?? byLabel(/lng\b|lon\b|خط.*طول/i);
+      if (latEl) await fillAngular(session, buildSelector(latEl), parts[0], "خط العرض");
+      if (lngEl) await fillAngular(session, buildSelector(lngEl), parts[1], "خط الطول");
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// الصفحة 3: /report/attribute/create/{id}
+// السمات والبيانات الإضافية للأصل
+// ─────────────────────────────────────────────────────────────────────────────
+async function fillAttributePage(
+  session: AutomationSession,
+  report: any,
+  els: any[],
+): Promise<void> {
+  logElements(session, els, "الصفحة 3 — السمات والبيانات الإضافية");
+
+  const byName  = (name: string) => els.find(e => e.name === name);
+  const byLabel = (rx: RegExp)   => findEl(els, rx);
+
+  // ── رقم الصك / سند الملكية ───────────────────────────────────────────────
+  const deedEl = byName("deed_number") ?? byName("title_number") ??
+    byLabel(/deed|title.?num|صك|سند/i);
+  if (deedEl) await fillAngular(session, buildSelector(deedEl), report.deedNumber, "رقم الصك");
+  else addLog(session, "⚠️ لم يُعثر على «رقم الصك»");
+
+  // ── نوع الملكية ───────────────────────────────────────────────────────────
+  const ownerEl = byName("ownership_type_id") ?? byLabel(/ownership|ملكية/i);
+  if (ownerEl) {
+    await (ownerEl.isMat
+      ? selectAngular(session, buildSelector(ownerEl), report.ownershipType, "نوع الملكية", true)
+      : selectNativeByName(session, ownerEl.name || "", report.ownershipType, "نوع الملكية"));
+  }
+
+  // ── مساحة الأرض ───────────────────────────────────────────────────────────
+  const landEl = byName("land_area") ?? byName("plot_area") ??
+    byLabel(/land.?area|plot.?area|مساحة.*أرض|مساحة.*قطعة/i);
+  if (landEl) await fillAngular(session, buildSelector(landEl), report.landArea, "مساحة الأرض");
+  else addLog(session, "⚠️ لم يُعثر على «مساحة الأرض»");
+
+  // ── مساحة البناء ──────────────────────────────────────────────────────────
+  const buildEl = byName("building_area") ?? byName("floor_area") ??
+    byLabel(/building.?area|floor.?area|مساحة.*بناء|مسطحات/i);
+  if (buildEl) await fillAngular(session, buildSelector(buildEl), report.buildingArea, "مساحة البناء");
+
+  // ── عدد الأدوار ───────────────────────────────────────────────────────────
+  const floorsEl = byName("floors_count") ?? byName("floor_count") ??
+    byLabel(/floor.?count|floors|أدوار|طوابق/i);
+  if (floorsEl) await fillAngular(session, buildSelector(floorsEl), report.floorsCount ?? report.permittedFloorsCount, "عدد الأدوار");
+
+  // ── نسبة البناء ───────────────────────────────────────────────────────────
+  const ratioEl = byName("build_ratio") ?? byName("building_ratio") ??
+    byLabel(/ratio|build.?ratio|نسبة.*بناء/i);
+  if (ratioEl) await fillAngular(session, buildSelector(ratioEl), report.permittedBuildingRatio, "نسبة البناء");
+
+  // ── حالة البناء ───────────────────────────────────────────────────────────
+  const statusEl = byName("building_status_id") ?? byLabel(/building.?status|حالة.*بناء/i);
+  if (statusEl) {
+    await (statusEl.isMat
+      ? selectAngular(session, buildSelector(statusEl), report.buildingStatus, "حالة البناء", true)
+      : selectNativeByName(session, statusEl.name || "", report.buildingStatus, "حالة البناء"));
+  }
+
+  // ── الاتجاهات المطلة ──────────────────────────────────────────────────────
+  const facadeEl = byName("facade_id") ?? byLabel(/facade|direction|اتجاه|مطلة|واجهة/i);
+  if (facadeEl) {
+    await (facadeEl.isMat
+      ? selectAngular(session, buildSelector(facadeEl), report.streetFacades, "الاتجاهات", true)
+      : selectNativeByName(session, facadeEl.name || "", report.streetFacades, "الاتجاهات"));
+  }
+
+  // ── المرافق (checkboxes) ─────────────────────────────────────────────────
+  const checkboxes = els.filter(e => e.type === "checkbox");
+  if (report.utilities && checkboxes.length > 0) {
+    const utilsStr = String(report.utilities).toLowerCase();
+    const utilMap: Record<string, RegExp> = {
+      "كهرباء":    /كهرباء|electricity/i,
+      "مياه":      /مياه|water/i,
+      "صرف صحي":  /صرف|sewage/i,
+      "غاز":       /غاز|gas/i,
+      "طرق":       /طرق|road/i,
+    };
+    for (const [label, rx] of Object.entries(utilMap)) {
+      const cbEl = checkboxes.find(e => rx.test(`${e.name}|${e.labelText}|${e.ariaLabel}`));
+      if (cbEl) {
+        const shouldCheck = rx.test(utilsStr) || utilsStr.includes(label);
+        await checkBox(session, buildSelector(cbEl), shouldCheck, `مرفق: ${label}`);
+      }
+    }
   }
 }
 
