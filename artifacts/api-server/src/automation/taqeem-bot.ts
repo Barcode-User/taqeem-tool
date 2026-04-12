@@ -32,6 +32,20 @@ export async function startAutomation(
     throw new Error("لا توجد جلسة مسجّلة. يرجى تسجيل الدخول أولاً من صفحة الإعدادات.");
   }
 
+  // ── أغلق جميع صفحات تقارير TAQEEM المفتوحة من جلسات سابقة ──────────────
+  // (نبقي صفحات تسجيل الدخول/الرئيسية — نغلق صفحات /report/ فقط)
+  const existingPages = context.pages();
+  for (const p of existingPages) {
+    const u = p.url();
+    if (u.includes(TAQEEM_URL) && (
+      u.includes("/report/") ||
+      u.includes("/asset/") ||
+      u.includes("/attribute/")
+    )) {
+      await p.close().catch(() => {});
+    }
+  }
+
   const sessionId = randomUUID();
   const page = await context.newPage();
   const session = createSession(sessionId, reportId, null as any, context, page);
@@ -72,6 +86,36 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     });
 
     // ════════════════════════════════════════════════════════════════════════
+    // تحضير الجلسة: مسح أي حالة Angular متبقية من جلسات سابقة
+    // ════════════════════════════════════════════════════════════════════════
+    addLog(session, "🧹 تنظيف جلسة TAQEEM من بيانات التقارير السابقة...");
+
+    // ① انتقل للصفحة الرئيسية أولاً لإعادة ضبط Angular router
+    await page.goto(`${TAQEEM_URL}/`, { waitUntil: "domcontentloaded", timeout: 20000 })
+      .catch(() => {}); // تجاهل الفشل — الهدف تحديد السياق فقط
+    await page.waitForTimeout(1000);
+
+    // ② امسح localStorage/sessionStorage الخاصة بـ TAQEEM
+    await page.evaluate(() => {
+      try {
+        // احذف مفاتيح النماذج المؤقتة التي قد يخزنها Angular
+        const keysToRemove: string[] = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i) ?? "";
+          if (k.includes("report") || k.includes("draft") || k.includes("form") ||
+              k.includes("asset") || k.includes("attribute")) {
+            keysToRemove.push(k);
+          }
+        }
+        keysToRemove.forEach(k => localStorage.removeItem(k));
+
+        // امسح sessionStorage بالكامل (أكثر أماناً)
+        sessionStorage.clear();
+      } catch { /* تجاهل إذا منعت CORS */ }
+    }).catch(() => {});
+    addLog(session, "✅ تم مسح بيانات الجلسة السابقة");
+
+    // ════════════════════════════════════════════════════════════════════════
     // الصفحة 1: /report/create/1/13
     // البيانات الأساسية للتقرير
     // ════════════════════════════════════════════════════════════════════════
@@ -88,7 +132,54 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     if (page.url().includes("/login") || page.url().includes("sso.taqeem")) {
       throw new Error("انتهت الجلسة — يرجى تسجيل الدخول مجدداً من صفحة الإعدادات.");
     }
-    addLog(session, `✅ الصفحة 1 جاهزة: ${page.url()}`);
+
+    // ── تحقق: إذا أعاد التوجيه لتقرير موجود بدلاً من نموذج جديد ──────────
+    const landedUrl = page.url();
+    const isOnCreate = landedUrl.includes("/report/create/");
+    const redirectedToExisting = !isOnCreate && landedUrl.includes("/report/");
+
+    if (redirectedToExisting) {
+      // TAQEEM أعاد التوجيه لتقرير موجود — هذا هو التداخل!
+      const existingId = landedUrl.match(/\/report\/(\d+)/)?.[1] ?? "مجهول";
+      addLog(session, `⚠️ TAQEEM أعاد التوجيه لتقرير موجود [ID: ${existingId}] بدل نموذج جديد!`);
+      addLog(session, `⚠️ URL: ${landedUrl}`);
+      addLog(session, `🔄 إعادة المحاولة: التنقل المباشر لنموذج إنشاء جديد...`);
+
+      // انتظر قليلاً ثم أعد المحاولة
+      await page.waitForTimeout(2000);
+      await page.goto(`${TAQEEM_URL}/report/create/1/13`, {
+        waitUntil: "networkidle",
+        timeout: 30000,
+      });
+      await page.waitForTimeout(2000);
+
+      if (!page.url().includes("/report/create/")) {
+        throw new Error(
+          `TAQEEM يُعيد التوجيه دائماً لتقرير موجود [${landedUrl}] — ` +
+          `يُرجى إغلاق التقرير المفتوح على منصة TAQEEM يدوياً أو إنهاء التقرير المعلّق.`
+        );
+      }
+    }
+
+    addLog(session, `✅ الصفحة 1 جاهزة (نموذج جديد): ${page.url()}`);
+
+    // ── تحقق: هل الحقل الأول فارغ؟ (ضمان عدم وجود بيانات سابقة) ──────────
+    const titlePreFilled = await page.$eval(
+      '[name="title"]',
+      (el: HTMLInputElement) => el.value?.trim() ?? "",
+    ).catch(() => "");
+    if (titlePreFilled) {
+      addLog(session, `⚠️ النموذج يحتوي بيانات مسبقة في حقل العنوان: "${titlePreFilled.slice(0, 40)}"`);
+      addLog(session, `🧹 مسح بيانات النموذج المسبقة...`);
+      // امسح جميع حقول النص
+      await page.evaluate(() => {
+        document.querySelectorAll<HTMLInputElement>("input[type='text'], input:not([type]), textarea")
+          .forEach(el => { el.value = ""; el.dispatchEvent(new Event("input", { bubbles: true })); });
+      });
+      await page.waitForTimeout(500);
+    } else {
+      addLog(session, "✅ النموذج فارغ — لا يوجد تداخل مع تقارير سابقة");
+    }
 
     const pdfState = { pdfUploaded: false };
     const elsPage1 = await scanElements(page);
