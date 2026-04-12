@@ -48,22 +48,22 @@ const FIELDS_SCHEMA = `{
   "clientName": "اسم العميل",
   "clientEmail": "بريد العميل الإلكتروني",
   "clientPhone": "هاتف العميل",
-  "intendedUser": "المستخدم المقصود",
+  "intendedUser": "المستخدم المقصود = المستفيد = مستخدم التقرير = الجهة المستفيدة (ابحث عن: لمصلحة / أُعدّ لصالح / المستفيد / مستخدم التقرير)",
   "reportType": "نوع التقرير",
   "valuationPurpose": "الغرض من التقييم",
   "valuationHypothesis": "فرضية القيمة",
-  "valuationBasis": "أساس القيمة",
-  "propertyType": "نوع العقار (أرض/شقة/فيلا/دور/مبنى تجاري)",
-  "propertySubType": "النوع الفرعي",
-  "region": "المنطقة الإدارية",
-  "city": "المدينة",
+  "valuationBasis": "أساس القيمة (قد يكون: القيمة السوقية العادلة / القيمة العادلة / قيمة الاستمرار / القيمة السوقية)",
+  "propertyType": "نوع العقار (ابحث تحت: الأصل محل التقييم / وصف العقار / نوع الأصل — مثال: أرض/شقة/فيلا/دور/مبنى)",
+  "propertySubType": "النوع الفرعي للعقار",
+  "region": "المنطقة الإدارية (مثال: الرياض / مكة المكرمة / المدينة المنورة — بدون كلمة منطقة)",
+  "city": "المدينة (استخرج اسم المدينة فقط حتى لو كانت مدمجة في العنوان — مثال: الرياض / جدة / مكة)",
   "district": "الحي",
   "street": "الشارع",
   "blockNumber": "رقم البلك",
   "plotNumber": "رقم القطعة",
-  "planNumber": "رقم المخطط",
+  "planNumber": "رقم المخطط (ابحث عن: مخطط رقم / المخطط: / رقم المخطط في جدول وصف العقار)",
   "propertyUse": "استخدام العقار",
-  "deedNumber": "رقم الصك",
+  "deedNumber": "رقم الصك (ابحث عن: صك ملكية رقم / وثيقة الملكية رقم / الصك رقم / رقم صك الملكية)",
   "deedDate": "تاريخ الصك",
   "ownerName": "اسم المالك",
   "ownershipType": "نوع الملكية",
@@ -91,15 +91,27 @@ const FIELDS_SCHEMA = `{
   "commercialRegNumber": "رقم السجل التجاري"
 }`;
 
-const SYSTEM_PROMPT = `You are an expert assistant for reading Saudi real estate valuation reports.
-Your task: extract the requested fields and return them as a valid JSON object ONLY.
-Rules:
-- Use EXACTLY the English key names provided in the schema (do NOT translate keys to Arabic)
-- Values can be in Arabic
-- If a field is not found, use null
-- Numbers as plain numbers without units
-- Dates in YYYY-MM-DD format if possible
-- Return ONLY the raw JSON object — no markdown, no code blocks, no extra text`;
+const SYSTEM_PROMPT = `أنت خبير متخصص في قراءة تقارير التقييم العقاري السعودية الصادرة وفق معايير TAQEEM.
+مهمتك: استخرج الحقول المطلوبة وأعدها كـ JSON صحيح فقط.
+
+قواعد الاستخراج:
+- استخدم أسماء المفاتيح الإنجليزية كما هي بالضبط
+- القيم تُكتب بالعربية كما وردت في التقرير
+- إذا لم يوجد الحقل استخدم null
+- الأرقام بدون وحدات (مساحة، قيمة، نسبة)
+- التواريخ بصيغة YYYY-MM-DD إن أمكن
+- أعد JSON فقط بدون markdown أو نص إضافي
+
+تنبيهات مهمة للحقول الصعبة:
+• intendedUser (المستخدم المقصود): يُكتب في التقارير بأسماء مختلفة مثل "المستفيد" أو "مستخدم التقرير" أو "الجهة المستفيدة" أو "لمصلحة" أو "أُعدّ لصالح" — ابحث عن أي منها
+• city (المدينة): قد تكون مدمجة في العنوان مثل "حي الملز - الرياض" أو "مدينة جدة" — استخرج اسم المدينة فقط
+• valuationBasis (أساس القيمة): يُكتب كـ "القيمة السوقية العادلة" أو "قيمة الاستمرار" أو "القيمة العادلة" أو "القيمة السوقية"
+• propertyType (نوع العقار): قد يكون تحت "الأصل محل التقييم" أو "وصف العقار" أو "نوع الأصل" — استخرج النوع (أرض، شقة، فيلا، دور، مبنى تجاري...)
+• planNumber (رقم المخطط): يظهر بصيغ مثل "مخطط رقم" أو "المخطط:" أو "رقم المخطط:" في جداول وصف العقار
+• deedNumber (رقم الصك): يظهر كـ "صك ملكية رقم" أو "وثيقة الملكية رقم" أو "الصك رقم" أو "رقم صك الملكية"
+• region (المنطقة الإدارية): مثل "منطقة الرياض" أو "المنطقة الغربية" — استخرج اسم المنطقة فقط بدون كلمة "منطقة"
+• ownerName (اسم المالك): قد يكون تحت "المالك" أو "مالك العقار" أو "صاحب الصك"
+• valuerName (اسم المقيم): ابحث عن الاسم بعد "المقيم المعتمد" أو "أعده" أو توقيع التقرير`;
 
 /** يُحلّل استجابة النموذج ويستخرج JSON منها حتى لو جاءت بـ markdown */
 function parseAIResponse(content: string): any {
@@ -120,6 +132,70 @@ function parseAIResponse(content: string): any {
   }
 }
 
+// ── قائمة مدن المملكة للبحث النصي ────────────────────────────────────────────
+const SAUDI_CITIES = [
+  "الرياض","جدة","مكة المكرمة","مكة","المدينة المنورة","المدينة","الدمام","الخبر","الظهران",
+  "الأحساء","الهفوف","تبوك","بريدة","القصيم","عنيزة","الطائف","خميس مشيط","أبها","جازان",
+  "نجران","حائل","الجبيل","ينبع","الرس","عرعر","سكاكا","القريات","الباحة","بيشة","الخرج",
+  "المجمعة","الزلفي","شقراء","وادي الدواسر","الدوادمي","القنفذة","محايل عسير","صبيا",
+  "صامطة","أبو عريش","ضباء","تيماء","العقير","الأفلاج","السليل","القوارة","الجفر","حوطة سدير",
+];
+
+/**
+ * استخراج أولي بالأنماط النصية قبل إرسال للذكاء الاصطناعي.
+ * يُعيد القيم التي يمكن التقاطها بموثوقية بالـ regex.
+ * الذكاء الاصطناعي يُكمل ما تبقى وهذه القيم تُعطى الأولوية عند الدمج.
+ */
+function preExtractFromText(text: string): Record<string, string | null> {
+  const result: Record<string, string | null> = {};
+  const t = text;
+
+  // ── رقم الصك ───────────────────────────────────────────────────────────────
+  const deedMatch = t.match(
+    /(?:صك\s*ملكية\s*رقم|وثيقة\s*الملكية\s*رقم|الصك\s*رقم|رقم\s*صك\s*الملكية|صك\s*رقم)[:\s]*([0-9٠-٩/\-]+)/
+  );
+  if (deedMatch) result.deedNumber = deedMatch[1].trim().replace(/[٠-٩]/g, d => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)));
+
+  // ── رقم المخطط ─────────────────────────────────────────────────────────────
+  const planMatch = t.match(
+    /(?:مخطط\s*رقم|رقم\s*المخطط|المخطط\s*رقم|المخطط\s*:)[:\s]*([0-9٠-٩/\-]+)/
+  );
+  if (planMatch) result.planNumber = planMatch[1].trim().replace(/[٠-٩]/g, d => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)));
+
+  // ── رقم القطعة ─────────────────────────────────────────────────────────────
+  const plotMatch = t.match(
+    /(?:قطعة\s*رقم|رقم\s*القطعة|القطعة\s*رقم|القطعة\s*:)[:\s]*([0-9٠-٩/\-]+)/
+  );
+  if (plotMatch) result.plotNumber = plotMatch[1].trim().replace(/[٠-٩]/g, d => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)));
+
+  // ── رقم البلك ──────────────────────────────────────────────────────────────
+  const blockMatch = t.match(
+    /(?:بلك\s*رقم|رقم\s*البلك|البلك\s*رقم|البلك\s*:)[:\s]*([0-9٠-٩/\-]+)/
+  );
+  if (blockMatch) result.blockNumber = blockMatch[1].trim().replace(/[٠-٩]/g, d => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)));
+
+  // ── المدينة — بحث في قائمة المدن السعودية ──────────────────────────────────
+  if (!result.city) {
+    for (const city of SAUDI_CITIES) {
+      if (t.includes(city)) { result.city = city; break; }
+    }
+  }
+
+  // ── المستخدم المقصود / المستفيد ─────────────────────────────────────────────
+  const intendedMatch = t.match(
+    /(?:المستفيد|مستخدم\s*التقرير|الجهة\s*المستفيدة|لمصلحة|لصالح|أُعدّ\s*لصالح|أعد\s*لصالح)[:\s]*([^\n\r]{3,80})/
+  );
+  if (intendedMatch) result.intendedUser = intendedMatch[1].trim().replace(/\s+/g, " ");
+
+  // ── رقم التقرير ─────────────────────────────────────────────────────────────
+  const repNumMatch = t.match(
+    /(?:رقم\s*التقرير|تقرير\s*رقم)[:\s]*([A-Za-z0-9\-\/]+)/
+  );
+  if (repNumMatch) result.reportNumber = repNumMatch[1].trim();
+
+  return result;
+}
+
 /** يُحدد هل نستخدم response_format للنموذج الحالي */
 function supportsJsonMode(): boolean {
   // نماذج Groq/Llama لا تدعم response_format بشكل موثوق مع العربية
@@ -127,8 +203,12 @@ function supportsJsonMode(): boolean {
   return true;
 }
 
-/** يستدعي AI بنمط النص */
+/** يستدعي AI بنمط النص ويدمج نتائج Regex لتعزيز الحقول الصعبة */
 async function extractWithText(text: string) {
+  // خطوة 1: استخراج بالأنماط النصية (سريع ودقيق لحقول محددة)
+  const regexResults = preExtractFromText(text);
+
+  // خطوة 2: استخراج بالذكاء الاصطناعي
   const useJsonMode = supportsJsonMode();
   const response = await openai.chat.completions.create({
     model: getAIModel(),
@@ -142,7 +222,17 @@ async function extractWithText(text: string) {
       },
     ],
   });
-  return parseAIResponse(response.choices[0]?.message?.content ?? "{}");
+  const aiResults = parseAIResponse(response.choices[0]?.message?.content ?? "{}");
+
+  // خطوة 3: دمج النتائج — الذكاء الاصطناعي له الأولوية، Regex يملأ الفراغات (null/undefined)
+  const merged: Record<string, any> = { ...aiResults };
+  for (const [key, val] of Object.entries(regexResults)) {
+    if (val != null && (merged[key] == null || merged[key] === "")) {
+      merged[key] = val;
+      console.log(`[regex-boost] ${key} = "${val}"`);
+    }
+  }
+  return merged;
 }
 
 /** يستدعي AI بنمط الصور (Vision) */
