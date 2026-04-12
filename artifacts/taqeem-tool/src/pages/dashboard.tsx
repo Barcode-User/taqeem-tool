@@ -52,15 +52,21 @@ type DsEntry = {
 };
 
 export default function Dashboard() {
-  const { data: reports, isLoading: reportsLoading } = useListReports();
-  const { data: stats, isLoading: statsLoading } = useGetReportStats();
+  const apiBase = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
+
+  const { data: reports, isLoading: reportsLoading } = useListReports({
+    query: { staleTime: 30_000, refetchOnWindowFocus: false }
+  });
+  const { data: stats, isLoading: statsLoading } = useGetReportStats({
+    query: { staleTime: 60_000, refetchOnWindowFocus: false }
+  });
 
   const [searchQuery,  setSearchQuery]  = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [dsMap, setDsMap] = useState<Record<number, DsEntry>>({});
 
   useEffect(() => {
-    fetch("/api/datasystem")
+    fetch(`${apiBase}/api/datasystem`)
       .then((r) => r.json())
       .then((list: any[]) => {
         const map: Record<number, DsEntry> = {};
@@ -75,7 +81,7 @@ export default function Dashboard() {
         setDsMap(map);
       })
       .catch(() => {});
-  }, []);
+  }, [apiBase]);
 
   const filteredReports = reports?.filter((report) => {
     const matchesSearch =

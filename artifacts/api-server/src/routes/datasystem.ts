@@ -11,6 +11,7 @@ import * as path from "path";
 import {
   sqliteInsertDataSystem,
   sqliteGetDataSystemById,
+  sqliteGetDataSystemByReportId,
   sqliteListDataSystem,
   sqliteUpdateDataSystemLinkedReport,
   insertReport,
@@ -406,25 +407,50 @@ router.post("/datasystem/upload", (req, res, next) => {
 
 // ─── GET /api/datasystem ───────────────────────────────────────────────────────
 // يُرجع قائمة datasystem مع نسبة التطابق لكل سجل
-router.get("/datasystem", async (_req, res) => {
+// دالة مساعدة: حساب نتائج المقارنة لسجل datasystem مع تقرير
+function calcDsScores(ds: any, report: any) {
+  const fieldScores: Record<string, number> = {};
+  const scoreValues: number[] = [];
+  COMPARE_FIELDS.forEach(({ key }) => {
+    const s = calcMatchScore((ds as any)[key], (report as any)[key]);
+    fieldScores[key] = s;
+    scoreValues.push(s);
+  });
+  const averageScore = Math.round(scoreValues.reduce((a, b) => a + b, 0) / scoreValues.length);
+  return { ...ds, averageScore, fieldScores };
+}
+
+router.get("/datasystem", async (req, res) => {
   try {
+    // ── فلتر سريع: ?linkedReportId=X — يُعيد سجل واحد فقط ──────────────
+    const linkedReportIdParam = req.query.linkedReportId;
+    if (linkedReportIdParam) {
+      const reportId = parseInt(linkedReportIdParam as string, 10);
+      if (!isNaN(reportId)) {
+        const ds = await sqliteGetDataSystemByReportId(reportId);
+        if (!ds) { res.json([]); return; }
+        const report = await getReportById(reportId);
+        if (!report) { res.json([{ ...ds, averageScore: null, fieldScores: null }]); return; }
+        res.json([calcDsScores(ds, report)]);
+        return;
+      }
+    }
+
+    // ── القائمة الكاملة: تحميل كل التقارير دفعة واحدة (حل N+1) ──────────
     const list = await sqliteListDataSystem();
-    const withScores = await Promise.all(
-      list.map(async (ds) => {
-        if (!ds.linkedReportId) return { ...ds, averageScore: null, fieldScores: null };
-        const report = await getReportById(ds.linkedReportId);
-        if (!report) return { ...ds, averageScore: null, fieldScores: null };
-        const fieldScores: Record<string, number> = {};
-        const scoreValues: number[] = [];
-        COMPARE_FIELDS.forEach(({ key }) => {
-          const s = calcMatchScore((ds as any)[key], (report as any)[key]);
-          fieldScores[key] = s;
-          scoreValues.push(s);
-        });
-        const avg = Math.round(scoreValues.reduce((a, b) => a + b, 0) / scoreValues.length);
-        return { ...ds, averageScore: avg, fieldScores };
-      })
-    );
+    // جلب التقارير المحتاج إليها فقط دفعة واحدة من قاعدة البيانات
+    const linkedIds = [...new Set(list.map(d => d.linkedReportId).filter(Boolean) as number[])];
+    const reportsArr = await Promise.all(linkedIds.map(id => getReportById(id)));
+    const reportsMap: Record<number, any> = {};
+    reportsArr.forEach(r => { if (r?.id) reportsMap[r.id] = r; });
+
+    const withScores = list.map((ds) => {
+      if (!ds.linkedReportId) return { ...ds, averageScore: null, fieldScores: null };
+      const report = reportsMap[ds.linkedReportId];
+      if (!report) return { ...ds, averageScore: null, fieldScores: null };
+      return calcDsScores(ds, report);
+    });
+
     res.json(withScores);
   } catch (err: any) {
     res.status(500).json({ error: err.message });

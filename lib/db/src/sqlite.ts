@@ -630,6 +630,12 @@ export async function sqliteListDataSystem(): Promise<DataSystemRecord[]> {
   return rows.map(rowToDataSystem);
 }
 
+export async function sqliteGetDataSystemByReportId(reportId: number): Promise<DataSystemRecord | null> {
+  const db = getDb();
+  const row = db.prepare("SELECT * FROM datasystem WHERE LinkedReportId = ? LIMIT 1").get(reportId) as any;
+  return row ? rowToDataSystem(row) : null;
+}
+
 export async function sqliteUpdateDataSystemLinkedReport(id: number, reportId: number): Promise<void> {
   const db = getDb();
   db.prepare("UPDATE datasystem SET LinkedReportId = ? WHERE Id = ?").run(reportId, id);

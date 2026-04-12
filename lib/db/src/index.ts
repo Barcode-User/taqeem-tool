@@ -51,5 +51,6 @@ export const hasPendingQueueDb = isPostgres
 export type { DataSystemRecord } from "./sqlite";
 export const sqliteInsertDataSystem = sq.sqliteInsertDataSystem;
 export const sqliteGetDataSystemById = sq.sqliteGetDataSystemById;
+export const sqliteGetDataSystemByReportId = sq.sqliteGetDataSystemByReportId;
 export const sqliteListDataSystem = sq.sqliteListDataSystem;
 export const sqliteUpdateDataSystemLinkedReport = sq.sqliteUpdateDataSystemLinkedReport;

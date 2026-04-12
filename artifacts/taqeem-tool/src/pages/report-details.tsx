@@ -214,7 +214,9 @@ export default function ReportDetails() {
   const { data: report, isLoading } = useGetReport(id, {
     query: {
       enabled: !!id,
-      queryKey: getGetReportQueryKey(id)
+      queryKey: getGetReportQueryKey(id),
+      staleTime: 60_000,          // لا إعادة تحميل لمدة 60 ثانية
+      refetchOnWindowFocus: false, // لا إعادة تحميل عند تبديل النوافذ
     }
   });
 
@@ -296,13 +298,13 @@ export default function ReportDetails() {
     fetchTaqeemSession();
   }, [id]);
 
-  // جلب نقاط تطابق datasystem لهذا التقرير
+  // جلب نقاط تطابق datasystem لهذا التقرير (فلتر سريع بدلاً من جلب الكل)
   useEffect(() => {
     if (!id) return;
-    fetch(`${apiBase}/api/datasystem`)
+    fetch(`${apiBase}/api/datasystem?linkedReportId=${id}`)
       .then(r => r.json())
       .then((list: any[]) => {
-        const match = list.find((ds: any) => ds.linkedReportId === id);
+        const match = list[0];
         if (match?.fieldScores) setDsFieldScores(match.fieldScores);
       })
       .catch(() => {});
