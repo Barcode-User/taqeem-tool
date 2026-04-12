@@ -155,6 +155,20 @@ const statusMap: Record<string, { label: string, color: string, next: string | n
   submitted: { label: "تم الرفع", color: "bg-green-100 text-green-800 border-green-200", next: null, action: "" },
 };
 
+function ScoreBadge({ score }: { score?: number }) {
+  if (score == null) return null;
+  const cls =
+    score >= 80 ? "text-green-700 bg-green-50 border-green-200" :
+    score >= 60 ? "text-yellow-700 bg-yellow-50 border-yellow-200" :
+    score >= 40 ? "text-orange-700 bg-orange-50 border-orange-200" :
+    "text-red-700 bg-red-50 border-red-200";
+  return (
+    <span className={`text-[10px] font-bold border rounded px-1 leading-4 ${cls}`}>
+      {score}%
+    </span>
+  );
+}
+
 function CopyField({ label, value }: { label: string; value: string | number | null | undefined }) {
   const [copied, setCopied] = useState(false);
   const text = value != null ? String(value) : "";
@@ -212,6 +226,9 @@ export default function ReportDetails() {
   const [automationLoading, setAutomationLoading] = useState(false);
   const [taqeemSession, setTaqeemSession] = useState<{ status: string; username?: string } | null>(null);
   const apiBase = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
+
+  // datasystem field scores
+  const [dsFieldScores, setDsFieldScores] = useState<Record<string, number> | null>(null);
 
   // PDF upload state
   const [pdfUploading, setPdfUploading] = useState(false);
@@ -277,6 +294,18 @@ export default function ReportDetails() {
   useEffect(() => {
     if (id) fetchAutomationStatus();
     fetchTaqeemSession();
+  }, [id]);
+
+  // جلب نقاط تطابق datasystem لهذا التقرير
+  useEffect(() => {
+    if (!id) return;
+    fetch(`${apiBase}/api/datasystem`)
+      .then(r => r.json())
+      .then((list: any[]) => {
+        const match = list.find((ds: any) => ds.linkedReportId === id);
+        if (match?.fieldScores) setDsFieldScores(match.fieldScores);
+      })
+      .catch(() => {});
   }, [id]);
 
   const startAutomation = async () => {
@@ -837,31 +866,31 @@ export default function ReportDetails() {
               </CardHeader>
               <CardContent className="pt-6 grid grid-cols-2 gap-4">
                 <FormField control={form.control} name="reportNumber" render={({ field }) => (
-                  <FormItem><FormLabel>رقم التقرير</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">رقم التقرير<ScoreBadge score={dsFieldScores?.reportNumber} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="requestNumber" render={({ field }) => (
-                  <FormItem><FormLabel>رقم الطلب</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">رقم الطلب<ScoreBadge score={dsFieldScores?.requestNumber} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="reportDate" render={({ field }) => (
-                  <FormItem><FormLabel>تاريخ التقرير</FormLabel><FormControl><Input type="date" {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">تاريخ التقرير<ScoreBadge score={dsFieldScores?.reportDate} /></FormLabel><FormControl><Input type="date" {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="valuationDate" render={({ field }) => (
-                  <FormItem><FormLabel>تاريخ التقييم</FormLabel><FormControl><Input type="date" {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">تاريخ التقييم<ScoreBadge score={dsFieldScores?.valuationDate} /></FormLabel><FormControl><Input type="date" {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="inspectionDate" render={({ field }) => (
-                  <FormItem><FormLabel>تاريخ المعاينة</FormLabel><FormControl><Input type="date" {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">تاريخ المعاينة<ScoreBadge score={dsFieldScores?.inspectionDate} /></FormLabel><FormControl><Input type="date" {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="reportType" render={({ field }) => (
-                  <FormItem><FormLabel>نوع التقرير</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">نوع التقرير<ScoreBadge score={dsFieldScores?.reportType} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="valuationPurpose" render={({ field }) => (
-                  <FormItem><FormLabel>غرض التقييم</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">غرض التقييم<ScoreBadge score={dsFieldScores?.valuationPurpose} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="valuationHypothesis" render={({ field }) => (
-                  <FormItem><FormLabel>فرضية القيمة</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">فرضية القيمة<ScoreBadge score={dsFieldScores?.valuationHypothesis} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="valuationBasis" render={({ field }) => (
-                  <FormItem><FormLabel>أساس القيمة</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">أساس القيمة<ScoreBadge score={dsFieldScores?.valuationBasis} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
               </CardContent>
             </Card>
@@ -876,28 +905,28 @@ export default function ReportDetails() {
               </CardHeader>
               <CardContent className="pt-6 grid grid-cols-2 gap-4">
                 <FormField control={form.control} name="region" render={({ field }) => (
-                  <FormItem><FormLabel>المنطقة</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">المنطقة<ScoreBadge score={dsFieldScores?.region} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="city" render={({ field }) => (
-                  <FormItem><FormLabel>المدينة</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">المدينة<ScoreBadge score={dsFieldScores?.city} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="district" render={({ field }) => (
-                  <FormItem><FormLabel>الحي</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">الحي<ScoreBadge score={dsFieldScores?.district} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="street" render={({ field }) => (
-                  <FormItem><FormLabel>الشارع</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">الشارع<ScoreBadge score={dsFieldScores?.street} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="blockNumber" render={({ field }) => (
-                  <FormItem><FormLabel>رقم البلك</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">رقم البلك<ScoreBadge score={dsFieldScores?.blockNumber} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="plotNumber" render={({ field }) => (
-                  <FormItem><FormLabel>رقم القطعة</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">رقم القطعة<ScoreBadge score={dsFieldScores?.plotNumber} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="planNumber" render={({ field }) => (
-                  <FormItem><FormLabel>رقم المخطط</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">رقم المخطط<ScoreBadge score={dsFieldScores?.planNumber} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="coordinates" render={({ field }) => (
-                  <FormItem><FormLabel>الإحداثيات</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} dir="ltr" className="text-left" placeholder="24.7136, 46.6753" /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">الإحداثيات<ScoreBadge score={dsFieldScores?.coordinates} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} dir="ltr" className="text-left" placeholder="24.7136, 46.6753" /></FormControl></FormItem>
                 )} />
               </CardContent>
             </Card>
@@ -912,67 +941,67 @@ export default function ReportDetails() {
               </CardHeader>
               <CardContent className="pt-6 grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
                 <FormField control={form.control} name="propertyType" render={({ field }) => (
-                  <FormItem><FormLabel>نوع العقار</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">نوع العقار<ScoreBadge score={dsFieldScores?.propertyType} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="propertySubType" render={({ field }) => (
-                  <FormItem><FormLabel>النوع الفرعي</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">النوع الفرعي<ScoreBadge score={dsFieldScores?.propertySubType} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="propertyUse" render={({ field }) => (
-                  <FormItem><FormLabel>الاستخدام</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">الاستخدام<ScoreBadge score={dsFieldScores?.propertyUse} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="deedNumber" render={({ field }) => (
-                  <FormItem><FormLabel>رقم الصك</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">رقم الصك<ScoreBadge score={dsFieldScores?.deedNumber} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="deedDate" render={({ field }) => (
-                  <FormItem><FormLabel>تاريخ الصك</FormLabel><FormControl><Input type="date" {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">تاريخ الصك<ScoreBadge score={dsFieldScores?.deedDate} /></FormLabel><FormControl><Input type="date" {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="ownerName" render={({ field }) => (
-                  <FormItem className="md:col-span-2"><FormLabel>اسم المالك</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem className="md:col-span-2"><FormLabel className="flex items-center gap-1.5">اسم المالك<ScoreBadge score={dsFieldScores?.ownerName} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="ownershipType" render={({ field }) => (
-                  <FormItem><FormLabel>نوع الملكية</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">نوع الملكية<ScoreBadge score={dsFieldScores?.ownershipType} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <div className="col-span-full my-2"><Separator /></div>
                 
                 <FormField control={form.control} name="buildingPermitNumber" render={({ field }) => (
-                  <FormItem><FormLabel>رقم رخصة البناء</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">رقم رخصة البناء<ScoreBadge score={dsFieldScores?.buildingPermitNumber} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="buildingStatus" render={({ field }) => (
-                  <FormItem><FormLabel>حالة البناء</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">حالة البناء<ScoreBadge score={dsFieldScores?.buildingStatus} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="buildingAge" render={({ field }) => (
-                  <FormItem><FormLabel>عمر البناء</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">عمر البناء<ScoreBadge score={dsFieldScores?.buildingAge} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="floorsCount" render={({ field }) => (
-                  <FormItem><FormLabel>عدد الأدوار الفعلية</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">عدد الأدوار الفعلية<ScoreBadge score={dsFieldScores?.floorsCount} /></FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="permittedFloorsCount" render={({ field }) => (
-                  <FormItem><FormLabel>عدد الأدوار المصرح به</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">عدد الأدوار المصرح به<ScoreBadge score={dsFieldScores?.permittedFloorsCount} /></FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="permittedBuildingRatio" render={({ field }) => (
-                  <FormItem><FormLabel>نسبة البناء المصرح بها %</FormLabel><FormControl><Input type="number" min="0" max="100" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">نسبة البناء المصرح بها %<ScoreBadge score={dsFieldScores?.permittedBuildingRatio} /></FormLabel><FormControl><Input type="number" min="0" max="100" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="streetWidth" render={({ field }) => (
-                  <FormItem><FormLabel>عرض الشارع (م)</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">عرض الشارع (م)<ScoreBadge score={dsFieldScores?.streetWidth} /></FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="streetFacades" render={({ field }) => (
-                  <FormItem><FormLabel>الواجهات المطلة على الشارع</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} placeholder="مثال: واجهة واحدة، واجهتان" /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">الواجهات المطلة على الشارع<ScoreBadge score={dsFieldScores?.streetFacades} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} placeholder="مثال: واجهة واحدة، واجهتان" /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="utilities" render={({ field }) => (
-                  <FormItem><FormLabel>المرافق المتاحة</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} placeholder="كهرباء، ماء، صرف صحي" /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">المرافق المتاحة<ScoreBadge score={dsFieldScores?.utilities} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} placeholder="كهرباء، ماء، صرف صحي" /></FormControl></FormItem>
                 )} />
                 
                 <FormField control={form.control} name="landArea" render={({ field }) => (
-                  <FormItem><FormLabel>مساحة الأرض (م²)</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">مساحة الأرض (م²)<ScoreBadge score={dsFieldScores?.landArea} /></FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="buildingArea" render={({ field }) => (
-                  <FormItem><FormLabel>مساحة البناء (م²)</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">مساحة البناء (م²)<ScoreBadge score={dsFieldScores?.buildingArea} /></FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="basementArea" render={({ field }) => (
-                  <FormItem><FormLabel>مساحة القبو (م²)</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">مساحة القبو (م²)<ScoreBadge score={dsFieldScores?.basementArea} /></FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="annexArea" render={({ field }) => (
-                  <FormItem><FormLabel>مساحة الملحق (م²)</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">مساحة الملحق (م²)<ScoreBadge score={dsFieldScores?.annexArea} /></FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
               </CardContent>
             </Card>
@@ -987,27 +1016,27 @@ export default function ReportDetails() {
               </CardHeader>
               <CardContent className="pt-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
                 <FormField control={form.control} name="valuationMethod" render={({ field }) => (
-                  <FormItem className="sm:col-span-2 md:col-span-3"><FormLabel>أسلوب وطريقة التقييم المتبعة</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} className="font-bold" /></FormControl></FormItem>
+                  <FormItem className="sm:col-span-2 md:col-span-3"><FormLabel className="flex items-center gap-1.5">أسلوب وطريقة التقييم المتبعة<ScoreBadge score={dsFieldScores?.valuationMethod} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} className="font-bold" /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="marketValue" render={({ field }) => (
-                  <FormItem><FormLabel>قيمة السوق</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">قيمة السوق<ScoreBadge score={dsFieldScores?.marketValue} /></FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="incomeValue" render={({ field }) => (
-                  <FormItem><FormLabel>قيمة الدخل</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">قيمة الدخل<ScoreBadge score={dsFieldScores?.incomeValue} /></FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="costValue" render={({ field }) => (
-                  <FormItem><FormLabel>قيمة التكلفة</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">قيمة التكلفة<ScoreBadge score={dsFieldScores?.costValue} /></FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 
                 <FormField control={form.control} name="finalValue" render={({ field }) => (
                   <FormItem className="md:col-span-2 bg-primary/5 p-4 rounded-lg border border-primary/20">
-                    <FormLabel className="text-primary font-bold text-lg">القيمة النهائية المعتمدة</FormLabel>
+                    <FormLabel className="flex items-center gap-1.5 text-primary font-bold text-lg">القيمة النهائية المعتمدة<ScoreBadge score={dsFieldScores?.finalValue} /></FormLabel>
                     <FormControl><Input type="number" {...field} value={field.value ?? ""} disabled={!isEditable} className="text-xl font-bold h-12" /></FormControl>
                   </FormItem>
                 )} />
                 <FormField control={form.control} name="pricePerMeter" render={({ field }) => (
                   <FormItem className="p-4">
-                    <FormLabel>سعر المتر</FormLabel>
+                    <FormLabel className="flex items-center gap-1.5">سعر المتر<ScoreBadge score={dsFieldScores?.pricePerMeter} /></FormLabel>
                     <FormControl><Input type="number" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl>
                   </FormItem>
                 )} />
@@ -1024,22 +1053,22 @@ export default function ReportDetails() {
               </CardHeader>
               <CardContent className="pt-6 grid grid-cols-2 gap-4">
                 <FormField control={form.control} name="clientName" render={({ field }) => (
-                  <FormItem className="col-span-2"><FormLabel>اسم العميل</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem className="col-span-2"><FormLabel className="flex items-center gap-1.5">اسم العميل<ScoreBadge score={dsFieldScores?.clientName} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="clientEmail" render={({ field }) => (
-                  <FormItem><FormLabel>البريد الإلكتروني للعميل</FormLabel><FormControl><Input type="email" {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">البريد الإلكتروني للعميل<ScoreBadge score={dsFieldScores?.clientEmail} /></FormLabel><FormControl><Input type="email" {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="clientPhone" render={({ field }) => (
-                  <FormItem><FormLabel>رقم هاتف العميل</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem><FormLabel className="flex items-center gap-1.5">رقم هاتف العميل<ScoreBadge score={dsFieldScores?.clientPhone} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="intendedUser" render={({ field }) => (
-                  <FormItem className="col-span-2"><FormLabel>المستخدم المعتمد</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem className="col-span-2"><FormLabel className="flex items-center gap-1.5">المستخدم المعتمد<ScoreBadge score={dsFieldScores?.intendedUser} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="companyName" render={({ field }) => (
-                  <FormItem className="col-span-2"><FormLabel>اسم الشركة (إن وجد)</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem className="col-span-2"><FormLabel className="flex items-center gap-1.5">اسم الشركة (إن وجد)<ScoreBadge score={dsFieldScores?.companyName} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="commercialRegNumber" render={({ field }) => (
-                  <FormItem className="col-span-2"><FormLabel>رقم السجل التجاري</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                  <FormItem className="col-span-2"><FormLabel className="flex items-center gap-1.5">رقم السجل التجاري<ScoreBadge score={dsFieldScores?.commercialRegNumber} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
               </CardContent>
             </Card>
@@ -1058,22 +1087,22 @@ export default function ReportDetails() {
                   <p className="text-sm font-semibold text-muted-foreground border-b pb-2">المقيّم الأول</p>
                   <div className="grid grid-cols-2 gap-4">
                     <FormField control={form.control} name="valuerName" render={({ field }) => (
-                      <FormItem className="col-span-2"><FormLabel>اسم المقيّم</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                      <FormItem className="col-span-2"><FormLabel className="flex items-center gap-1.5">اسم المقيّم<ScoreBadge score={dsFieldScores?.valuerName} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                     )} />
                     <FormField control={form.control} name="valuerPercentage" render={({ field }) => (
-                      <FormItem><FormLabel>نسبة المشاركة %</FormLabel><FormControl><Input type="number" min="0" max="100" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
+                      <FormItem><FormLabel className="flex items-center gap-1.5">نسبة المشاركة %<ScoreBadge score={dsFieldScores?.valuerPercentage} /></FormLabel><FormControl><Input type="number" min="0" max="100" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
                     )} />
                     <FormField control={form.control} name="licenseNumber" render={({ field }) => (
-                      <FormItem><FormLabel>رقم الترخيص</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                      <FormItem><FormLabel className="flex items-center gap-1.5">رقم الترخيص<ScoreBadge score={dsFieldScores?.licenseNumber} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                     )} />
                     <FormField control={form.control} name="licenseDate" render={({ field }) => (
-                      <FormItem><FormLabel>تاريخ الترخيص</FormLabel><FormControl><Input type="date" {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                      <FormItem><FormLabel className="flex items-center gap-1.5">تاريخ الترخيص<ScoreBadge score={dsFieldScores?.licenseDate} /></FormLabel><FormControl><Input type="date" {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                     )} />
                     <FormField control={form.control} name="membershipNumber" render={({ field }) => (
-                      <FormItem><FormLabel>رقم العضوية</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                      <FormItem><FormLabel className="flex items-center gap-1.5">رقم العضوية<ScoreBadge score={dsFieldScores?.membershipNumber} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                     )} />
                     <FormField control={form.control} name="membershipType" render={({ field }) => (
-                      <FormItem><FormLabel>نوع العضوية</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                      <FormItem><FormLabel className="flex items-center gap-1.5">نوع العضوية<ScoreBadge score={dsFieldScores?.membershipType} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                     )} />
                   </div>
                 </div>
@@ -1083,16 +1112,16 @@ export default function ReportDetails() {
                   <p className="text-sm font-semibold text-muted-foreground border-b pb-2">المقيّم الثاني (اختياري)</p>
                   <div className="grid grid-cols-2 gap-4">
                     <FormField control={form.control} name="secondValuerName" render={({ field }) => (
-                      <FormItem className="col-span-2"><FormLabel>اسم المقيّم الثاني</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} placeholder="إن وجد..." /></FormControl></FormItem>
+                      <FormItem className="col-span-2"><FormLabel className="flex items-center gap-1.5">اسم المقيّم الثاني<ScoreBadge score={dsFieldScores?.secondValuerName} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} placeholder="إن وجد..." /></FormControl></FormItem>
                     )} />
                     <FormField control={form.control} name="secondValuerPercentage" render={({ field }) => (
-                      <FormItem><FormLabel>نسبة المشاركة %</FormLabel><FormControl><Input type="number" min="0" max="100" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
+                      <FormItem><FormLabel className="flex items-center gap-1.5">نسبة المشاركة %<ScoreBadge score={dsFieldScores?.secondValuerPercentage} /></FormLabel><FormControl><Input type="number" min="0" max="100" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
                     )} />
                     <FormField control={form.control} name="secondValuerLicenseNumber" render={({ field }) => (
-                      <FormItem><FormLabel>رقم الترخيص</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                      <FormItem><FormLabel className="flex items-center gap-1.5">رقم الترخيص<ScoreBadge score={dsFieldScores?.secondValuerLicenseNumber} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                     )} />
                     <FormField control={form.control} name="secondValuerMembershipNumber" render={({ field }) => (
-                      <FormItem className="col-span-2"><FormLabel>رقم العضوية</FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                      <FormItem className="col-span-2"><FormLabel className="flex items-center gap-1.5">رقم العضوية<ScoreBadge score={dsFieldScores?.secondValuerMembershipNumber} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
                     )} />
                   </div>
                 </div>
