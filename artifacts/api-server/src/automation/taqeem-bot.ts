@@ -304,14 +304,40 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     addLog(session, `▶ الصفحة 3 [ID: ${taqeemReportId}]: السمات والبيانات الإضافية`);
     addLog(session, "═══════════════════════════════════════════════");
 
+    // ── تحقق أننا فعلاً على صفحة 3 قبل البدء ──────────────────────────────
+    const p3CurrentUrl = page.url();
+    if (!p3CurrentUrl.includes("/report/attribute/create/")) {
+      addLog(session, `⚠️ URL غير متوقع قبل تعبئة الصفحة 3: ${p3CurrentUrl}`);
+      addLog(session, "↩️ محاولة الانتقال المباشر لصفحة 3...");
+      await page.goto(expectedPage3, { waitUntil: "domcontentloaded", timeout: 30000 });
+      await page.waitForTimeout(2000);
+    }
+    addLog(session, `✅ URL الصفحة 3 مؤكد: ${page.url()}`);
+
     const elsPage3 = await scanElements(page);
     await saveDebug(reportId, "page3", elsPage3);
     await screenshot(page, `p3_before_${reportId}`);
     addLog(session, `📋 عدد حقول الصفحة 3: ${elsPage3.length}`);
 
-    await fillAttributePage(session, report, elsPage3);
+    // ── تعبئة الصفحة 3 مع حماية من الانتقال المفاجئ ────────────────────
+    const urlAtStartP3 = page.url();
+    try {
+      await fillAttributePage(session, report, elsPage3);
+    } catch (fillErr: any) {
+      addLog(session, `⚠️ خطأ أثناء تعبئة الصفحة 3 (نتابع): ${fillErr.message}`);
+    }
+
+    // تحقق من أن الصفحة لم تنتقل أثناء التعبئة
+    const urlAfterFillP3 = page.url();
+    if (urlAfterFillP3 !== urlAtStartP3 && !urlAfterFillP3.includes("/report/attribute/create/")) {
+      addLog(session, `⚠️ تغيّر URL أثناء تعبئة الصفحة 3: ${urlAfterFillP3}`);
+      addLog(session, "↩️ إعادة الانتقال لصفحة 3...");
+      await page.goto(expectedPage3, { waitUntil: "domcontentloaded", timeout: 30000 });
+      await page.waitForTimeout(1500);
+    }
+
     // انتظر قصير لتستقر Angular form validation قبل الحفظ
-    await page.waitForTimeout(600);
+    await page.waitForTimeout(800);
     await screenshot(page, `p3_after_${reportId}`);
 
     // ── ضغط زر "continue" — صفحة المراجعة ───────────────────────────────
@@ -1288,32 +1314,83 @@ async function fillApproachFields(
     return;
   }
 
-  // ── الاستراتيجية 2: افحص mat-selects التي تحتوي على خيارات الحالة ─────────
+  // ── الاستراتيجية 2: قراءة خيارات mat-select من DOM بدون نقر (سريع) ─────────
   addLog(session, "ℹ️ الاستراتيجية 1 لم تجد عناصر الأساليب — أجرب الاستراتيجية 2");
-  const selects = els.filter(e => e.tag === "MAT-SELECT" || e.tag === "SELECT");
 
-  // ابحث عن mat-selects التي تحتوي على "مستخدم" أو "غير مستخدم" كخيارات
+  // قراءة خيارات جميع mat-selects من DOM في استدعاء واحد بدون نقر
+  const allSelectData: Array<{ fcn: string; name: string; label: string; options: string[] }> =
+    await page.evaluate(() => {
+      const result: Array<{ fcn: string; name: string; label: string; options: string[] }> = [];
+      document.querySelectorAll("mat-select").forEach((el: any) => {
+        // خيارات مباشرة كـ children في DOM
+        const opts = Array.from(el.querySelectorAll("mat-option"))
+          .map((o: any) => (o.textContent ?? "").trim())
+          .filter((s: string) => s.length > 0);
+
+        const getLabel = (node: Element | null): string => {
+          let p = node?.parentElement;
+          for (let i = 0; i < 10 && p; i++) {
+            if (p.tagName === "MAT-FORM-FIELD" || p.classList.contains("mat-form-field")) {
+              return p.querySelector("mat-label, label")?.textContent?.trim() ?? "";
+            }
+            p = p.parentElement;
+          }
+          return "";
+        };
+
+        result.push({
+          fcn:     el.getAttribute("formcontrolname") ?? "",
+          name:    el.getAttribute("name") ?? "",
+          label:   getLabel(el) || el.getAttribute("aria-label") || "",
+          options: opts,
+        });
+      });
+      return result;
+    });
+
+  // فرز: فقط selects تحتوي على خيارات "مستخدم..."
   const approachSelects: Array<{ el: any; options: string[] }> = [];
-  for (const sel of selects) {
-    const sel2 = buildSelector(sel);
-    if (!sel2) continue;
-    try {
-      // افتح القائمة واجمع الخيارات
-      await page.click(sel2).catch(() => {});
-      await page.waitForSelector("mat-option, .mat-mdc-option", { timeout: 1000 }).catch(() => {});
-      const opts: string[] = await page.evaluate(() =>
-        Array.from(document.querySelectorAll("mat-option, .mat-mdc-option"))
-          .map(o => o.textContent?.trim() ?? ""),
-      );
-      await page.keyboard.press("Escape");
-      await page.waitForTimeout(100);
+  for (const sd of allSelectData) {
+    const isApproach = sd.options.some(o => /مستخدم أساسي|مستخدم مساعد|غير مستخدم/i.test(o));
+    if (!isApproach) continue;
+    // طابق مع el من els
+    const matchedEl = els.find(e =>
+      (sd.fcn && e.formControlName === sd.fcn) ||
+      (sd.name && e.name === sd.name) ||
+      (sd.label && e.labelText === sd.label),
+    );
+    if (matchedEl) {
+      approachSelects.push({ el: matchedEl, options: sd.options });
+      addLog(session, `🔍 وجد select أسلوب: "${sd.label || sd.fcn}" — خيارات: ${sd.options.join(" | ")}`);
+    }
+  }
 
-      const isApproachSel = opts.some(o => /مستخدم أساسي|مستخدم مساعد|غير مستخدم/i.test(o));
-      if (isApproachSel) {
-        approachSelects.push({ el: sel, options: opts });
-        addLog(session, `🔍 وجد select أسلوب: "${sel.labelText || sel.formControlName || sel.name}" — خيارات: ${opts.join(" | ")}`);
-      }
-    } catch { await page.keyboard.press("Escape").catch(() => {}); }
+  // إذا لم تُعثر عليها في DOM (قد تكون lazy-loaded) → افتح أول select مشبوه فقط
+  if (approachSelects.length === 0) {
+    addLog(session, "ℹ️ الخيارات غير موجودة في DOM — أجرب فتح الـ selects المرشحة فقط");
+    const candidateSelects = els.filter(e =>
+      (e.tag === "MAT-SELECT" || e.tag === "SELECT") &&
+      /approach|أسلوب|method|استخدام/i.test(`${e.formControlName}${e.name}${e.labelText}`),
+    );
+    for (const sel of candidateSelects.slice(0, 5)) {
+      const sel2 = buildSelector(sel);
+      if (!sel2) continue;
+      try {
+        await page.click(sel2).catch(() => {});
+        await page.waitForSelector("mat-option, .mat-mdc-option", { timeout: 500 }).catch(() => {});
+        const opts: string[] = await page.evaluate(() =>
+          Array.from(document.querySelectorAll("mat-option, .mat-mdc-option"))
+            .map((o: any) => (o.textContent ?? "").trim()),
+        );
+        await page.keyboard.press("Escape");
+        await page.waitForTimeout(80);
+        const isApproach = opts.some(o => /مستخدم أساسي|مستخدم مساعد|غير مستخدم/i.test(o));
+        if (isApproach) {
+          approachSelects.push({ el: sel, options: opts });
+          addLog(session, `🔍 (lazy) وجد select أسلوب: "${sel.labelText || sel.formControlName}" — ${opts.join(" | ")}`);
+        }
+      } catch { await page.keyboard.press("Escape").catch(() => {}); }
+    }
   }
 
   if (approachSelects.length > 0) {
