@@ -619,12 +619,12 @@ async function fillAngular(
   const val = String(value).trim();
   const { page } = session;
   try {
-    await page.waitForSelector(selector, { timeout: 2000 });
+    await page.waitForSelector(selector, { timeout: 300 });
 
     // طريقة 1: page.click + page.fill — سريع وآمن مع Angular zone.js
     try {
-      await page.click(selector);
-      await page.fill(selector, val);
+      await page.click(selector, { timeout: 500 });
+      await page.fill(selector, val, { timeout: 500 });
       await page.evaluate((sel: string) => {
         const el = document.querySelector(sel) as HTMLInputElement | null;
         if (!el) return;
@@ -666,12 +666,12 @@ async function fillDate(
   }
   const { page } = session;
   try {
-    await page.waitForSelector(selector, { timeout: 2000 });
+    await page.waitForSelector(selector, { timeout: 300 });
 
     // طريقة 1: page.click + page.fill — سريع وآمن مع Angular zone.js
     try {
-      await page.click(selector);
-      await page.fill(selector, formatted);
+      await page.click(selector, { timeout: 500 });
+      await page.fill(selector, formatted, { timeout: 500 });
       await page.evaluate((args: { sel: string; v: string }) => {
         const el = document.querySelector(args.sel) as HTMLInputElement | null;
         if (!el) return;
@@ -718,7 +718,7 @@ async function selectAngular(
   // ── محاولة 1: native HTML select ──────────────────────────────────────────
   if (!isMat) {
     try {
-      await page.waitForSelector(selector, { timeout: 2000 });
+      await page.waitForSelector(selector, { timeout: 300 });
       // جرّب بالنص أولاً ثم بالقيمة
       const chosen = await page.selectOption(selector, { label: value }).catch(() =>
         page.selectOption(selector, { value }).catch(() => []),
@@ -735,7 +735,7 @@ async function selectAngular(
 
   // ── محاولة 2: Angular Material mat-select ─────────────────────────────────
   try {
-    await page.waitForSelector(selector, { timeout: 2000 });
+    await page.waitForSelector(selector, { timeout: 300 });
     // افتح القائمة بالنقر
     await page.click(selector);
     // انتظر ظهور panel الخيارات
@@ -1122,6 +1122,94 @@ async function selectNativeByName(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // الصفحة 2: /report/asset/create/{id}
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: تعبئة أسلوب تقييم واحد (status select + value input)
+// القاعدة: إذا كانت القيمة > 0 → "مستخدم أساسي" + تعبئة القيمة
+//           إذا كانت القيمة = 0 أو null → "غير مستخدم"
+// ─────────────────────────────────────────────────────────────────────────────
+async function fillOneApproach(
+  session: AutomationSession,
+  els: any[],
+  statusNames: string[],         // أسماء محتملة لـ select الحالة
+  statusLabelRx: RegExp,         // regex للبحث بالـ label إن لم يوجد name
+  valueNames: string[],          // أسماء محتملة لـ input القيمة
+  valueLabelRx: RegExp,
+  approachValue: number | null | undefined,
+  approachLabel: string,
+): Promise<void> {
+  const findEl2 = (names: string[], rx: RegExp) => {
+    for (const n of names) {
+      const el = els.find(e => e.name === n || e.formControlName === n);
+      if (el) return el;
+    }
+    return findEl(els, rx);
+  };
+
+  const statusEl = findEl2(statusNames, statusLabelRx);
+  const valueEl  = findEl2(valueNames,  valueLabelRx);
+
+  const hasValue = approachValue != null && Number(approachValue) !== 0;
+  const usage    = hasValue ? "مستخدم أساسي" : "غير مستخدم";
+
+  if (statusEl) {
+    const sel = buildSelector(statusEl);
+    if (statusEl.tag === "SELECT" || statusEl.isMat) {
+      await selectAngular(session, sel, usage, `${approachLabel} (حالة)`, statusEl.isMat);
+    }
+  } else {
+    addLog(session, `⚠️ لم يُعثر على select حالة ${approachLabel}`);
+  }
+
+  if (hasValue && valueEl) {
+    await fillAngular(session, buildSelector(valueEl), approachValue, `${approachLabel} (قيمة)`);
+  } else if (hasValue && !valueEl) {
+    addLog(session, `⚠️ لم يُعثر على input قيمة ${approachLabel}`);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// تعبئة أساليب التقييم الثلاثة (السوق / الدخل / التكلفة)
+// ─────────────────────────────────────────────────────────────────────────────
+async function fillApproachFields(
+  session: AutomationSession,
+  els: any[],
+  report: any,
+): Promise<void> {
+  // أسلوب السوق
+  await fillOneApproach(
+    session, els,
+    ["market_approach","market_approach_id","marketApproach","market_approach_type","market_approach_usage","market_approach_type_id"],
+    /أسلوب.*سوق.*(?:نوع|حالة|استخدام)|(?:نوع|حالة).*سوق/i,
+    ["market_approach_value","market_value","marketValue","market_approach_amount","comparable_value"],
+    /(?:قيمة|مبلغ).*(?:سوق|مقارن)|(?:سوق|مقارن).*(?:قيمة|مبلغ)/i,
+    report.marketValue,
+    "أسلوب السوق",
+  );
+
+  // أسلوب الدخل
+  await fillOneApproach(
+    session, els,
+    ["income_approach","income_approach_id","incomeApproach","income_approach_type","income_approach_usage","income_approach_type_id"],
+    /أسلوب.*دخل.*(?:نوع|حالة|استخدام)|(?:نوع|حالة).*دخل/i,
+    ["income_approach_value","income_value","incomeValue","income_approach_amount"],
+    /(?:قيمة|مبلغ).*دخل|دخل.*(?:قيمة|مبلغ)/i,
+    report.incomeValue,
+    "أسلوب الدخل",
+  );
+
+  // أسلوب التكلفة
+  await fillOneApproach(
+    session, els,
+    ["cost_approach","cost_approach_id","costApproach","cost_approach_type","cost_approach_usage","cost_approach_type_id"],
+    /أسلوب.*تكلفة.*(?:نوع|حالة|استخدام)|(?:نوع|حالة).*تكلفة/i,
+    ["cost_approach_value","cost_value","costValue","cost_approach_amount"],
+    /(?:قيمة|مبلغ).*تكلفة|تكلفة.*(?:قيمة|مبلغ)/i,
+    report.costValue,
+    "أسلوب التكلفة",
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // بيانات الأصل والموقع
 // (أسماء الحقول تُكتشف من scanElements — نستخدم name إن عُرف أو labelText كاحتياط)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1164,14 +1252,9 @@ async function fillAssetPage(
   if (inspEl) await fillDate(session, buildSelector(inspEl), report.inspectionDate, "تاريخ المعاينة");
   else addLog(session, "⚠️ لم يُعثر على «تاريخ المعاينة»");
 
-  // ── أسلوب التقييم (checkbox أو select) ──────────────────────────────────
-  const methodEl = byName("valuation_method_id") ??
-    byLabel(/method|approach|أسلوب.*تقييم|طريقة/i);
-  if (methodEl && (methodEl.tag === "SELECT" || methodEl.tag === "MAT-SELECT")) {
-    await (methodEl.isMat
-      ? selectAngular(session, buildSelector(methodEl), report.valuationMethod, "أسلوب التقييم", true)
-      : selectNativeByName(session, methodEl.name || "", report.valuationMethod, "أسلوب التقييم"));
-  }
+  // ── أساليب التقييم (أسلوب السوق / الدخل / التكلفة) ──────────────────────
+  // كل أسلوب له: select للحالة (مستخدم أساسي / غير مستخدم) + input للقيمة
+  await fillApproachFields(session, els, report);
 
   // ── الدولة (ثابت: المملكة العربية السعودية) ──────────────────────────────
   const countryEl = byName("country_id") ?? byLabel(/country|دولة|بلد/i);
@@ -1219,23 +1302,6 @@ async function fillAssetPage(
     await fillAngular(session, buildSelector(finalValEl), report.finalValue, "الرأي النهائي في القيمة");
   } else {
     addLog(session, "⚠️ لم يُعثر على حقل «الرأي النهائي في القيمة»");
-  }
-
-  // ── أسلوب السوق (قيمة نصية أو عددية) ───────────────────────────────────
-  const marketEl =
-    byName("market_approach")       ?? byName("market_approach_value") ??
-    byName("market_value")          ?? byName("marketapproach") ??
-    byName("market_approach_amount") ?? byName("comparable_value") ??
-    byLabel(/market.?approach|market.?value|أسلوب.*سوق|قيمة.*سوق|سوق.*مقارن/i);
-  if (marketEl) {
-    const marketVal = report.marketValue ?? report.finalValue;
-    if (marketEl.tag === "SELECT" || marketEl.isMat) {
-      await selectAngular(session, buildSelector(marketEl), String(marketVal ?? ""), "أسلوب السوق", marketEl.isMat);
-    } else {
-      await fillAngular(session, buildSelector(marketEl), marketVal, "أسلوب السوق");
-    }
-  } else {
-    addLog(session, "⚠️ لم يُعثر على حقل «أسلوب السوق»");
   }
 
   // ── الإحداثيات (خط العرض / خط الطول) ───────────────────────────────────
