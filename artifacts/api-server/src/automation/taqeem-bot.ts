@@ -551,6 +551,49 @@ async function scanElements(page: Page): Promise<any[]> {
       });
     });
 
+    // 3. Angular Material: mat-checkbox
+    document.querySelectorAll("mat-checkbox").forEach((el: any) => {
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 && rect.height === 0) return;
+      const input = el.querySelector("input[type='checkbox']") as HTMLInputElement | null;
+      result.push({
+        tag: "INPUT",
+        type: "checkbox",
+        name: el.getAttribute("name") ?? input?.getAttribute("name") ?? "",
+        id: el.id ?? input?.id ?? "",
+        placeholder: "",
+        formControlName: el.getAttribute("formcontrolname") ?? "",
+        ariaLabel: el.getAttribute("aria-label") ?? "",
+        value: input?.checked ? "true" : "false",
+        labelText: el.textContent?.trim().split("\n")[0] ?? getLabelText(el),
+        isMat: false,
+        isMatCheckbox: true,
+        matCheckboxEl: true,
+        y: Math.round(rect.y),
+      });
+    });
+
+    // 4. Angular Material: mat-radio-button
+    document.querySelectorAll("mat-radio-button, mat-radio-group").forEach((el: any) => {
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 && rect.height === 0) return;
+      const input = el.querySelector("input[type='radio']") as HTMLInputElement | null;
+      result.push({
+        tag: "INPUT",
+        type: "radio",
+        name: el.getAttribute("name") ?? input?.getAttribute("name") ?? "",
+        id: el.id ?? input?.id ?? "",
+        placeholder: "",
+        formControlName: el.getAttribute("formcontrolname") ?? el.parentElement?.getAttribute("formcontrolname") ?? "",
+        ariaLabel: el.getAttribute("aria-label") ?? "",
+        value: el.getAttribute("value") ?? "",
+        labelText: el.textContent?.trim().split("\n")[0] ?? getLabelText(el),
+        isMat: false,
+        isMatRadio: true,
+        y: Math.round(rect.y),
+      });
+    });
+
     return result.sort((a: any, b: any) => a.y - b.y);
   });
 }
@@ -619,12 +662,12 @@ async function fillAngular(
   const val = String(value).trim();
   const { page } = session;
   try {
-    await page.waitForSelector(selector, { timeout: 300 });
+    await page.waitForSelector(selector, { timeout: 800 });
 
     // طريقة 1: page.click + page.fill — سريع وآمن مع Angular zone.js
     try {
-      await page.click(selector, { timeout: 500 });
-      await page.fill(selector, val, { timeout: 500 });
+      await page.click(selector, { timeout: 800 });
+      await page.fill(selector, val, { timeout: 800 });
       await page.evaluate((sel: string) => {
         const el = document.querySelector(sel) as HTMLInputElement | null;
         if (!el) return;
@@ -666,12 +709,12 @@ async function fillDate(
   }
   const { page } = session;
   try {
-    await page.waitForSelector(selector, { timeout: 300 });
+    await page.waitForSelector(selector, { timeout: 800 });
 
     // طريقة 1: page.click + page.fill — سريع وآمن مع Angular zone.js
     try {
-      await page.click(selector, { timeout: 500 });
-      await page.fill(selector, formatted, { timeout: 500 });
+      await page.click(selector, { timeout: 800 });
+      await page.fill(selector, formatted, { timeout: 800 });
       await page.evaluate((args: { sel: string; v: string }) => {
         const el = document.querySelector(args.sel) as HTMLInputElement | null;
         if (!el) return;
@@ -718,7 +761,7 @@ async function selectAngular(
   // ── محاولة 1: native HTML select ──────────────────────────────────────────
   if (!isMat) {
     try {
-      await page.waitForSelector(selector, { timeout: 300 });
+      await page.waitForSelector(selector, { timeout: 800 });
       // جرّب بالنص أولاً ثم بالقيمة
       const chosen = await page.selectOption(selector, { label: value }).catch(() =>
         page.selectOption(selector, { value }).catch(() => []),
@@ -735,7 +778,7 @@ async function selectAngular(
 
   // ── محاولة 2: Angular Material mat-select ─────────────────────────────────
   try {
-    await page.waitForSelector(selector, { timeout: 300 });
+    await page.waitForSelector(selector, { timeout: 800 });
     // افتح القائمة بالنقر
     await page.click(selector);
     // انتظر ظهور panel الخيارات
@@ -1169,44 +1212,168 @@ async function fillOneApproach(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // تعبئة أساليب التقييم الثلاثة (السوق / الدخل / التكلفة)
+// الاستراتيجية:
+//   1. ابحث بالـ formControlName/name في scanElements
+//   2. إن لم يوجد، افحص الـ mat-selects التي تحتوي على خيارات "مستخدم أساسي/غير مستخدم"
+//   3. احتياط: ابحث عن checkboxes بالـ labelText
 // ─────────────────────────────────────────────────────────────────────────────
 async function fillApproachFields(
   session: AutomationSession,
   els: any[],
   report: any,
 ): Promise<void> {
-  // أسلوب السوق
-  await fillOneApproach(
-    session, els,
-    ["market_approach","market_approach_id","marketApproach","market_approach_type","market_approach_usage","market_approach_type_id"],
-    /أسلوب.*سوق.*(?:نوع|حالة|استخدام)|(?:نوع|حالة).*سوق/i,
-    ["market_approach_value","market_value","marketValue","market_approach_amount","comparable_value"],
-    /(?:قيمة|مبلغ).*(?:سوق|مقارن)|(?:سوق|مقارن).*(?:قيمة|مبلغ)/i,
-    report.marketValue,
-    "أسلوب السوق",
-  );
+  const { page } = session;
 
-  // أسلوب الدخل
-  await fillOneApproach(
-    session, els,
-    ["income_approach","income_approach_id","incomeApproach","income_approach_type","income_approach_usage","income_approach_type_id"],
-    /أسلوب.*دخل.*(?:نوع|حالة|استخدام)|(?:نوع|حالة).*دخل/i,
-    ["income_approach_value","income_value","incomeValue","income_approach_amount"],
-    /(?:قيمة|مبلغ).*دخل|دخل.*(?:قيمة|مبلغ)/i,
-    report.incomeValue,
-    "أسلوب الدخل",
-  );
+  // أنواع الأساليب مرتبة بالأولوية (الأعلى قيمة = أساسي)
+  const approaches = [
+    {
+      label:    "أسلوب السوق",
+      value:    Number(report.marketValue)  || 0,
+      statusNames: ["market_approach","market_approach_id","marketApproach","market_approach_type","market_approach_usage","market_approach_type_id","marketApproachStatus"],
+      statusRx: /أسلوب.*سوق.*(?:نوع|حالة|استخدام|status)|(?:نوع|حالة|status).*سوق/i,
+      valueNames: ["market_approach_value","market_value","marketValue","market_approach_amount","comparable_value","marketApproachValue"],
+      valueRx:  /(?:قيمة|مبلغ).*(?:سوق|مقارن)|(?:سوق|مقارن).*(?:قيمة|مبلغ)/i,
+      cbRx:     /أسلوب.*سوق|المقارن|السوق/i,
+    },
+    {
+      label:    "أسلوب الدخل",
+      value:    Number(report.incomeValue)  || 0,
+      statusNames: ["income_approach","income_approach_id","incomeApproach","income_approach_type","income_approach_usage","income_approach_type_id","incomeApproachStatus"],
+      statusRx: /أسلوب.*دخل.*(?:نوع|حالة|استخدام|status)|(?:نوع|حالة|status).*دخل/i,
+      valueNames: ["income_approach_value","income_value","incomeValue","income_approach_amount","incomeApproachValue"],
+      valueRx:  /(?:قيمة|مبلغ).*دخل|دخل.*(?:قيمة|مبلغ)/i,
+      cbRx:     /أسلوب.*دخل|الدخل/i,
+    },
+    {
+      label:    "أسلوب التكلفة",
+      value:    Number(report.costValue)    || 0,
+      statusNames: ["cost_approach","cost_approach_id","costApproach","cost_approach_type","cost_approach_usage","cost_approach_type_id","costApproachStatus"],
+      statusRx: /أسلوب.*تكلفة.*(?:نوع|حالة|استخدام|status)|(?:نوع|حالة|status).*تكلفة/i,
+      valueNames: ["cost_approach_value","cost_value","costValue","cost_approach_amount","costApproachValue"],
+      valueRx:  /(?:قيمة|مبلغ).*تكلفة|تكلفة.*(?:قيمة|مبلغ)/i,
+      cbRx:     /أسلوب.*تكلفة|التكلفة/i,
+    },
+  ];
 
-  // أسلوب التكلفة
-  await fillOneApproach(
-    session, els,
-    ["cost_approach","cost_approach_id","costApproach","cost_approach_type","cost_approach_usage","cost_approach_type_id"],
-    /أسلوب.*تكلفة.*(?:نوع|حالة|استخدام)|(?:نوع|حالة).*تكلفة/i,
-    ["cost_approach_value","cost_value","costValue","cost_approach_amount"],
-    /(?:قيمة|مبلغ).*تكلفة|تكلفة.*(?:قيمة|مبلغ)/i,
-    report.costValue,
-    "أسلوب التكلفة",
-  );
+  // أعلى قيمة = الأساسي
+  const maxVal = Math.max(...approaches.map(a => a.value));
+
+  // ── الاستراتيجية 1: ابحث بـ name/formControlName ──────────────────────────
+  let strategy1Worked = false;
+  const findEl2 = (names: string[], rx: RegExp) => {
+    for (const n of names) {
+      const found = els.find(e => e.name === n || e.formControlName === n);
+      if (found) return found;
+    }
+    return findEl(els, rx);
+  };
+
+  for (const ap of approaches) {
+    const statusEl = findEl2(ap.statusNames, ap.statusRx);
+    const valueEl  = findEl2(ap.valueNames,  ap.valueRx);
+    if (statusEl) {
+      strategy1Worked = true;
+      const hasValue  = ap.value > 0;
+      const isPrimary = ap.value === maxVal && ap.value > 0;
+      const usage     = isPrimary ? "مستخدم أساسي" : (hasValue ? "مستخدم مساعد" : "غير مستخدم");
+      await selectAngular(session, buildSelector(statusEl), usage, `${ap.label} (حالة)`, statusEl.isMat);
+      if (hasValue && valueEl) {
+        await fillAngular(session, buildSelector(valueEl), ap.value, `${ap.label} (قيمة)`);
+      }
+    }
+  }
+
+  if (strategy1Worked) {
+    addLog(session, "✅ أساليب التقييم: اكتملت باستراتيجية 1 (name/formControlName)");
+    return;
+  }
+
+  // ── الاستراتيجية 2: افحص mat-selects التي تحتوي على خيارات الحالة ─────────
+  addLog(session, "ℹ️ الاستراتيجية 1 لم تجد عناصر الأساليب — أجرب الاستراتيجية 2");
+  const selects = els.filter(e => e.tag === "MAT-SELECT" || e.tag === "SELECT");
+
+  // ابحث عن mat-selects التي تحتوي على "مستخدم" أو "غير مستخدم" كخيارات
+  const approachSelects: Array<{ el: any; options: string[] }> = [];
+  for (const sel of selects) {
+    const sel2 = buildSelector(sel);
+    if (!sel2) continue;
+    try {
+      // افتح القائمة واجمع الخيارات
+      await page.click(sel2).catch(() => {});
+      await page.waitForSelector("mat-option, .mat-mdc-option", { timeout: 1000 }).catch(() => {});
+      const opts: string[] = await page.evaluate(() =>
+        Array.from(document.querySelectorAll("mat-option, .mat-mdc-option"))
+          .map(o => o.textContent?.trim() ?? ""),
+      );
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(100);
+
+      const isApproachSel = opts.some(o => /مستخدم أساسي|مستخدم مساعد|غير مستخدم/i.test(o));
+      if (isApproachSel) {
+        approachSelects.push({ el: sel, options: opts });
+        addLog(session, `🔍 وجد select أسلوب: "${sel.labelText || sel.formControlName || sel.name}" — خيارات: ${opts.join(" | ")}`);
+      }
+    } catch { await page.keyboard.press("Escape").catch(() => {}); }
+  }
+
+  if (approachSelects.length > 0) {
+    // طابق كل select مع الأسلوب المناسب حسب الـ labelText
+    for (const ap of approaches) {
+      const found = approachSelects.find(s =>
+        ap.cbRx.test(s.el.labelText || "") || ap.cbRx.test(s.el.ariaLabel || ""),
+      ) ?? approachSelects.find(s =>
+        ap.statusNames.some(n => n === s.el.name || n === s.el.formControlName),
+      );
+
+      if (found) {
+        const hasValue  = ap.value > 0;
+        const isPrimary = ap.value === maxVal && ap.value > 0;
+        const usage     = isPrimary ? "مستخدم أساسي" : (hasValue ? "مستخدم مساعد" : "غير مستخدم");
+        // تحقق أن الخيار موجود في القائمة
+        const actualUsage = found.options.find(o => o.includes(usage) || usage.includes(o)) ?? "غير مستخدم";
+        await selectAngular(session, buildSelector(found.el), actualUsage, `${ap.label} (حالة)`, found.el.isMat);
+        // قيمة الأسلوب
+        const valEl = findEl2(ap.valueNames, ap.valueRx);
+        if (hasValue && valEl) {
+          await fillAngular(session, buildSelector(valEl), ap.value, `${ap.label} (قيمة)`);
+        }
+      } else {
+        addLog(session, `⚠️ لم يُطابَق أسلوب "${ap.label}" مع أي select`);
+      }
+    }
+    return;
+  }
+
+  // ── الاستراتيجية 3: checkboxes بالـ labelText ─────────────────────────────
+  addLog(session, "ℹ️ لا توجد approach selects — أجرب checkboxes");
+  const cbs = els.filter(e => e.type === "checkbox");
+  for (const ap of approaches) {
+    const cbEl = cbs.find(c => ap.cbRx.test(c.labelText || "") || ap.cbRx.test(c.ariaLabel || ""));
+    if (cbEl) {
+      const shouldCheck = ap.value > 0;
+      await checkBox(session, buildSelector(cbEl), shouldCheck, `${ap.label} (checkbox)`);
+      // قيمة الأسلوب
+      const valEl = findEl2(ap.valueNames, ap.valueRx);
+      if (shouldCheck && valEl) {
+        await fillAngular(session, buildSelector(valEl), ap.value, `${ap.label} (قيمة)`);
+      }
+    } else {
+      addLog(session, `⚠️ لم يُعثر على checkbox "${ap.label}"`);
+    }
+  }
+
+  // الأسلوب الأساسي: ابحث عن radio buttons أو select خاص بالأسلوب الأساسي
+  const primaryAp = approaches.find(a => a.value === maxVal && a.value > 0);
+  if (primaryAp) {
+    const primaryEl =
+      els.find(e => e.type === "radio" && /أسلوب.*أساسي|primary.*approach/i.test(e.labelText || "")) ??
+      findEl(els, /أسلوب.*أساسي|primary.*approach/i);
+    if (primaryEl) {
+      const val = primaryAp.label.includes("سوق") ? "أسلوب السوق" :
+                  primaryAp.label.includes("دخل") ? "أسلوب الدخل" : "أسلوب التكلفة";
+      await selectAngular(session, buildSelector(primaryEl), val, "الأسلوب الأساسي", primaryEl.isMat);
+    }
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

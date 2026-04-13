@@ -130,6 +130,8 @@ const reportFormSchema = z.object({
   streetFacades: stringOrNull,
   utilities: stringOrNull,
   coordinates: stringOrNull,
+  latitude:    numberOrNull,
+  longitude:   numberOrNull,
   
   valuationMethod: stringOrNull,
   marketValue: numberOrNull,
@@ -213,7 +215,9 @@ const COMPARE_GROUPS = [
       { key: "plotNumber",      label: "رقم القطعة" },
       { key: "planNumber",      label: "رقم المخطط" },
       { key: "propertyUse",     label: "استخدام العقار" },
-      { key: "coordinates",     label: "الإحداثيات" },
+      { key: "coordinates",     label: "الإحداثيات (خط العرض، خط الطول)" },
+      { key: "latitude",        label: "خط العرض (Latitude)" },
+      { key: "longitude",       label: "خط الطول (Longitude)" },
     ],
   },
   {
