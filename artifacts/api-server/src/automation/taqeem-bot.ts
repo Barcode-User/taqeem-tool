@@ -583,7 +583,25 @@ function formatDate(raw: string | null | undefined): string | null {
   return s;
 }
 
-// تعبئة حقل نصي (Angular-safe) — يستخدم page.fill() + keyboard كاحتياط
+// ─── حقن قيمة مباشرة في حقل Angular بدون كتابة حرف بحرف ────────────────────
+// يستخدم native property setter لضمان التوافق مع Angular reactive forms
+async function setInputValue(page: Page, selector: string, val: string): Promise<boolean> {
+  return page.evaluate(({ sel, v }: { sel: string; v: string }) => {
+    const el = document.querySelector(sel) as HTMLInputElement | null;
+    if (!el) return false;
+    // استخدم native setter لإعلام Angular بالتغيير
+    const nativeSetter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype, "value"
+    )?.set;
+    if (nativeSetter) nativeSetter.call(el, v);
+    else el.value = v;
+    el.dispatchEvent(new Event("input",  { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+    el.dispatchEvent(new Event("blur",   { bubbles: true }));
+    return true;
+  }, { sel: selector, v: val });
+}
+
 async function fillAngular(
   session: AutomationSession, selector: string,
   value: string | number | null | undefined, label: string,
@@ -595,39 +613,31 @@ async function fillAngular(
   const val = String(value).trim();
   const { page } = session;
   try {
-    await page.waitForSelector(selector, { timeout: 4000 });
+    await page.waitForSelector(selector, { timeout: 2000 });
 
-    // طريقة 1: page.fill — أفضل طريقة مع Angular (تُطلق input events تلقائياً)
-    try {
-      await page.click(selector);
-      await page.waitForTimeout(100);
-      await page.fill(selector, val);
-      // أضف Angular events يدوياً
-      await page.evaluate((sel: string) => {
-        const el = document.querySelector(sel) as HTMLInputElement | null;
-        if (!el) return;
-        el.dispatchEvent(new Event("input",  { bubbles: true }));
-        el.dispatchEvent(new Event("change", { bubbles: true }));
-        el.dispatchEvent(new Event("blur",   { bubbles: true }));
-      }, selector);
+    // طريقة 1: حقن JavaScript مباشر — فوري بدون تأخير
+    const ok = await setInputValue(page, selector, val);
+    if (ok) {
       addLog(session, `✅ ${label}: ${val}`);
       return;
-    } catch { /* ننتقل للطريقة 2 */ }
+    }
 
-    // طريقة 2: keyboard typing — احتياطية
-    await page.click(selector, { clickCount: 3 });
-    await page.waitForTimeout(100);
-    await page.keyboard.press("Control+a");
-    await page.keyboard.press("Delete");
-    await page.keyboard.type(val, { delay: 30 });
-    await page.keyboard.press("Tab");
-    addLog(session, `✅ ${label}: ${val} (keyboard)`);
+    // طريقة 2: page.fill — احتياطية
+    await page.fill(selector, val);
+    await page.evaluate((sel: string) => {
+      const el = document.querySelector(sel) as HTMLInputElement | null;
+      if (!el) return;
+      el.dispatchEvent(new Event("input",  { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      el.dispatchEvent(new Event("blur",   { bubbles: true }));
+    }, selector);
+    addLog(session, `✅ ${label}: ${val} (fill)`);
   } catch (err: any) {
     addLog(session, `⚠️ لم يُعبَّأ "${label}": ${(err as Error).message}`);
   }
 }
 
-// تعبئة حقل تاريخ
+// تعبئة حقل تاريخ — فوري بدون تأخير
 async function fillDate(
   session: AutomationSession, selector: string,
   rawValue: string | null | undefined, label: string,
@@ -639,14 +649,17 @@ async function fillDate(
   }
   const { page } = session;
   try {
-    await page.waitForSelector(selector, { timeout: 3000 });
-    await page.click(selector);
-    await page.waitForTimeout(150);
-    await page.keyboard.press("Control+a");
-    await page.keyboard.press("Delete");
-    await page.keyboard.type(formatted, { delay: 50 });
-    await page.keyboard.press("Escape");
-    await page.waitForTimeout(150);
+    await page.waitForSelector(selector, { timeout: 2000 });
+
+    // طريقة 1: حقن JavaScript مباشر — فوري
+    const ok = await setInputValue(page, selector, formatted);
+    if (ok) {
+      addLog(session, `✅ ${label}: ${formatted}`);
+      return;
+    }
+
+    // طريقة 2: page.fill — احتياطية (بدون delay)
+    await page.fill(selector, formatted);
     await page.evaluate((args: { sel: string; v: string }) => {
       const el = document.querySelector(args.sel) as HTMLInputElement | null;
       if (!el) return;
@@ -656,7 +669,7 @@ async function fillDate(
       el.dispatchEvent(new Event("change", { bubbles: true }));
       el.dispatchEvent(new Event("blur",   { bubbles: true }));
     }, { sel: selector, v: formatted });
-    addLog(session, `✅ ${label}: ${formatted}`);
+    addLog(session, `✅ ${label}: ${formatted} (fill)`);
   } catch {
     addLog(session, `⚠️ لم يُعبَّأ تاريخ "${label}"`);
   }
@@ -702,7 +715,7 @@ async function selectAngular(
       "mat-option, .mat-option, .mat-mdc-option",
       { timeout: 3000 },
     );
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(150);
 
     // جرّب إيجاد الخيار بالنص المطابق
     const clicked = await page.evaluate((val: string) => {
@@ -718,7 +731,7 @@ async function selectAngular(
     }, value);
 
     if (clicked) {
-      await page.waitForTimeout(300);
+      await page.waitForTimeout(150);
       addLog(session, `✅ ${label}: ${value} (mat-select)`);
       return;
     }
@@ -747,7 +760,6 @@ async function checkBox(
     const current = await page.$eval(selector, (el: any) => el.checked).catch(() => false);
     if (current !== checked) {
       await page.click(selector);
-      await page.waitForTimeout(150);
     }
     addLog(session, `✅ ${label}: ${checked ? "محدد" : "غير محدد"}`);
   } catch {
