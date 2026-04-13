@@ -1477,8 +1477,13 @@ async function fillAssetPage(
   let lng: string | null = report.longitude != null ? String(report.longitude) : null;
 
   if ((!lat || !lng) && report.coordinates) {
-    const parts = String(report.coordinates).split(/[,،]/).map((s: string) => s.trim());
-    if (parts.length === 2) {
+    // يدعم: "24.7136, 46.6753" أو "24.7136،46.6753" أو "24.7136  46.6753" (فراغ)
+    const parts = String(report.coordinates)
+      .trim()
+      .split(/[,،\s]+/)
+      .map((s: string) => s.trim())
+      .filter((s: string) => /^-?\d+(\.\d+)?$/.test(s));
+    if (parts.length >= 2) {
       if (!lat) lat = parts[0];
       if (!lng) lng = parts[1];
     }
