@@ -182,6 +182,8 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     addLog(session, `📋 عدد حقول الصفحة 1: ${elsPage1.length}`);
 
     await fillFormPage(session, report, elsPage1, pdfState);
+    // انتظر قصير لتستقر Angular form validation قبل الحفظ
+    await page.waitForTimeout(600);
 
     // ── إعادة محاولة رفع PDF ──────────────────────────────────────────────
     if (!pdfState.pdfUploaded) {
@@ -255,6 +257,8 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     addLog(session, `📋 عدد حقول الصفحة 2: ${elsPage2.length}`);
 
     await fillAssetPage(session, report, elsPage2);
+    // انتظر قصير لتستقر Angular form validation قبل الحفظ
+    await page.waitForTimeout(600);
     await screenshot(page, `p2_after_${reportId}`);
 
     // ── ضغط زر "continue" للانتقال للصفحة 3 ──────────────────────────────
@@ -306,6 +310,8 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     addLog(session, `📋 عدد حقول الصفحة 3: ${elsPage3.length}`);
 
     await fillAttributePage(session, report, elsPage3);
+    // انتظر قصير لتستقر Angular form validation قبل الحفظ
+    await page.waitForTimeout(600);
     await screenshot(page, `p3_after_${reportId}`);
 
     // ── ضغط زر "continue" — صفحة المراجعة ───────────────────────────────
@@ -615,29 +621,40 @@ async function fillAngular(
   try {
     await page.waitForSelector(selector, { timeout: 2000 });
 
-    // طريقة 1: حقن JavaScript مباشر — فوري بدون تأخير
+    // طريقة 1: page.click + page.fill — سريع وآمن مع Angular zone.js
+    try {
+      await page.click(selector);
+      await page.fill(selector, val);
+      await page.evaluate((sel: string) => {
+        const el = document.querySelector(sel) as HTMLInputElement | null;
+        if (!el) return;
+        el.dispatchEvent(new Event("input",  { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        el.dispatchEvent(new Event("blur",   { bubbles: true }));
+      }, selector);
+      addLog(session, `✅ ${label}: ${val}`);
+      return;
+    } catch { /* ننتقل للطريقة 2 */ }
+
+    // طريقة 2: native setter — احتياطية
     const ok = await setInputValue(page, selector, val);
     if (ok) {
-      addLog(session, `✅ ${label}: ${val}`);
+      addLog(session, `✅ ${label}: ${val} (js)`);
       return;
     }
 
-    // طريقة 2: page.fill — احتياطية
-    await page.fill(selector, val);
-    await page.evaluate((sel: string) => {
-      const el = document.querySelector(sel) as HTMLInputElement | null;
-      if (!el) return;
-      el.dispatchEvent(new Event("input",  { bubbles: true }));
-      el.dispatchEvent(new Event("change", { bubbles: true }));
-      el.dispatchEvent(new Event("blur",   { bubbles: true }));
-    }, selector);
-    addLog(session, `✅ ${label}: ${val} (fill)`);
+    // طريقة 3: keyboard typing — آخر خيار
+    await page.click(selector, { clickCount: 3 });
+    await page.keyboard.press("Control+a");
+    await page.keyboard.type(val, { delay: 0 });
+    await page.keyboard.press("Tab");
+    addLog(session, `✅ ${label}: ${val} (keyboard)`);
   } catch (err: any) {
     addLog(session, `⚠️ لم يُعبَّأ "${label}": ${(err as Error).message}`);
   }
 }
 
-// تعبئة حقل تاريخ — فوري بدون تأخير
+// تعبئة حقل تاريخ — سريع بدون تأخير بالأحرف
 async function fillDate(
   session: AutomationSession, selector: string,
   rawValue: string | null | undefined, label: string,
@@ -651,25 +668,36 @@ async function fillDate(
   try {
     await page.waitForSelector(selector, { timeout: 2000 });
 
-    // طريقة 1: حقن JavaScript مباشر — فوري
+    // طريقة 1: page.click + page.fill — سريع وآمن مع Angular zone.js
+    try {
+      await page.click(selector);
+      await page.fill(selector, formatted);
+      await page.evaluate((args: { sel: string; v: string }) => {
+        const el = document.querySelector(args.sel) as HTMLInputElement | null;
+        if (!el) return;
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+        if (setter) setter.call(el, args.v); else el.value = args.v;
+        el.dispatchEvent(new Event("input",  { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        el.dispatchEvent(new Event("blur",   { bubbles: true }));
+      }, { sel: selector, v: formatted });
+      addLog(session, `✅ ${label}: ${formatted}`);
+      return;
+    } catch { /* ننتقل للطريقة 2 */ }
+
+    // طريقة 2: native setter — احتياطية
     const ok = await setInputValue(page, selector, formatted);
     if (ok) {
-      addLog(session, `✅ ${label}: ${formatted}`);
+      addLog(session, `✅ ${label}: ${formatted} (js)`);
       return;
     }
 
-    // طريقة 2: page.fill — احتياطية (بدون delay)
-    await page.fill(selector, formatted);
-    await page.evaluate((args: { sel: string; v: string }) => {
-      const el = document.querySelector(args.sel) as HTMLInputElement | null;
-      if (!el) return;
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
-      if (setter) setter.call(el, args.v); else el.value = args.v;
-      el.dispatchEvent(new Event("input",  { bubbles: true }));
-      el.dispatchEvent(new Event("change", { bubbles: true }));
-      el.dispatchEvent(new Event("blur",   { bubbles: true }));
-    }, { sel: selector, v: formatted });
-    addLog(session, `✅ ${label}: ${formatted} (fill)`);
+    // طريقة 3: keyboard typing — آخر خيار بلا delay
+    await page.click(selector);
+    await page.keyboard.press("Control+a");
+    await page.keyboard.type(formatted, { delay: 0 });
+    await page.keyboard.press("Escape");
+    addLog(session, `✅ ${label}: ${formatted} (keyboard)`);
   } catch {
     addLog(session, `⚠️ لم يُعبَّأ تاريخ "${label}"`);
   }
