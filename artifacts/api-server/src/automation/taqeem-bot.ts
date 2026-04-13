@@ -1209,15 +1209,70 @@ async function fillAssetPage(
     byLabel(/street|شارع/i);
   if (streetEl) await fillAngular(session, buildSelector(streetEl), report.street, "الشارع");
 
-  // ── الإحداثيات ───────────────────────────────────────────────────────────
-  if (report.coordinates) {
-    const parts = String(report.coordinates).split(",").map((s: string) => s.trim());
-    if (parts.length === 2) {
-      const latEl = byName("lat") ?? byName("latitude") ?? byLabel(/lat\b|خط.*عرض/i);
-      const lngEl = byName("lng") ?? byName("longitude") ?? byLabel(/lng\b|lon\b|خط.*طول/i);
-      if (latEl) await fillAngular(session, buildSelector(latEl), parts[0], "خط العرض");
-      if (lngEl) await fillAngular(session, buildSelector(lngEl), parts[1], "خط الطول");
+  // ── الرأي النهائي في القيمة ──────────────────────────────────────────────
+  const finalValEl =
+    byName("final_opinion_value") ?? byName("opinion_value") ??
+    byName("final_value")         ?? byName("finalopinionvalue") ??
+    byName("final_opinion")       ?? byName("total_value") ??
+    byLabel(/final.?opinion|opinion.?value|final.?value|الرأي.*قيمة|رأي.*نهائي|القيمة.*نهائية|رأي.*المقيّم|رأي.*مقيم/i);
+  if (finalValEl) {
+    await fillAngular(session, buildSelector(finalValEl), report.finalValue, "الرأي النهائي في القيمة");
+  } else {
+    addLog(session, "⚠️ لم يُعثر على حقل «الرأي النهائي في القيمة»");
+  }
+
+  // ── أسلوب السوق (قيمة نصية أو عددية) ───────────────────────────────────
+  const marketEl =
+    byName("market_approach")       ?? byName("market_approach_value") ??
+    byName("market_value")          ?? byName("marketapproach") ??
+    byName("market_approach_amount") ?? byName("comparable_value") ??
+    byLabel(/market.?approach|market.?value|أسلوب.*سوق|قيمة.*سوق|سوق.*مقارن/i);
+  if (marketEl) {
+    const marketVal = report.marketValue ?? report.finalValue;
+    if (marketEl.tag === "SELECT" || marketEl.isMat) {
+      await selectAngular(session, buildSelector(marketEl), String(marketVal ?? ""), "أسلوب السوق", marketEl.isMat);
+    } else {
+      await fillAngular(session, buildSelector(marketEl), marketVal, "أسلوب السوق");
     }
+  } else {
+    addLog(session, "⚠️ لم يُعثر على حقل «أسلوب السوق»");
+  }
+
+  // ── الإحداثيات (خط العرض / خط الطول) ───────────────────────────────────
+  // استخرج lat/lng من الحقل المباشر أو من coordinates
+  let lat: string | null = report.latitude != null ? String(report.latitude) : null;
+  let lng: string | null = report.longitude != null ? String(report.longitude) : null;
+
+  if ((!lat || !lng) && report.coordinates) {
+    const parts = String(report.coordinates).split(/[,،]/).map((s: string) => s.trim());
+    if (parts.length === 2) {
+      if (!lat) lat = parts[0];
+      if (!lng) lng = parts[1];
+    }
+  }
+
+  const latEl =
+    byName("latitude")  ?? byName("lat")  ??
+    byName("property_latitude") ?? byName("asset_latitude") ??
+    byLabel(/latitude|lat\b|خط.*عرض|عرض.*جغرافي/i);
+  if (latEl && lat) {
+    await fillAngular(session, buildSelector(latEl), lat, "خط العرض");
+  } else if (!latEl) {
+    addLog(session, "⚠️ لم يُعثر على حقل «خط العرض»");
+  } else if (!lat) {
+    addLog(session, "⚠️ لا توجد قيمة لخط العرض في التقرير");
+  }
+
+  const lngEl =
+    byName("longitude")  ?? byName("lng") ?? byName("lon") ??
+    byName("property_longitude") ?? byName("asset_longitude") ??
+    byLabel(/longitude|lng\b|lon\b|خط.*طول|طول.*جغرافي/i);
+  if (lngEl && lng) {
+    await fillAngular(session, buildSelector(lngEl), lng, "خط الطول");
+  } else if (!lngEl) {
+    addLog(session, "⚠️ لم يُعثر على حقل «خط الطول»");
+  } else if (!lng) {
+    addLog(session, "⚠️ لا توجد قيمة لخط الطول في التقرير");
   }
 }
 

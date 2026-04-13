@@ -93,7 +93,7 @@ public class ReportsController(AppDbContext db, OpenAiService ai, PdfService pdf
 
     // PATCH /api/reports/:id
     [HttpPatch("{id:int}")]
-    public async Task<IActionResult> Update(int id, [FromBody] Report updates)
+    public async Task<IActionResult> Update(int id, [FromBody] Report ا)
     {
         var report = await db.Reports.FindAsync(id);
         if (report == null) return NotFound(new { error = "Report not found" });

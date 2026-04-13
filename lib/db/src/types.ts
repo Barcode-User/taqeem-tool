@@ -59,6 +59,8 @@ export interface Report {
   streetFacades: string | null;
   utilities: string | null;
   coordinates: string | null;
+  latitude: number | null;
+  longitude: number | null;
   valuationMethod: string | null;
   marketValue: number | null;
   incomeValue: number | null;
