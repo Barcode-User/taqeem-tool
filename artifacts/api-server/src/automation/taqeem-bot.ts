@@ -1351,104 +1351,109 @@ async function fillApproachFields(
   const { page } = session;
 
   /* ═══════════════════════════════════════════════════════════════════════
-     القاعدة (سيناريو المستخدم):
-       ✔ إذا كانت قيمة الأسلوب > 0 → اختر "أساسي لتقدير القيمة" من
-         القائمة المنسدلة المُعنونة باسم الأسلوب (أسلوب السوق / الدخل / التكلفة)
-         ثم عبّئ أول حقل "القيمة" الذي يأتي بعدها مباشرةً في DOM.
-       ✔ إذا لا قيمة → تخطّ (لا تغيّر شيئاً).
+     القاعدة: إذا قيمة الأسلوب > 0 → اختر "أساسي لتقدير القيمة" من
+              dropdown الأسلوب + عبّئ أول حقل "القيمة" تحته.
      ════════════════════════════════════════════════════════════════════════
 
-     المنطق:
-       1. نجد لكل أسلوب الـ mat-select الذي label-ه يطابق اسمه
-          (مثلاً label = "أسلوب الدخل" → هذا هو status dropdown)
-       2. نعرف نظامياً (nth في قائمة كل mat-selects) لنستخدمه مع Playwright
-       3. أول input يأتي بعد status dropdown في ترتيب DOM → هو أول خانة "القيمة"
-       4. nth-index للـ input محسوب على قائمة document.querySelectorAll("input")
-          (كاملة بدون فلترة) لضمان التطابق مع page.locator("input").nth()
+     الاستراتيجية "افتح وتحقق":
+       بما أن بنية TAQEEM لا تعتمد على mat-label داخل mat-form-field،
+       نفتح كل mat-select على حدة ونفحص خياراته:
+         → إذا وجدنا "أساسي لتقدير القيمة" → هذا هو dropdown الأسلوب
+         → نغلقه بـ Escape ونحفظ مؤشره
+       ثم نحدد أي أسلوب هو (سوق/دخل/تكلفة) بالنص المحيط في DOM.
      ════════════════════════════════════════════════════════════════════════ */
 
   const approaches = [
-    { key: "market", label: "أسلوب السوق",   labelRx: /أسلوب.*السوق|السوق.*أسلوب/i, value: Number(report.marketValue) || 0 },
-    { key: "income", label: "أسلوب الدخل",   labelRx: /أسلوب.*الدخل|الدخل.*أسلوب/i,  value: Number(report.incomeValue) || 0 },
-    { key: "cost",   label: "أسلوب التكلفة", labelRx: /أسلوب.*التكلفة|التكلفة.*أسلوب/i, value: Number(report.costValue) || 0 },
+    { key: "market", label: "أسلوب السوق",   textRx: /السوق/i,   value: Number(report.marketValue) || 0 },
+    { key: "income", label: "أسلوب الدخل",   textRx: /الدخل/i,   value: Number(report.incomeValue) || 0 },
+    { key: "cost",   label: "أسلوب التكلفة", textRx: /التكلفة/i, value: Number(report.costValue)   || 0 },
   ];
 
-  addLog(
-    session,
+  addLog(session,
     `📊 أساليب — سوق: ${approaches[0].value} | دخل: ${approaches[1].value} | تكلفة: ${approaches[2].value}`,
   );
 
+  // إجمالي mat-selects في الصفحة
+  const totalMS = await page.locator("mat-select").count();
+  addLog(session, `🔍 إجمالي mat-selects في الصفحة: ${totalMS}`);
+
   /* ────────────────────────────────────────────────────────────────────────
-     الخطوة 1: فحص DOM لإيجاد الـ nth-index لكل status mat-select
-     الآلية: نتحقق من لافتة (label) كل mat-select في الصفحة
-             فإذا طابقت اسم الأسلوب → هذا هو dropdown الحالة
+     المرحلة 1: اكتشاف dropdown كل أسلوب عبر الفتح والتحقق
+     نفتح كل mat-select ونفحص: هل خياراته تحتوي "أساسي لتقدير القيمة"؟
+     إذا نعم → هذا هو dropdown أحد الأساليب → نغلقه ونحفظ مؤشره
      ────────────────────────────────────────────────────────────────────── */
-  const statusNthMap: Record<string, number> = await page.evaluate(() => {
-    const allMS = Array.from(document.querySelectorAll("mat-select"));
-    const result: Record<string, number> = {};
+  // map: nth → اسم الأسلوب (market/income/cost)
+  const statusNthMap: Record<string, number> = {};
 
-    /** استخراج نص الـ label الخاص بـ mat-select من عدة مصادر */
-    const getLabelText = (ms: Element): string => {
-      // مصدر 1: mat-form-field أعلاه → mat-label
-      let el: Element | null = ms;
-      for (let i = 0; i < 8; i++) {
-        if (!el) break;
-        // :scope لتجنّب الـ label الداخلي للـ mat-select نفسه
-        const lbl = el.querySelector(":scope > mat-label") ||
-                    el.querySelector(":scope > label") ||
-                    el.querySelector("mat-label") ||
-                    el.querySelector("label");
-        if (lbl && lbl !== ms) {
-          const txt = (lbl.textContent || "").replace(/\*/g, "").trim();
-          if (txt) return txt;
-        }
-        el = el.parentElement;
-      }
-      // مصدر 2: aria-label
-      return ms.getAttribute("aria-label") || "";
-    };
+  // نفحص أول MAX_SCAN mat-select في الصفحة (لتجنب الإبطاء)
+  const MAX_SCAN = Math.min(totalMS, 25);
 
-    const patterns: Array<{ key: string; rx: RegExp }> = [
-      { key: "market", rx: /أسلوب.*السوق|السوق.*أسلوب/i },
-      { key: "income", rx: /أسلوب.*الدخل|الدخل.*أسلوب/i },
-      { key: "cost",   rx: /أسلوب.*التكلفة|التكلفة.*أسلوب/i },
-    ];
+  for (let i = 0; i < MAX_SCAN; i++) {
+    if (Object.keys(statusNthMap).length === 3) break; // وجدنا الثلاثة
+    const loc = page.locator("mat-select").nth(i);
+    try {
+      await loc.click({ timeout: 1500 });
+      await page.waitForTimeout(250);
 
-    for (let i = 0; i < allMS.length; i++) {
-      const lbl = getLabelText(allMS[i]);
-      for (const pat of patterns) {
-        if (pat.rx.test(lbl) && result[pat.key] === undefined) {
-          result[pat.key] = i;
-        }
-      }
-    }
+      // اقرأ الخيارات المتاحة + النص المحيط بالـ mat-select في DOM
+      const info = await page.evaluate((idx: number) => {
+        const opts = Array.from(
+          document.querySelectorAll("mat-option, .mat-mdc-option"),
+        ).map(o => (o.textContent || "").trim()).filter(t => t);
 
-    // إذا لم نجد بالـ label → ابحث بالنص القريب في DOM (fallback)
-    if (Object.keys(result).length < 3) {
-      for (let i = 0; i < allMS.length; i++) {
-        if (result.market !== undefined && result.income !== undefined && result.cost !== undefined) break;
+        const hasApproachOpt = opts.some(o =>
+          /أساسي.*(?:لتقدير|القيمة)|(?:لتقدير|القيمة).*أساسي/i.test(o),
+        );
 
-        // اصعد وانظر النص المحيط
-        let el: Element | null = allMS[i];
+        // النص المحيط بالـ mat-select (نصعد 5 مستويات)
         let surroundingText = "";
+        const allMS = Array.from(document.querySelectorAll("mat-select"));
+        let el: Element | null = allMS[idx];
         for (let d = 0; d < 6 && el; d++) {
-          surroundingText = (el.textContent || "").replace(/\*/g, "").slice(0, 60);
+          const t = (el.textContent || "").replace(/\*/g, "").trim();
+          if (t.length > surroundingText.length && t.length < 200) surroundingText = t;
           el = el.parentElement;
         }
+        return { hasApproachOpt, opts, surroundingText };
+      }, i);
 
-        if (result.market === undefined && /أسلوب.*السوق|السوق.*أسلوب/i.test(surroundingText)) result.market = i;
-        if (result.income === undefined && /أسلوب.*الدخل|الدخل.*أسلوب/i.test(surroundingText)) result.income = i;
-        if (result.cost === undefined && /أسلوب.*التكلفة|التكلفة.*أسلوب/i.test(surroundingText)) result.cost = i;
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(150);
+
+      if (!info.hasApproachOpt) continue;
+
+      // حدد أي أسلوب هو بالنص المحيط
+      const st = info.surroundingText;
+      const matchedKey =
+        /السوق/i.test(st) ? "market" :
+        /الدخل/i.test(st) ? "income" :
+        /التكلفة/i.test(st) ? "cost" : null;
+
+      addLog(session,
+        `🔍 nth=${i}: خيارات أسلوب → [${info.opts.slice(0, 4).join(" | ")}] | نص محيط: "${st.slice(0, 50)}"`,
+      );
+
+      if (matchedKey && statusNthMap[matchedKey] === undefined) {
+        statusNthMap[matchedKey] = i;
+        addLog(session, `✅ ${matchedKey} status dropdown → nth=${i}`);
+      } else if (!matchedKey) {
+        addLog(session, `⚠️ nth=${i}: له خيار أسلوب لكن لم نتعرف على نوعه من النص`);
+        // حاول التعيين بالترتيب إذا لم نعرف النوع
+        const missing = ["market", "income", "cost"].find(k => statusNthMap[k] === undefined);
+        if (missing) {
+          statusNthMap[missing] = i;
+          addLog(session, `↳ افتراض: ${missing} → nth=${i}`);
+        }
       }
+    } catch {
+      await page.keyboard.press("Escape").catch(() => {});
     }
+  }
 
-    return result;
-  });
-
-  addLog(session, `🔍 status dropdowns (nth): ${JSON.stringify(statusNthMap)}`);
+  addLog(session, `📌 نتيجة الاكتشاف: ${JSON.stringify(statusNthMap)}`);
 
   /* ────────────────────────────────────────────────────────────────────────
-     الخطوة 2: لكل أسلوب له قيمة → اختر "أساسي لتقدير القيمة" + عبّئ أول قيمة
+     المرحلة 2: تعبئة كل أسلوب له قيمة
      ────────────────────────────────────────────────────────────────────── */
   for (const ap of approaches) {
     if (ap.value <= 0) {
@@ -1457,15 +1462,14 @@ async function fillApproachFields(
     }
 
     const statusNth = statusNthMap[ap.key];
-
     if (statusNth === undefined) {
-      addLog(session, `⚠️ ${ap.label}: لم يُعثر على dropdown الحالة في DOM — تخطّي`);
+      addLog(session, `⚠️ ${ap.label}: لم يُكتشف dropdown — تخطّي`);
       continue;
     }
 
-    addLog(session, `🎯 ${ap.label}: قيمة=${ap.value} | status nth=${statusNth}`);
+    addLog(session, `🎯 ${ap.label}: قيمة=${ap.value} | nth=${statusNth}`);
 
-    /* ── أ) اختيار "أساسي لتقدير القيمة" من dropdown الحالة ──────────── */
+    /* ── أ) اختيار "أساسي لتقدير القيمة" ───────────────────────────── */
     let statusDone = false;
     try {
       const statusLoc = page.locator("mat-select").nth(statusNth);
@@ -1473,72 +1477,62 @@ async function fillApproachFields(
       await page.waitForSelector("mat-option, .mat-mdc-option", { timeout: 3000 });
       await page.waitForTimeout(200);
 
-      const clicked = await page.evaluate(() => {
+      const result = await page.evaluate(() => {
         const opts = Array.from(
           document.querySelectorAll("mat-option, .mat-mdc-option"),
         );
-        const target = opts.find((o) =>
+        const target = opts.find(o =>
           /أساسي.*(?:لتقدير|القيمة)|(?:لتقدير|القيمة).*أساسي/i.test(
             (o.textContent || "").trim(),
           ),
         ) as HTMLElement | undefined;
-        if (target) { target.click(); return true; }
-        // سجّل الخيارات المتاحة للتشخيص
-        return opts.map(o => (o.textContent || "").trim()).filter(t => t);
+        if (target) { target.click(); return { ok: true, opts: [] as string[] }; }
+        return { ok: false, opts: opts.map(o => (o.textContent || "").trim()).filter(t => t) };
       });
 
-      if (clicked === true) {
+      if (result.ok) {
         addLog(session, `✅ ${ap.label}: "أساسي لتقدير القيمة" تم`);
         statusDone = true;
       } else {
         await page.keyboard.press("Escape").catch(() => {});
-        const available = Array.isArray(clicked) ? clicked.join(" | ") : "—";
-        addLog(session, `⚠️ ${ap.label}: خيار "أساسي لتقدير القيمة" غير موجود. الخيارات: ${available}`);
+        addLog(session, `⚠️ ${ap.label}: خيار غير موجود. الخيارات: ${result.opts.join(" | ")}`);
       }
       await page.waitForTimeout(300);
     } catch (err: any) {
       await page.keyboard.press("Escape").catch(() => {});
-      addLog(session, `⚠️ ${ap.label}: فشل النقر على status dropdown — ${err.message}`);
+      addLog(session, `⚠️ ${ap.label}: فشل النقر — ${err.message}`);
     }
 
-    /* ── ب) تعبئة أول حقل "القيمة" بعد هذا الـ mat-select في DOM ─────── */
-    // نحسب nth-index في قائمة document.querySelectorAll("input") الكاملة
-    // (بلا فلترة) لأن page.locator("input").nth() تستخدم نفس القائمة
+    /* ── ب) تعبئة أول حقل "القيمة" بعد هذا dropdown في DOM ─────────── */
+    // nth-index في document.querySelectorAll("input") الكاملة
+    // ← يتطابق مع page.locator("input").nth()
     const valueNth: number = await page.evaluate((msIdx: number) => {
-      const allMS    = Array.from(document.querySelectorAll("mat-select"));
+      const allMS     = Array.from(document.querySelectorAll("mat-select"));
       const allInputs = Array.from(document.querySelectorAll("input"));
-      const statusMS  = allMS[msIdx];
-      if (!statusMS) return -1;
-
-      // أول input يأتي بعد status mat-select في ترتيب DOM، وليس radio/checkbox/hidden
-      const first = allInputs.find((inp) => {
+      const ms        = allMS[msIdx];
+      if (!ms) return -1;
+      const first = allInputs.find(inp => {
         if (["radio", "checkbox", "hidden"].includes((inp as HTMLInputElement).type)) return false;
-        return (statusMS.compareDocumentPosition(inp) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+        return (ms.compareDocumentPosition(inp) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
       });
-
       return first ? allInputs.indexOf(first) : -1;
     }, statusNth);
 
-    addLog(session, `🔍 ${ap.label}: أول input بعد status nth=${statusNth} → input nth=${valueNth}`);
+    addLog(session, `🔍 ${ap.label}: input nth=${valueNth}`);
 
     if (valueNth >= 0) {
       try {
-        // page.locator("input") = document.querySelectorAll("input") → نفس الترتيب
         const inputLoc = page.locator("input").nth(valueNth);
         await inputLoc.click({ timeout: 2000 });
         await inputLoc.selectText().catch(() => {});
         await inputLoc.fill(String(ap.value));
-        addLog(session, `✅ ${ap.label}: قيمة=${ap.value} (input nth=${valueNth})`);
+        addLog(session, `✅ ${ap.label}: قيمة=${ap.value}`);
       } catch (err: any) {
-        addLog(session, `⚠️ ${ap.label}: فشل تعبئة حقل القيمة — ${err.message}`);
+        addLog(session, `⚠️ ${ap.label}: فشل تعبئة القيمة — ${err.message}`);
       }
-    } else {
-      addLog(session, `⚠️ ${ap.label}: لم يُعثر على input قيمة بعد status dropdown`);
     }
 
-    if (!statusDone) {
-      addLog(session, `ℹ️ ${ap.label}: اختيار "أساسي لتقدير القيمة" لم يتم — قد تحتاج مراجعة يدوية`);
-    }
+    if (!statusDone) addLog(session, `ℹ️ ${ap.label}: اختيار الحالة لم يتم`);
   }
 }
 
@@ -1587,8 +1581,11 @@ async function fillAssetPage(
   else addLog(session, "⚠️ لم يُعثر على «تاريخ المعاينة»");
 
   // ── أساليب التقييم (أسلوب السوق / الدخل / التكلفة) ──────────────────────
-  // كل أسلوب له: select للحالة (مستخدم أساسي / غير مستخدم) + input للقيمة
-  await fillApproachFields(session, els, report);
+  try {
+    await fillApproachFields(session, els, report);
+  } catch (approachErr: any) {
+    addLog(session, `⚠️ fillApproachFields خطأ (غير مميت): ${approachErr.message}`);
+  }
 
   // ── الدولة (ثابت: المملكة العربية السعودية) ──────────────────────────────
   const countryEl = byName("country_id") ?? byLabel(/country|دولة|بلد/i);
