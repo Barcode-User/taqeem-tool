@@ -236,9 +236,17 @@ router.post("/automation/start/:reportId", async (req, res) => {
       return;
     }
 
+    // إذا كان "running" أو "waiting_otp" — تحقق هل يوجد جلسة فعلية في الذاكرة
     if (report.automationStatus === "running" || report.automationStatus === "waiting_otp") {
-      res.status(409).json({ error: "التقرير قيد المعالجة بالفعل" });
-      return;
+      const existingSession = getSessionByReportId(reportId);
+      if (existingSession) {
+        // جلسة حقيقية تعمل فعلاً
+        res.status(409).json({ error: "التقرير قيد المعالجة بالفعل" });
+        return;
+      }
+      // لا توجد جلسة — الحالة عالقة من جلسة سابقة (مثلاً إعادة تشغيل الخادم)
+      // أعد الضبط وابدأ من جديد
+      await updateReport(reportId, { automationStatus: "idle", automationError: "تم إعادة الضبط تلقائياً — كانت الحالة عالقة" });
     }
 
     const sessionId = await startAutomation(reportId);
@@ -268,9 +276,14 @@ router.get("/automation/status/:reportId", async (req, res) => {
     const session = getSessionByReportId(reportId);
     const logs = session?.logs ?? [];
 
+    // كشف الحالة العالقة: status=running لكن لا توجد جلسة فعلية في الذاكرة
+    const dbStatus = report.automationStatus ?? "idle";
+    const isStale = (dbStatus === "running" || dbStatus === "waiting_otp") && !session;
+
     res.json({
       reportId,
-      automationStatus: report.automationStatus ?? "idle",
+      automationStatus: dbStatus,
+      isStale,
       automationError:  report.automationError,
       sessionId:        report.automationSessionId,
       qrCodeBase64:     report.qrCodeBase64,

@@ -1,5 +1,26 @@
 import app from "./app";
 import { logger } from "./lib/logger";
+import { getReportsByAutomationStatus, updateReport } from "@workspace/db";
+
+// ── تنظيف الحالات العالقة عند بدء الخادم ──────────────────────────────────
+// أي تقرير بحالة "running" عند البدء يعني أن الخادم أُعيد تشغيله في الأثناء
+// نُعيد ضبطها إلى "idle" حتى يتمكن المستخدم من إعادة تشغيل الأتمتة
+async function resetStuckAutomations() {
+  try {
+    const running = await getReportsByAutomationStatus("running");
+    for (const r of running) {
+      await updateReport(r.id, {
+        automationStatus: "idle",
+        automationError: "الخادم أُعيد تشغيله أثناء عمل الأتمتة — يرجى المحاولة مجدداً",
+      });
+    }
+    if (running.length > 0) {
+      logger.info({ count: running.length }, "تم إعادة ضبط الأتمتات العالقة");
+    }
+  } catch (err) {
+    logger.error({ err }, "خطأ في إعادة ضبط الأتمتات العالقة");
+  }
+}
 
 const rawPort = process.env["PORT"];
 
@@ -22,4 +43,7 @@ app.listen(port, (err) => {
   }
 
   logger.info({ port }, "Server listening");
+
+  // نظّف الحالات العالقة بعد البدء مباشرةً
+  resetStuckAutomations();
 });
