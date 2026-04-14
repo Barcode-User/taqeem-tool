@@ -2271,6 +2271,23 @@ async function fillPage3(session: AutomationSession, report: any, els: any[], pd
   );
   if (swEl) await fillAngular(session, buildSelector(swEl), report.streetWidth, "عرض الشارع");
 
+  // ── عدد الواجهات ─────────────────────────────────────────────────────────
+  // محسوب تلقائياً من جدول الحدود والأطوال (عدد الحدود التي وصفها "شارع")
+  if (report.facadesCount != null) {
+    const facCntEl = findEl(inputs,
+      /facades?.?count|facadescount|frontages?.?count|number.?of.?facades|عدد.*واجهات|واجهات.*عدد/i,
+    ) ?? findEl(selects,
+      /facades?.?count|facadescount|frontages?.?count|number.?of.?facades|عدد.*واجهات|واجهات.*عدد/i,
+    );
+    if (facCntEl) {
+      if (facCntEl.tag === "MAT-SELECT" || facCntEl.tag === "SELECT" || facCntEl.isMat) {
+        await selectAngular(session, buildSelector(facCntEl), String(report.facadesCount), "عدد الواجهات", facCntEl.isMat);
+      } else {
+        await fillAngular(session, buildSelector(facCntEl), report.facadesCount, "عدد الواجهات");
+      }
+    } else addLog(session, `ℹ️ لم يُعثر على حقل «عدد الواجهات» (facadesCount=${report.facadesCount})`);
+  }
+
   // تقدير الأصل ثاني أفضل استخدام → "نعم"
   try {
     const bestUseYes = await page.$('input[type="radio"][value="true"], input[type="radio"][value="1"]');

@@ -128,6 +128,7 @@ const reportFormSchema = z.object({
   permittedBuildingRatio: numberOrNull,
   streetWidth: numberOrNull,
   streetFacades: stringOrNull,
+  facadesCount: numberOrNull,
   utilities: stringOrNull,
   coordinates: stringOrNull,
   latitude:    numberOrNull,
@@ -244,6 +245,7 @@ const COMPARE_GROUPS = [
       { key: "permittedBuildingRatio",  label: "نسبة البناء المصرح بها %" },
       { key: "streetWidth",             label: "عرض الشارع م" },
       { key: "streetFacades",           label: "الواجهات" },
+      { key: "facadesCount",            label: "عدد الواجهات" },
       { key: "utilities",               label: "المرافق" },
     ],
   },
@@ -848,6 +850,7 @@ export default function ReportDetails() {
                 <CopyField label="رقم الصك" value={report.deedNumber} />
                 <CopyField label="مساحة الأرض (م²)" value={report.landArea} />
                 <CopyField label="الواجهات على الشارع" value={(report as any).streetFacades} />
+                <CopyField label="عدد الواجهات" value={(report as any).facadesCount} />
                 <CopyField label="عرض الشارع (م)" value={(report as any).streetWidth} />
                 <CopyField label="المرافق" value={(report as any).utilities} />
                 <CopyField label="عدد الأدوار المصرح به" value={(report as any).permittedFloorsCount} />
@@ -1159,6 +1162,9 @@ export default function ReportDetails() {
                 )} />
                 <FormField control={form.control} name="streetFacades" render={({ field }) => (
                   <FormItem><FormLabel className="flex items-center gap-1.5">الواجهات المطلة على الشارع<ScoreBadge score={dsFieldScores?.streetFacades} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} placeholder="مثال: واجهة واحدة، واجهتان" /></FormControl></FormItem>
+                )} />
+                <FormField control={form.control} name="facadesCount" render={({ field }) => (
+                  <FormItem><FormLabel className="flex items-center gap-1.5">عدد الواجهات على الشارع<ScoreBadge score={dsFieldScores?.facadesCount} /></FormLabel><FormControl><Input type="number" min="1" max="4" {...field} value={field.value ?? ""} disabled={!isEditable} placeholder="1" /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="utilities" render={({ field }) => (
                   <FormItem><FormLabel className="flex items-center gap-1.5">المرافق المتاحة<ScoreBadge score={dsFieldScores?.utilities} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} placeholder="كهرباء، ماء، صرف صحي" /></FormControl></FormItem>

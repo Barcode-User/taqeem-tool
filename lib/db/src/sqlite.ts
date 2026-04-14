@@ -79,6 +79,7 @@ function getDb(): DatabaseSync {
       PermittedBuildingRatio    REAL,
       StreetWidth               REAL,
       StreetFacades             TEXT,
+      FacadesCount              INTEGER,
       Utilities                 TEXT,
       Coordinates               TEXT,
       Latitude                  REAL,
@@ -114,8 +115,9 @@ function getDb(): DatabaseSync {
     }
   };
   addIfMissing("ValuationHypothesis", "TEXT");
-  addIfMissing("Latitude",  "REAL");
-  addIfMissing("Longitude", "REAL");
+  addIfMissing("Latitude",     "REAL");
+  addIfMissing("Longitude",    "REAL");
+  addIfMissing("FacadesCount", "INTEGER");
 
   // ─── جدول datasystem ──────────────────────────────────────────────────────
   _db.exec(`
@@ -258,6 +260,7 @@ function rowToReport(row: any): Report {
     permittedBuildingRatio: num(row.PermittedBuildingRatio),
     streetWidth: num(row.StreetWidth),
     streetFacades: str(row.StreetFacades),
+    facadesCount: row.FacadesCount != null ? parseInt(row.FacadesCount) : null,
     utilities: str(row.Utilities),
     coordinates: str(row.Coordinates),
     latitude: num(row.Latitude),
@@ -326,7 +329,7 @@ export async function sqliteInsertReport(data: InsertReport): Promise<Report> {
       PropertyUse, DeedNumber, DeedDate, OwnerName, OwnershipType,
       BuildingPermitNumber, BuildingStatus, BuildingAge, LandArea, BuildingArea,
       BasementArea, AnnexArea, FloorsCount, PermittedFloorsCount,
-      PermittedBuildingRatio, StreetWidth, StreetFacades, Utilities, Coordinates,
+      PermittedBuildingRatio, StreetWidth, StreetFacades, FacadesCount, Utilities, Coordinates,
       Latitude, Longitude,
       ValuationMethod, MarketValue, IncomeValue, CostValue, FinalValue,
       PricePerMeter, CompanyName, CommercialRegNumber, PdfFileName, PdfFilePath,
@@ -334,7 +337,7 @@ export async function sqliteInsertReport(data: InsertReport): Promise<Report> {
     ) VALUES (
       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
     )
   `).run(
     data.reportNumber ?? null, data.reportDate ?? null, data.valuationDate ?? null,
@@ -358,7 +361,7 @@ export async function sqliteInsertReport(data: InsertReport): Promise<Report> {
     data.basementArea ?? null, data.annexArea ?? null,
     data.floorsCount ?? null, data.permittedFloorsCount ?? null,
     data.permittedBuildingRatio ?? null, data.streetWidth ?? null,
-    data.streetFacades ?? null, data.utilities ?? null, data.coordinates ?? null,
+    data.streetFacades ?? null, data.facadesCount ?? null, data.utilities ?? null, data.coordinates ?? null,
     data.latitude ?? null, data.longitude ?? null,
     data.valuationMethod ?? null, data.marketValue ?? null, data.incomeValue ?? null,
     data.costValue ?? null, data.finalValue ?? null, data.pricePerMeter ?? null,
@@ -401,7 +404,7 @@ export async function sqliteUpdateReport(id: number, data: Partial<InsertReport>
     basementArea: "BasementArea", annexArea: "AnnexArea", floorsCount: "FloorsCount",
     permittedFloorsCount: "PermittedFloorsCount",
     permittedBuildingRatio: "PermittedBuildingRatio", streetWidth: "StreetWidth",
-    streetFacades: "StreetFacades", utilities: "Utilities", coordinates: "Coordinates",
+    streetFacades: "StreetFacades", facadesCount: "FacadesCount", utilities: "Utilities", coordinates: "Coordinates",
     latitude: "Latitude", longitude: "Longitude",
     valuationMethod: "ValuationMethod", marketValue: "MarketValue",
     incomeValue: "IncomeValue", costValue: "CostValue", finalValue: "FinalValue",

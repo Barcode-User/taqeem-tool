@@ -57,6 +57,7 @@ export interface Report {
   permittedBuildingRatio: number | null;
   streetWidth: number | null;
   streetFacades: string | null;
+  facadesCount: number | null;
   utilities: string | null;
   coordinates: string | null;
   latitude: number | null;

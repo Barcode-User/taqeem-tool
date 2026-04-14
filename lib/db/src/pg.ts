@@ -174,6 +174,7 @@ function rowToReport(row: any): Report {
     permittedBuildingRatio: num(row.permitted_building_ratio),
     streetWidth: num(row.street_width),
     streetFacades: str(row.street_facades),
+    facadesCount: row.facades_count != null ? parseInt(String(row.facades_count)) : null,
     utilities: str(row.utilities),
     coordinates: str(row.coordinates),
     latitude: num(row.latitude),
