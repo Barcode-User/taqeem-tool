@@ -1317,6 +1317,8 @@ async function fillOneApproach(
 // ─────────────────────────────────────────────────────────────────────────────
 // تعبئة أساليب التقييم الثلاثة (السوق / الدخل / التكلفة)
 // الاستراتيجية:
+//   0. إذا وُجد نص في "أسلوب وطريقة التقييم المتبعة" (valuationMethod) استخدمه مباشرة
+//      لتحديد الأسلوب الأساسي — والـ value قد يكون dropdown وليس input
 //   1. ابحث بالـ formControlName/name في scanElements
 //   2. إن لم يوجد، افحص الـ mat-selects التي تحتوي على خيارات "مستخدم أساسي/غير مستخدم"
 //   3. احتياط: ابحث عن checkboxes بالـ labelText
@@ -1328,9 +1330,43 @@ async function fillApproachFields(
 ): Promise<void> {
   const { page } = session;
 
+  // ── 0. تحديد الأسلوب الأساسي من نص "أسلوب وطريقة التقييم المتبعة" ─────────
+  const methodText = String(report.valuationMethod || "").trim();
+  const detectMethodKey = (text: string): "market" | "income" | "cost" | null => {
+    const t = text.toLowerCase();
+    if (/سوق|مقارن|market|comparable/i.test(t)) return "market";
+    if (/دخل|إيراد|income/i.test(t))            return "income";
+    if (/تكلف|cost/i.test(t))                   return "cost";
+    return null;
+  };
+  const methodPrimary = methodText ? detectMethodKey(methodText) : null;
+  if (methodPrimary) {
+    addLog(session, `📋 valuationMethod = "${methodText}" → الأسلوب الأساسي المستنتج: ${methodPrimary}`);
+  }
+
+  // ── دالة مساعدة: تعبئة حقل القيمة (dropdown أو input) ──────────────────────
+  // إذا كان العنصر mat-select أو select → selectAngular (قائمة)
+  // وإلا → fillAngular (كتابة رقم)
+  const fillValueField = async (
+    el: any,
+    numVal: number,
+    label: string,
+  ) => {
+    if (!el) return;
+    const sel = buildSelector(el);
+    if (!sel) return;
+    if (el.tag === "MAT-SELECT" || el.tag === "SELECT" || el.isMat) {
+      // حقل القيمة dropdown — اختر الخيار الأقرب للرقم نصياً
+      await selectAngular(session, sel, String(numVal), `${label} (قيمة/select)`, el.isMat);
+    } else {
+      await fillAngular(session, sel, numVal, `${label} (قيمة/input)`);
+    }
+  };
+
   // أنواع الأساليب مرتبة بالأولوية (الأعلى قيمة = أساسي)
   const approaches = [
     {
+      key:      "market" as const,
       label:    "أسلوب السوق",
       value:    Number(report.marketValue)  || 0,
       statusNames: ["market_approach","market_approach_id","marketApproach","market_approach_type","market_approach_usage","market_approach_type_id","marketApproachStatus"],
@@ -1338,8 +1374,10 @@ async function fillApproachFields(
       valueNames: ["market_approach_value","market_value","marketValue","market_approach_amount","comparable_value","marketApproachValue"],
       valueRx:  /(?:قيمة|مبلغ).*(?:سوق|مقارن)|(?:سوق|مقارن).*(?:قيمة|مبلغ)/i,
       cbRx:     /أسلوب.*سوق|المقارن|السوق/i,
+      primaryLabel: "أسلوب السوق",
     },
     {
+      key:      "income" as const,
       label:    "أسلوب الدخل",
       value:    Number(report.incomeValue)  || 0,
       statusNames: ["income_approach","income_approach_id","incomeApproach","income_approach_type","income_approach_usage","income_approach_type_id","incomeApproachStatus"],
@@ -1347,8 +1385,10 @@ async function fillApproachFields(
       valueNames: ["income_approach_value","income_value","incomeValue","income_approach_amount","incomeApproachValue"],
       valueRx:  /(?:قيمة|مبلغ).*دخل|دخل.*(?:قيمة|مبلغ)/i,
       cbRx:     /أسلوب.*دخل|الدخل/i,
+      primaryLabel: "أسلوب الدخل",
     },
     {
+      key:      "cost" as const,
       label:    "أسلوب التكلفة",
       value:    Number(report.costValue)    || 0,
       statusNames: ["cost_approach","cost_approach_id","costApproach","cost_approach_type","cost_approach_usage","cost_approach_type_id","costApproachStatus"],
@@ -1356,11 +1396,18 @@ async function fillApproachFields(
       valueNames: ["cost_approach_value","cost_value","costValue","cost_approach_amount","costApproachValue"],
       valueRx:  /(?:قيمة|مبلغ).*تكلفة|تكلفة.*(?:قيمة|مبلغ)/i,
       cbRx:     /أسلوب.*تكلفة|التكلفة/i,
+      primaryLabel: "أسلوب التكلفة",
     },
   ];
 
-  // أعلى قيمة = الأساسي
+  // أعلى قيمة = الأساسي (من الأرقام) — وإذا تساوت أو كلها صفر → استخدم methodPrimary
   const maxVal = Math.max(...approaches.map(a => a.value));
+
+  // دالة تحدد هل هذا الأسلوب أساسي
+  const isPrimaryApproach = (ap: typeof approaches[0]): boolean => {
+    if (methodPrimary) return ap.key === methodPrimary;   // الأولوية لـ valuationMethod
+    return ap.value === maxVal && ap.value > 0;
+  };
 
   // ── الاستراتيجية 1: ابحث بـ name/formControlName ──────────────────────────
   let strategy1Worked = false;
@@ -1378,17 +1425,20 @@ async function fillApproachFields(
     if (statusEl) {
       strategy1Worked = true;
       const hasValue  = ap.value > 0;
-      const isPrimary = ap.value === maxVal && ap.value > 0;
-      const usage     = isPrimary ? "مستخدم أساسي" : (hasValue ? "مستخدم مساعد" : "غير مستخدم");
+      const isPrimary = isPrimaryApproach(ap);
+      // إذا كان الأسلوب أساسياً بسبب valuationMethod وليس له قيمة رقمية → أساسي بدون قيمة
+      const usage = isPrimary ? "مستخدم أساسي" : (hasValue ? "مستخدم مساعد" : "غير مستخدم");
       await selectAngular(session, buildSelector(statusEl), usage, `${ap.label} (حالة)`, statusEl.isMat);
       if (hasValue && valueEl) {
-        await fillAngular(session, buildSelector(valueEl), ap.value, `${ap.label} (قيمة)`);
+        await fillValueField(valueEl, ap.value, ap.label);
       }
     }
   }
 
   if (strategy1Worked) {
     addLog(session, "✅ أساليب التقييم: اكتملت باستراتيجية 1 (name/formControlName)");
+    // اختر الأسلوب الأساسي من الحقل المنفصل إن وجد
+    await fillPrimaryApproachSelect(session, els, approaches, isPrimaryApproach, methodText);
     return;
   }
 
@@ -1482,20 +1532,23 @@ async function fillApproachFields(
 
       if (found) {
         const hasValue  = ap.value > 0;
-        const isPrimary = ap.value === maxVal && ap.value > 0;
+        const isPrimary = isPrimaryApproach(ap);
         const usage     = isPrimary ? "مستخدم أساسي" : (hasValue ? "مستخدم مساعد" : "غير مستخدم");
         // تحقق أن الخيار موجود في القائمة
         const actualUsage = found.options.find(o => o.includes(usage) || usage.includes(o)) ?? "غير مستخدم";
         await selectAngular(session, buildSelector(found.el), actualUsage, `${ap.label} (حالة)`, found.el.isMat);
-        // قيمة الأسلوب
+        // قيمة الأسلوب (dropdown أو input)
         const valEl = findEl2(ap.valueNames, ap.valueRx);
         if (hasValue && valEl) {
-          await fillAngular(session, buildSelector(valEl), ap.value, `${ap.label} (قيمة)`);
+          await fillValueField(valEl, ap.value, ap.label);
         }
       } else {
         addLog(session, `⚠️ لم يُطابَق أسلوب "${ap.label}" مع أي select`);
       }
     }
+
+    // ── اختيار الأسلوب الأساسي من قائمة "الأسلوب الأساسي" المنفصلة (إن وجدت) ──
+    await fillPrimaryApproachSelect(session, els, approaches, isPrimaryApproach, methodText);
     return;
   }
 
@@ -1505,30 +1558,50 @@ async function fillApproachFields(
   for (const ap of approaches) {
     const cbEl = cbs.find(c => ap.cbRx.test(c.labelText || "") || ap.cbRx.test(c.ariaLabel || ""));
     if (cbEl) {
-      const shouldCheck = ap.value > 0;
+      const shouldCheck = ap.value > 0 || isPrimaryApproach(ap);
       await checkBox(session, buildSelector(cbEl), shouldCheck, `${ap.label} (checkbox)`);
-      // قيمة الأسلوب
+      // قيمة الأسلوب (dropdown أو input)
       const valEl = findEl2(ap.valueNames, ap.valueRx);
-      if (shouldCheck && valEl) {
-        await fillAngular(session, buildSelector(valEl), ap.value, `${ap.label} (قيمة)`);
+      if (ap.value > 0 && valEl) {
+        await fillValueField(valEl, ap.value, ap.label);
       }
     } else {
       addLog(session, `⚠️ لم يُعثر على checkbox "${ap.label}"`);
     }
   }
 
-  // الأسلوب الأساسي: ابحث عن radio buttons أو select خاص بالأسلوب الأساسي
-  const primaryAp = approaches.find(a => a.value === maxVal && a.value > 0);
-  if (primaryAp) {
-    const primaryEl =
-      els.find(e => e.type === "radio" && /أسلوب.*أساسي|primary.*approach/i.test(e.labelText || "")) ??
-      findEl(els, /أسلوب.*أساسي|primary.*approach/i);
-    if (primaryEl) {
-      const val = primaryAp.label.includes("سوق") ? "أسلوب السوق" :
-                  primaryAp.label.includes("دخل") ? "أسلوب الدخل" : "أسلوب التكلفة";
-      await selectAngular(session, buildSelector(primaryEl), val, "الأسلوب الأساسي", primaryEl.isMat);
-    }
+  // ── اختيار الأسلوب الأساسي من قائمة "الأسلوب الأساسي" المنفصلة ──────────
+  await fillPrimaryApproachSelect(session, els, approaches, isPrimaryApproach, methodText);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// تعبئة حقل "الأسلوب الأساسي" المنفصل (radio / select / mat-select)
+// يُستخدم نص valuationMethod مباشرة للمطابقة مع خيارات القائمة
+// ─────────────────────────────────────────────────────────────────────────────
+async function fillPrimaryApproachSelect(
+  session: AutomationSession,
+  els: any[],
+  approaches: Array<{ key: string; label: string; value: number; cbRx: RegExp; primaryLabel: string }>,
+  isPrimaryApproach: (ap: any) => boolean,
+  methodText: string,
+): Promise<void> {
+  // ابحث عن عنصر "الأسلوب الأساسي" (radio أو select أو mat-select)
+  const primaryEl =
+    els.find(e => e.type === "radio" && /أسلوب.*أساسي|primary.*approach/i.test(e.labelText || "")) ??
+    findEl(els, /(?:select|اختر).*أسلوب.*أساسي|أسلوب.*أساسي|primary.*approach/i);
+
+  if (!primaryEl) {
+    addLog(session, "ℹ️ لم يُعثر على حقل «الأسلوب الأساسي» المنفصل");
+    return;
   }
+
+  const primaryAp = approaches.find(a => isPrimaryApproach(a));
+  if (!primaryAp) return;
+
+  // قيمة للاختيار: استخدم النص الأصلي من PDF أولاً، ثم الـ label
+  const valueToSelect = methodText || primaryAp.primaryLabel;
+  addLog(session, `🎯 الأسلوب الأساسي (حقل منفصل): "${valueToSelect}"`);
+  await selectAngular(session, buildSelector(primaryEl), valueToSelect, "الأسلوب الأساسي", primaryEl.isMat);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
