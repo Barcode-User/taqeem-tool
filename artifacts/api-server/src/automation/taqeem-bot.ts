@@ -1265,10 +1265,17 @@ async function selectNativeByName(
     addLog(session, `⏭️ تخطي "${label}" — لا توجد قيمة`);
     return;
   }
+
+  // نطبّق التطبيع هنا في Node.js ثم نمرره للمتصفح
+  const normVal = normalizeAr(value);
+  // نزيل "ال" التعريف من البداية للمطابقة الأكثر مرونة
+  const stemVal = normVal.replace(/^ال/, "");
+
   const sel = `[name="${name}"]`;
   try {
     await session.page.waitForSelector(sel, { timeout: 3000 });
-    // حاول بالنص ثم بالقيمة
+
+    // محاولة 1: page.selectOption بالنص الأصلي ثم القيمة
     const chosen = await session.page
       .selectOption(sel, { label: value })
       .catch(() => session.page.selectOption(sel, { value }).catch(() => []));
@@ -1279,30 +1286,51 @@ async function selectNativeByName(
       addLog(session, `✅ ${label}: ${value}`);
       return;
     }
-    // إذا لم يطابق بالضبط، ابحث جزئياً
-    const matched = await session.page.evaluate(
-      (args: { sel: string; val: string }) => {
+
+    // محاولة 2: مطابقة مرنة مع تطبيع عربي + تجريد "ال"
+    const result = await session.page.evaluate(
+      (args: { sel: string; nv: string; stem: string }) => {
+        const norm = (s: string) => (s ?? "")
+          .trim()
+          .replace(/[يىیے]/g, "ي")
+          .replace(/[كکڪ]/g, "ك")
+          .replace(/ة/g, "ه")
+          .replace(/\s+/g, " ");
+
         const el = document.querySelector<HTMLSelectElement>(args.sel);
-        if (!el) return null;
-        const opt = Array.from(el.options).find(o =>
-          o.text.trim().includes(args.val) || args.val.includes(o.text.trim()),
-        );
+        if (!el) return { matched: null, available: [] as string[] };
+
+        const opts = Array.from(el.options);
+        const available = opts.map(o => o.text.trim()).filter(t => t);
+
+        const opt = opts.find(o => {
+          const t = norm(o.text);
+          const tStem = t.replace(/^ال/, "");
+          return (
+            t === args.nv ||
+            t.includes(args.nv) || args.nv.includes(t) ||
+            tStem === args.stem ||
+            tStem.includes(args.stem) || args.stem.includes(tStem)
+          );
+        });
+
         if (opt) {
           el.value = opt.value;
           el.dispatchEvent(new Event("change", { bubbles: true }));
-          return opt.text;
+          return { matched: opt.text, available };
         }
-        return null;
+        return { matched: null, available };
       },
-      { sel, val: value },
+      { sel, nv: normVal, stem: stemVal },
     );
-    if (matched) {
-      addLog(session, `✅ ${label}: ${matched} (مطابقة جزئية)`);
+
+    if (result.matched) {
+      addLog(session, `✅ ${label}: ${result.matched} (مطابقة مرنة من "${value}")`);
     } else {
-      addLog(session, `⚠️ "${label}": الخيار "${value}" غير موجود`);
+      addLog(session, `⚠️ "${label}": "${value}" غير موجود — المتاح: ${result.available.slice(0, 8).join(" | ")}`);
     }
-  } catch {
-    addLog(session, `⚠️ لم يُحدَّد "${label}"`);
+  } catch (e: any) {
+    addLog(session, `⚠️ لم يُحدَّد "${label}": ${e.message}`);
   }
 }
 
