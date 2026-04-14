@@ -359,8 +359,15 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     await page.waitForTimeout(800);
     await screenshot(page, `p3_after_${reportId}`);
 
-    // ── ضغط زر "continue" — صفحة المراجعة ───────────────────────────────
-    await clickContinueButton(session);
+    // ── ضغط زر "حفظ واستمرار" أولاً ثم "continue" كاحتياط ───────────────
+    const urlBeforeSaveP3 = page.url();
+    await clickSaveAndContinue(session);
+    await page.waitForTimeout(1000);
+    // إذا لم يتغير URL → جرب clickContinueButton أيضاً
+    if (page.url() === urlBeforeSaveP3) {
+      addLog(session, "ℹ️ URL لم يتغير بعد حفظ واستمرار — أجرب زر المتابعة");
+      await clickContinueButton(session);
+    }
     await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
     await page.waitForTimeout(2000);
 
@@ -897,57 +904,70 @@ async function selectRadio(
   }
 }
 
-// ضغط زر "حفظ واستمرار"
+// ضغط زر "حفظ واستمرار" — مع إزالة disabled إجباراً إن لزم
 async function clickSaveAndContinue(session: AutomationSession): Promise<void> {
   const { page } = session;
   addLog(session, "🖱️ ضغط «حفظ واستمرار»...");
 
-  const btnSelectors = [
-    'button:has-text("حفظ واستمرار")',
-    'button:has-text("حفظ و استمرار")',
-    'button:has-text("Save & Continue")',
-    'button:has-text("Save")',
-    'button[type="submit"]',
-    'input[type="submit"]',
-  ];
-
-  for (const sel of btnSelectors) {
+  // ── محاولة 1: ابحث بالنص مع force click ──────────────────────────────────
+  const textPatterns = ["حفظ واستمرار", "حفظ و استمرار", "Save & Continue", "حفظ", "Save"];
+  for (const txt of textPatterns) {
     try {
-      const btn = await page.$(sel);
-      if (!btn) continue;
-
-      // تأكد من أن الزر مرئي وقابل للنقر
-      const isVisible = await btn.isVisible().catch(() => false);
-      const isEnabled = await btn.isEnabled().catch(() => false);
-      if (!isVisible || !isEnabled) continue;
-
-      await btn.scrollIntoViewIfNeeded().catch(() => {});
-      await btn.click();
-      await page.waitForTimeout(800); // انتظر بسيط ثم waitForPageTransition يتولى الباقي
-      addLog(session, `✅ تم الضغط على الزر: ${sel}`);
-      return;
-    } catch { /* جرّب التالي */ }
+      const loc = page.locator(`button:has-text("${txt}"), input[value*="${txt}"]`).first();
+      if (await loc.count().catch(() => 0) > 0) {
+        await loc.scrollIntoViewIfNeeded().catch(() => {});
+        await loc.click({ force: true, timeout: 4000 });
+        await page.waitForTimeout(500);
+        addLog(session, `✅ تم الضغط: "${txt}" (force)`);
+        return;
+      }
+    } catch { /* تابع */ }
   }
 
-  // محاولة أخيرة: ابحث في الصفحة بالنص العربي مباشرة
+  // ── محاولة 2: إزالة disabled وإجبار النقر ─────────────────────────────────
   try {
-    const clicked = await page.evaluate(() => {
-      const btns = Array.from(document.querySelectorAll("button, input[type='submit']"));
+    const result = await page.evaluate(() => {
+      const keywords = ["حفظ", "save", "استمرار", "continue"];
+      const btns = Array.from(document.querySelectorAll<HTMLButtonElement | HTMLInputElement>(
+        "button, input[type='submit'], input[type='button']"
+      ));
       const target = btns.find(b => {
-        const t = (b.textContent ?? (b as HTMLInputElement).value ?? "").trim();
-        return t.includes("حفظ") || t.includes("Save") || t.includes("استمرار");
-      }) as HTMLElement | undefined;
-      if (target) { target.click(); return true; }
-      return false;
+        const t = (b.textContent ?? (b as HTMLInputElement).value ?? "").toLowerCase().trim();
+        return keywords.some(k => t.includes(k));
+      }) ?? btns.find(b => (b as HTMLButtonElement).type === "submit") ?? btns[btns.length - 1];
+      if (!target) return null;
+      // أزل disabled
+      target.removeAttribute("disabled");
+      (target as HTMLButtonElement).disabled = false;
+      const mat = target.closest("[mat-button],[mat-raised-button],[mat-flat-button]");
+      if (mat) { (mat as HTMLElement).removeAttribute("disabled"); }
+      target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      target.click();
+      return target.textContent?.trim().slice(0, 30) ?? (target as HTMLInputElement).value ?? "?";
     });
-    if (clicked) {
-      await page.waitForTimeout(800);
-      addLog(session, "✅ تم الضغط على زر الحفظ (بحث مباشر)");
+    if (result) {
+      await page.waitForTimeout(500);
+      addLog(session, `✅ تم إجبار النقر: "${result}"`);
+      return;
+    }
+  } catch { /* تابع */ }
+
+  // ── محاولة 3: form submit event ───────────────────────────────────────────
+  try {
+    const ok = await page.evaluate(() => {
+      const form = document.querySelector<HTMLFormElement>("form");
+      if (!form) return false;
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      return true;
+    });
+    if (ok) {
+      await page.waitForTimeout(500);
+      addLog(session, "✅ تم إرسال النموذج (form submit)");
       return;
     }
   } catch { /* تجاهل */ }
 
-  addLog(session, "⚠️ لم يُعثر على زر «حفظ واستمرار» — المتابعة بدون ضغط");
+  addLog(session, "⚠️ لم يُعثر على زر «حفظ واستمرار»");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1575,33 +1595,48 @@ async function fillApproachFields(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// تعبئة حقل "الأسلوب الأساسي" المنفصل (radio / select / mat-select)
+// تعبئة حقل "الأسلوب الأساسي / أساسي لتقدير القيمة" المنفصل
 // يُستخدم نص valuationMethod مباشرة للمطابقة مع خيارات القائمة
 // ─────────────────────────────────────────────────────────────────────────────
 async function fillPrimaryApproachSelect(
   session: AutomationSession,
   els: any[],
-  approaches: Array<{ key: string; label: string; value: number; cbRx: RegExp; primaryLabel: string }>,
+  approaches: Array<{ key: string; label: string; value: number; cbRx: RegExp; primaryLabel: string; valueNames: string[]; valueRx: RegExp }>,
   isPrimaryApproach: (ap: any) => boolean,
   methodText: string,
 ): Promise<void> {
-  // ابحث عن عنصر "الأسلوب الأساسي" (radio أو select أو mat-select)
+  // ابحث عن عنصر "الأسلوب الأساسي / أساسي لتقدير القيمة" (radio/select/mat-select)
   const primaryEl =
     els.find(e => e.type === "radio" && /أسلوب.*أساسي|primary.*approach/i.test(e.labelText || "")) ??
-    findEl(els, /(?:select|اختر).*أسلوب.*أساسي|أسلوب.*أساسي|primary.*approach/i);
-
-  if (!primaryEl) {
-    addLog(session, "ℹ️ لم يُعثر على حقل «الأسلوب الأساسي» المنفصل");
-    return;
-  }
+    findEl(els, /أساسي.*(?:لتقدير|تقدير|قيمة)|تقدير.*أساسي|(?:select|اختر).*أسلوب.*أساسي|أسلوب.*أساسي|primary.*approach/i);
 
   const primaryAp = approaches.find(a => isPrimaryApproach(a));
-  if (!primaryAp) return;
 
-  // قيمة للاختيار: استخدم النص الأصلي من PDF أولاً، ثم الـ label
-  const valueToSelect = methodText || primaryAp.primaryLabel;
-  addLog(session, `🎯 الأسلوب الأساسي (حقل منفصل): "${valueToSelect}"`);
-  await selectAngular(session, buildSelector(primaryEl), valueToSelect, "الأسلوب الأساسي", primaryEl.isMat);
+  if (primaryEl && primaryAp) {
+    // قيمة للاختيار: استخدم النص الأصلي من PDF أولاً، ثم الـ label
+    const valueToSelect = methodText || primaryAp.primaryLabel;
+    addLog(session, `🎯 الأسلوب الأساسي (حقل منفصل): "${valueToSelect}"`);
+    await selectAngular(session, buildSelector(primaryEl), valueToSelect, "الأسلوب الأساسي", primaryEl.isMat);
+
+    // ── بحث عن حقل القيمة المرتبط بالأسلوب الأساسي ──────────────────────────
+    // يبحث في els عن input/mat-select اسمه يحتوي "primary_value" أو label يحتوي "قيمة أساسي"
+    const primaryValEl =
+      els.find(e => /primary.?value|primaryvalue|value.?primary/i.test(`${e.name}${e.formControlName}`)) ??
+      findEl(els, /قيمة.*(?:أسلوب.*أساسي|أساسي)|(?:أسلوب.*أساسي|أساسي).*قيمة/i);
+
+    if (primaryValEl && primaryAp.value > 0) {
+      const sel = buildSelector(primaryValEl);
+      if (primaryValEl.tag === "MAT-SELECT" || primaryValEl.tag === "SELECT" || primaryValEl.isMat) {
+        await selectAngular(session, sel, String(primaryAp.value), "قيمة الأسلوب الأساسي", primaryValEl.isMat);
+      } else {
+        await fillAngular(session, sel, primaryAp.value, "قيمة الأسلوب الأساسي");
+      }
+    } else if (!primaryValEl) {
+      addLog(session, "ℹ️ لم يُعثر على حقل «قيمة الأسلوب الأساسي» المنفصل");
+    }
+  } else if (!primaryEl) {
+    addLog(session, "ℹ️ لم يُعثر على حقل «الأسلوب الأساسي» المنفصل");
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1808,21 +1843,77 @@ async function fillAttributePage(
   }
 
   // ── المرافق (checkboxes) ─────────────────────────────────────────────────
-  const checkboxes = els.filter(e => e.type === "checkbox");
-  if (report.utilities && checkboxes.length > 0) {
-    const utilsStr = String(report.utilities).toLowerCase();
-    const utilMap: Record<string, RegExp> = {
-      "كهرباء":    /كهرباء|electricity/i,
-      "مياه":      /مياه|water/i,
-      "صرف صحي":  /صرف|sewage/i,
-      "غاز":       /غاز|gas/i,
-      "طرق":       /طرق|road/i,
-    };
-    for (const [label, rx] of Object.entries(utilMap)) {
-      const cbEl = checkboxes.find(e => rx.test(`${e.name}|${e.labelText}|${e.ariaLabel}`));
-      if (cbEl) {
-        const shouldCheck = rx.test(utilsStr) || utilsStr.includes(label);
-        await checkBox(session, buildSelector(cbEl), shouldCheck, `مرفق: ${label}`);
+  await fillUtilitiesCheckboxes(session, els, report);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// تعبئة checkboxes "المرافق المتاحة" — تحقق مباشرة من النص المستخرج
+// إذا كان اسم checkbox يطابق أي كلمة في report.utilities → ضع check
+// كما تفحص DOM مباشرة لالتقاط mat-checkbox التي لم تُكتشف بـ scanElements
+// ─────────────────────────────────────────────────────────────────────────────
+async function fillUtilitiesCheckboxes(
+  session: AutomationSession,
+  els: any[],
+  report: any,
+): Promise<void> {
+  if (!report.utilities) return;
+
+  const utilsStr = String(report.utilities).toLowerCase();
+  addLog(session, `🔧 تعبئة المرافق من النص: "${report.utilities}"`);
+
+  // خريطة شاملة: [مفاتيح بحث في نص PDF] → [regex للـ checkbox]
+  const utilMap: Array<{ keywords: RegExp; checkboxRx: RegExp; label: string }> = [
+    { keywords: /كهرباء|electricity|electric/i,        checkboxRx: /كهرباء|electricity|electric|power/i,          label: "كهرباء" },
+    { keywords: /مياه|ماء|water|drinking/i,             checkboxRx: /مياه|ماء|water|drinking/i,                    label: "مياه" },
+    { keywords: /صرف|sewage|sewer|drainage/i,           checkboxRx: /صرف|sewage|sewer|drain/i,                     label: "صرف صحي" },
+    { keywords: /غاز|gas/i,                             checkboxRx: /غاز|gas/i,                                    label: "غاز" },
+    { keywords: /طرق|road|street|access/i,              checkboxRx: /طرق|road|street|access/i,                     label: "طرق" },
+    { keywords: /هاتف|اتصالات|telephone|telecom|communication/i,
+                                                        checkboxRx: /هاتف|اتصالات|telephone|telecom|comm/i,        label: "اتصالات" },
+    { keywords: /إنترنت|انترنت|internet/i,              checkboxRx: /إنترنت|انترنت|internet/i,                     label: "إنترنت" },
+    { keywords: /إضاءة|اضاءة|lighting|light/i,          checkboxRx: /إضاءة|اضاءة|lighting/i,                      label: "إضاءة" },
+  ];
+
+  const checkboxes = els.filter(e => e.type === "checkbox" || e.tag === "MAT-CHECKBOX");
+
+  for (const util of utilMap) {
+    const shouldCheck = util.keywords.test(utilsStr);
+
+    // ابحث في els المكتشفة أولاً
+    const cbEl = checkboxes.find(e => {
+      const combined = `${e.formControlName ?? ""}|${e.name ?? ""}|${e.labelText ?? ""}|${e.ariaLabel ?? ""}`;
+      return util.checkboxRx.test(combined);
+    });
+
+    if (cbEl) {
+      await checkBox(session, buildSelector(cbEl), shouldCheck, `مرفق: ${util.label}`);
+      continue;
+    }
+
+    // إذا لم يُعثر عليها في els → ابحث في DOM مباشرة
+    if (shouldCheck) {
+      const clicked = await session.page.evaluate((rx: string) => {
+        const r = new RegExp(rx, "i");
+        // ابحث في mat-checkbox وعناصر label
+        const candidates = Array.from(document.querySelectorAll<HTMLElement>(
+          "mat-checkbox, input[type='checkbox']"
+        ));
+        for (const el of candidates) {
+          const lbl = el.textContent?.trim() ?? el.getAttribute("aria-label") ?? "";
+          if (r.test(lbl)) {
+            // إذا كان mat-checkbox انقر عليه
+            const cb = el.querySelector<HTMLInputElement>("input[type='checkbox']") ?? el as any;
+            if (!cb.checked) { el.click(); }
+            return lbl;
+          }
+        }
+        return null;
+      }, util.checkboxRx.source).catch(() => null);
+
+      if (clicked) {
+        addLog(session, `✅ مرفق (DOM مباشر): ${util.label} — ${clicked}`);
+      } else {
+        addLog(session, `ℹ️ مرفق "${util.label}" غير موجود في الصفحة`);
       }
     }
   }
@@ -2128,25 +2219,7 @@ async function fillPage3(session: AutomationSession, report: any, els: any[], pd
   if (facadeEl) await selectAngular(session, buildSelector(facadeEl), report.streetFacades, "الاتجاهات المطلة", facadeEl.isMat);
 
   // المرافق (checkboxes) — نُحدد المرافق الموجودة في `report.utilities`
-  if (report.utilities && checkboxes.length > 0) {
-    const utilsStr = String(report.utilities).toLowerCase();
-    const utilMap: Record<string, RegExp> = {
-      "كهرباء": /كهرباء|electricity|electric/i,
-      "مياه شرب": /مياه|water|drinking/i,
-      "صرف صحي": /صرف|sewage|sewer/i,
-      "غاز طبيعي": /غاز|gas/i,
-      "طرق رئيسية": /طرق|road|street/i,
-    };
-    for (const [label, rx] of Object.entries(utilMap)) {
-      const cbEl = checkboxes.find(e =>
-        rx.test(e.formControlName + e.name + e.labelText + e.ariaLabel),
-      );
-      if (cbEl) {
-        const shouldCheck = rx.test(utilsStr) || utilsStr.includes(label);
-        await checkBox(session, buildSelector(cbEl), shouldCheck, `مرفق: ${label}`);
-      }
-    }
-  }
+  await fillUtilitiesCheckboxes(session, els, report);
 
   // ── مساحة الأرض (م²) ─────────────────────────────────────────────────────
   const landEl = findEl(inputs,
