@@ -261,47 +261,66 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     await page.waitForTimeout(600);
     await screenshot(page, `p2_after_${reportId}`);
 
-    // ── ضغط زر "continue" للانتقال للصفحة 3 ──────────────────────────────
-    const urlBeforePage3 = page.url();
+    // ── ضغط زر "continue" — حفظ الصفحة 2 ──────────────────────────────────
+    const urlBeforeSave = page.url();
     await clickContinueButton(session);
 
-    // ── انتظار الانتقال لـ /report/attribute/create/{taqeemReportId} ──────
-    addLog(session, "⏳ انتظار الانتقال لصفحة السمات...");
-    const expectedPage3 = `${TAQEEM_URL}/report/attribute/create/${taqeemReportId}`;
+    // ── انتظار أي انتقال بعد الحفظ (TAQEEM قد يُعيد رقماً جديداً للأصل) ──
+    addLog(session, "⏳ انتظار الانتقال بعد حفظ الصفحة 2...");
+    await page.waitForFunction(
+      (prev: string) => window.location.href !== prev,
+      urlBeforeSave,
+      { timeout: 30000 },
+    ).catch(() => addLog(session, "⚠️ URL لم يتغير بعد 30 ثانية"));
 
-    await page
-      .waitForURL(`${TAQEEM_URL}/report/attribute/create/**`, { timeout: 25000 })
-      .catch(async () => {
-        // fallback: انتظر أي تغيير في URL
-        await page.waitForFunction(
-          (prev: string) => window.location.href !== prev,
-          urlBeforePage3,
-          { timeout: 25000 },
-        ).catch(() => {});
-      });
+    await page.waitForLoadState("domcontentloaded", { timeout: 15000 }).catch(() => {});
+    await page.waitForTimeout(1200);
 
-    await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
-    await page.waitForTimeout(1500);
+    const afterSavePage2Url = page.url();
+    addLog(session, `🔗 URL بعد حفظ الصفحة 2: ${afterSavePage2Url}`);
 
-    // ── تحقق من تطابق الرقم في صفحة 3 ───────────────────────────────────
-    const page3ActualUrl = page.url();
-    addLog(session, `🔗 URL الصفحة 3 الفعلي: ${page3ActualUrl}`);
-    addLog(session, `🔗 URL الصفحة 3 المتوقع: ${expectedPage3}`);
+    // ── استخرج الـ ID الصحيح من URL الانتقال ──────────────────────────────
+    // المسارات المتوقعة من TAQEEM:
+    //   /report/asset/{assetId}/edit         ← رقم الأصل الجديد
+    //   /report/attribute/create/{assetId}   ← انتقل مباشرة للصفحة 3
+    //   /report/asset/create/{reportId}      ← لم يتغير (خطأ في التحقق)
+    let assetId: string = taqeemReportId; // احتياط: استخدم الـ ID الأصلي
 
-    if (!page3ActualUrl.includes(`/report/attribute/create/${taqeemReportId}`)) {
-      addLog(session, `⚠️ عدم تطابق — ID الفعلي في URL: ${page3ActualUrl.match(/\/(\d+)$/)?.[1] ?? "غير موجود"}`);
-      addLog(session, `↩️ التنقل المباشر لصفحة السمات بـ ID الصحيح: ${taqeemReportId}`);
-      await page.goto(expectedPage3, { waitUntil: "networkidle", timeout: 30000 });
+    const assetEditMatch = afterSavePage2Url.match(/\/report\/asset\/(\d+)\/edit/);
+    const attrCreateMatch = afterSavePage2Url.match(/\/report\/attribute\/create\/(\d+)/);
+    const anyIdMatch = afterSavePage2Url.match(/\/(\d+)(?:\/|$)/);
+
+    if (assetEditMatch) {
+      assetId = assetEditMatch[1];
+      addLog(session, `🆔 رقم الأصل الجديد (asset/edit): ${assetId}`);
+    } else if (attrCreateMatch) {
+      assetId = attrCreateMatch[1];
+      addLog(session, `🆔 انتقل مباشرة لصفحة السمات — ID: ${assetId}`);
+    } else if (anyIdMatch && anyIdMatch[1] !== taqeemReportId) {
+      assetId = anyIdMatch[1];
+      addLog(session, `🆔 رقم مختلف في URL: ${assetId} (بدلاً من ${taqeemReportId})`);
+    } else {
+      addLog(session, `ℹ️ لم يتغير الـ ID — يُستخدم: ${taqeemReportId}`);
+    }
+
+    // ── رابط الصفحة 3 بالـ ID الصحيح ────────────────────────────────────
+    const expectedPage3 = `${TAQEEM_URL}/report/attribute/create/${assetId}`;
+    addLog(session, `🔗 الصفحة 3 المتوقعة: ${expectedPage3}`);
+
+    // إذا لم نكن على صفحة attribute/create بعد → انتقل إليها
+    if (!afterSavePage2Url.includes("/report/attribute/create/")) {
+      addLog(session, "↩️ الانتقال المباشر لصفحة السمات...");
+      await page.goto(expectedPage3, { waitUntil: "domcontentloaded", timeout: 30000 });
       await page.waitForTimeout(1500);
     }
-    addLog(session, `✅ تأكيد URL الصفحة 3 [ID: ${taqeemReportId}]: ${page.url()}`);
+    addLog(session, `✅ تأكيد URL الصفحة 3 [assetId: ${assetId}]: ${page.url()}`);
 
     // ════════════════════════════════════════════════════════════════════════
-    // الصفحة 3: /report/attribute/create/{taqeemReportId}
+    // الصفحة 3: /report/attribute/create/{assetId}
     // البيانات الإضافية وسمات الأصل
     // ════════════════════════════════════════════════════════════════════════
     addLog(session, "═══════════════════════════════════════════════");
-    addLog(session, `▶ الصفحة 3 [ID: ${taqeemReportId}]: السمات والبيانات الإضافية`);
+    addLog(session, `▶ الصفحة 3 [assetId: ${assetId}]: السمات والبيانات الإضافية`);
     addLog(session, "═══════════════════════════════════════════════");
 
     // ── تحقق أننا فعلاً على صفحة 3 قبل البدء ──────────────────────────────
