@@ -1017,17 +1017,76 @@ async function clickContinueButton(session: AutomationSession): Promise<void> {
       const all = Array.from(document.querySelectorAll<HTMLInputElement | HTMLButtonElement>(
         "input[type='submit'], button[type='submit']",
       ));
-      // تجاهل زر "save" إذا وُجد continue
-      const cont = all.find(b => {
-        const v = ((b as HTMLInputElement).name ?? "").toLowerCase();
-        return v === "continue";
-      });
+      const cont = all.find(b => ((b as HTMLInputElement).name ?? "").toLowerCase() === "continue");
       const target = cont ?? all[all.length - 1];
       if (target) { target.click(); return (target as HTMLInputElement).name ?? "?"; }
       return null;
     });
     if (clicked) {
       addLog(session, `✅ تم الضغط (آخر زر submit): name="${clicked}"`);
+      return;
+    }
+  } catch { /* تابع */ }
+
+  // ── الأولوية 5: إزالة disabled من زر Angular وإجبار النقر ────────────────
+  // Angular يُعطّل الزر عند وجود أخطاء في النموذج — نتخطى ذلك
+  addLog(session, "ℹ️ محاولة إزالة disabled وإجبار النقر...");
+  try {
+    const forcedResult = await page.evaluate(() => {
+      const keywords = ["حفظ", "استمرار", "متابعة", "تالي", "save", "continue", "next", "submit"];
+
+      // ابحث عن أي زر (حتى disabled) يطابق النصوص
+      const allBtns = Array.from(document.querySelectorAll<HTMLButtonElement | HTMLInputElement>(
+        "button, input[type='submit'], input[type='button']"
+      ));
+
+      const target = allBtns.find(b => {
+        const txt = (b.textContent ?? (b as HTMLInputElement).value ?? "").toLowerCase().trim();
+        return keywords.some(k => txt.includes(k));
+      }) ?? allBtns.find(b => (b as HTMLButtonElement).type === "submit")
+        ?? allBtns[allBtns.length - 1];
+
+      if (!target) return null;
+
+      // أزل disabled
+      target.removeAttribute("disabled");
+      (target as HTMLButtonElement).disabled = false;
+
+      // أزل disabled من Angular Material wrapper إن وجد
+      const matBtn = target.closest("[mat-button],[mat-raised-button],[mat-flat-button]");
+      if (matBtn) {
+        (matBtn as HTMLElement).removeAttribute("disabled");
+        (matBtn as HTMLElement).setAttribute("aria-disabled", "false");
+      }
+
+      // أطلق click events
+      target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      target.click();
+
+      return target.textContent?.trim().slice(0, 30) ?? (target as HTMLInputElement).value ?? "?";
+    });
+
+    if (forcedResult) {
+      await page.waitForTimeout(800);
+      addLog(session, `✅ تم إجبار النقر على: "${forcedResult}"`);
+      return;
+    }
+  } catch (e: any) {
+    addLog(session, `⚠️ فشل إجبار النقر: ${e.message}`);
+  }
+
+  // ── الأولوية 6: إرسال النموذج مباشرة عبر Angular form ────────────────────
+  try {
+    const submitted = await page.evaluate(() => {
+      // ابحث عن Angular NgForm أو form عادي
+      const form = document.querySelector<HTMLFormElement>("form");
+      if (!form) return false;
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      return true;
+    });
+    if (submitted) {
+      await page.waitForTimeout(800);
+      addLog(session, "✅ تم إرسال النموذج مباشرة (form submit event)");
       return;
     }
   } catch { /* تابع */ }
