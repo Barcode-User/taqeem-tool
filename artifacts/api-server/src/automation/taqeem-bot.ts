@@ -798,6 +798,17 @@ async function fillDate(
   }
 }
 
+// ─── تطبيع النص العربي: توحيد الياء والكاف والهمزات ────────────────────────
+// يحل مشكلة الياء الفارسية (ی) مقابل العربية (ي) الشائعة في PDF
+function normalizeAr(s: string): string {
+  return (s ?? "")
+    .trim()
+    .replace(/[يىیے]/g, "ي")   // توحيد جميع أشكال الياء
+    .replace(/[كکڪ]/g, "ك")   // توحيد الكاف
+    .replace(/ة/g, "ه")        // تاء مربوطة → هاء (اختياري — يحسن التطابق)
+    .replace(/\s+/g, " ");
+}
+
 // اختيار من قائمة منسدلة — يدعم native select و mat-select
 async function selectAngular(
   session: AutomationSession, selector: string,
@@ -809,12 +820,12 @@ async function selectAngular(
     return;
   }
   const { page } = session;
+  const normVal = normalizeAr(value);
 
   // ── محاولة 1: native HTML select ──────────────────────────────────────────
   if (!isMat) {
     try {
       await page.waitForSelector(selector, { timeout: 800 });
-      // جرّب بالنص أولاً ثم بالقيمة
       const chosen = await page.selectOption(selector, { label: value }).catch(() =>
         page.selectOption(selector, { value }).catch(() => []),
       );
@@ -828,47 +839,55 @@ async function selectAngular(
     } catch { /* ننتقل لـ mat-select */ }
   }
 
-  // ── محاولة 2: Angular Material mat-select ─────────────────────────────────
+  // ── محاولة 2: Angular Material mat-select — Playwright native click ────────
+  // استخدام Playwright locator بدلاً من JS click() لأن Angular CDK يحتاج
+  // أحداث الفأرة الحقيقية (mousedown/mouseup) وليس فقط click event
   try {
     await page.waitForSelector(selector, { timeout: 800 });
-    // افتح القائمة بالنقر
     await page.click(selector);
-    // انتظر ظهور panel الخيارات
     await page.waitForSelector(
       "mat-option, .mat-option, .mat-mdc-option",
       { timeout: 3000 },
     );
-    await page.waitForTimeout(150);
+    await page.waitForTimeout(200);
 
-    // جرّب إيجاد الخيار بالنص المطابق
-    const clicked = await page.evaluate((val: string) => {
-      const options = Array.from(
+    // ابحث عن الخيار المطابق مع تطبيع النص العربي
+    const optionText = await page.evaluate((nv: string) => {
+      const opts = Array.from(
         document.querySelectorAll("mat-option, .mat-option, .mat-mdc-option"),
       );
-      const target = options.find(opt => {
-        const text = opt.textContent?.trim() ?? "";
-        return text === val || text.includes(val) || val.includes(text);
-      }) as HTMLElement | undefined;
-      if (target) { target.click(); return true; }
-      return false;
-    }, value);
+      const norm = (s: string) => (s ?? "")
+        .trim()
+        .replace(/[يىیے]/g, "ي")
+        .replace(/[كکڪ]/g, "ك")
+        .replace(/ة/g, "ه")
+        .replace(/\s+/g, " ");
+      const target = opts.find(o => {
+        const t = norm(o.textContent ?? "");
+        return t === nv || t.includes(nv) || nv.includes(t);
+      });
+      return target ? (target.textContent ?? "").trim() : null;
+    }, normVal);
 
-    if (clicked) {
-      await page.waitForTimeout(150);
-      addLog(session, `✅ ${label}: ${value} (mat-select)`);
+    if (optionText !== null) {
+      // استخدم Playwright locator لضمان أحداث الفأرة الحقيقية
+      const optLoc = page.locator("mat-option, .mat-option, .mat-mdc-option")
+        .filter({ hasText: optionText });
+      await optLoc.first().click({ timeout: 2000 });
+      await page.waitForTimeout(300);
+      addLog(session, `✅ ${label}: ${value}`);
       return;
     }
 
-    // إذا لم يُعثر على الخيار بالضبط → سجّل الخيارات المتاحة
+    // لم يُعثر على الخيار → سجّل المتاح وأغلق
     const available = await page.evaluate(() =>
       Array.from(document.querySelectorAll("mat-option, .mat-option, .mat-mdc-option"))
-        .map(o => o.textContent?.trim() ?? ""),
+        .map(o => (o.textContent ?? "").trim()).filter(t => t),
     );
-    addLog(session, `⚠️ الخيار "${value}" غير موجود في "${label}" — المتاح: ${available.slice(0, 8).join(" | ")}`);
-    // أغلق القائمة
+    addLog(session, `⚠️ "${label}": الخيار "${value}" غير موجود — المتاح: ${available.slice(0, 8).join(" | ")}`);
     await page.keyboard.press("Escape");
-  } catch {
-    addLog(session, `⚠️ لم يُحدَّد "${label}": ${value}`);
+  } catch (e: any) {
+    addLog(session, `⚠️ لم يُحدَّد "${label}": ${value} — ${e.message}`);
   }
 }
 
@@ -1580,12 +1599,7 @@ async function fillAssetPage(
   if (inspEl) await fillDate(session, buildSelector(inspEl), report.inspectionDate, "تاريخ المعاينة");
   else addLog(session, "⚠️ لم يُعثر على «تاريخ المعاينة»");
 
-  // ── أساليب التقييم (أسلوب السوق / الدخل / التكلفة) ──────────────────────
-  try {
-    await fillApproachFields(session, els, report);
-  } catch (approachErr: any) {
-    addLog(session, `⚠️ fillApproachFields خطأ (غير مميت): ${approachErr.message}`);
-  }
+  // ── أساليب التقييم ─── تُعبَّأ في الصفحة 3 (fillAttributePage) ───────────
 
   // ── الدولة (ثابت: المملكة العربية السعودية) ──────────────────────────────
   const countryEl = byName("country_id") ?? byLabel(/country|دولة|بلد/i);
@@ -1741,6 +1755,14 @@ async function fillAttributePage(
     await (facadeEl.isMat
       ? selectAngular(session, buildSelector(facadeEl), report.streetFacades, "الاتجاهات", true)
       : selectNativeByName(session, facadeEl.name || "", report.streetFacades, "الاتجاهات"));
+  }
+
+  // ── أساليب التقييم (أسلوب السوق / الدخل / التكلفة) ──────────────────────
+  // تُعبَّأ هنا في صفحة 3 لأن mat-select الأساليب يظهر في هذه الصفحة فعلياً
+  try {
+    await fillApproachFields(session, els, report);
+  } catch (approachErr: any) {
+    addLog(session, `⚠️ fillApproachFields خطأ (غير مميت): ${(approachErr as Error).message}`);
   }
 
   // ── المرافق (checkboxes) ─────────────────────────────────────────────────
