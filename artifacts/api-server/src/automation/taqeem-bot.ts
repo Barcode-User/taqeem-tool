@@ -1647,17 +1647,19 @@ async function fillAssetPage(
   } else addLog(session, "⚠️ لم يُعثر على «نوع الأصل»");
 
   // ── استخدام/قطاع الأصل ───────────────────────────────────────────────────
-  // TAQEEM يستخدم name="attribute[N]" لهذا الحقل — byName لا يطابقه
-  // نستخدم: أولاً البحث عبر els (إذا كشفه scanElements)، ثم مسح مباشر للصفحة
-  const assetUseEl = byName("asset_use_id") ?? byName("property_use_id") ??
+  // الاسم الفعلي في TAQEEM: asset_usage_id (وليس asset_use_id أو property_use_id)
+  const assetUseEl =
+    byName("asset_usage_id") ??   // ← الاسم الحقيقي في TAQEEM
+    byName("asset_use_id")   ??
+    byName("property_use_id") ??
     byLabel(/usage|sector|استخدام|قطاع/i);
   if (assetUseEl) {
     await (assetUseEl.isMat
       ? selectAngular(session, buildSelector(assetUseEl), report.propertyUse, "استخدام الأصل", true, "أخرى")
       : selectNativeByName(session, assetUseEl.name || "", report.propertyUse, "استخدام الأصل", "أخرى"));
   } else {
-    // مسح مباشر بالـ label المجاور في DOM — يعمل مع attribute[N]
-    await fillSelectByPageScan(session, "استخدام|قطاع.*أصل|أصل.*قطاع|قطاع.*تقييم", report.propertyUse, "استخدام/قطاع الأصل", "أخرى");
+    // مسح مباشر بالـ label المجاور في DOM (احتياط)
+    await fillSelectByPageScan(session, "استخدام|قطاع.*أصل|أصل.*قطاع", report.propertyUse, "استخدام/قطاع الأصل", "أخرى");
   }
 
   // ── تاريخ المعاينة ────────────────────────────────────────────────────────
@@ -1969,11 +1971,18 @@ async function fillAttributePage(
   else addLog(session, "⚠️ لم يُعثر على «رقم الصك»");
 
   // ── نوع الملكية ───────────────────────────────────────────────────────────
-  const ownerEl = byName("ownership_type_id") ?? byLabel(/ownership|ملكية/i);
+  // الاسم الفعلي في TAQEEM: attribute[4] (id=4) — لا ownership_type_id
+  // scanElements يُعيده بـ name="attribute[4]" ولذا byLabel هو الطريق الأمثل
+  const ownerEl =
+    byName("ownership_type_id") ??
+    byLabel(/نوع.*ملكية|ملكية.*نوع|ownership/i);
   if (ownerEl) {
     await (ownerEl.isMat
       ? selectAngular(session, buildSelector(ownerEl), report.ownershipType, "نوع الملكية", true, "أخرى")
       : selectNativeByName(session, ownerEl.name || "", report.ownershipType, "نوع الملكية", "أخرى"));
+  } else {
+    // احتياط: مسح مباشر بالـ label — يجد attribute[4] بغض النظر عن اسمه
+    await fillSelectByPageScan(session, "نوع.*ملكية|ملكية.*نوع|ownership", report.ownershipType, "نوع الملكية", "أخرى");
   }
 
   // ── مساحة الأرض ───────────────────────────────────────────────────────────
@@ -2015,10 +2024,36 @@ async function fillAttributePage(
       : selectNativeByName(session, dirEl.name || "", report.streetFacades, "اتجاه المطل", "أخرى"));
   }
 
-  // ── عدد الواجهات المطلة على الشارع ──────────────────────────────────────
-  // الخريطة: 1→"واجهة واحدة", 2→"واجهتان", 3→"3 واجهات", 4+→"4 واجهات"
-  // البحث بالخيارات الفريدة لهذا الـ select (وليس بالاسم الذي قد يتغيّر)
-  await fillFacadesCount(session, report.facadesCount);
+  // ── الواجهات المطلة على الشارع ──────────────────────────────────────────
+  // الاسم الفعلي: attribute[8] (id=8)
+  // الخريطة: 1→"واجهة واحدة"(6), 2→"واجهتان"(7), 3→"3 واجهات"(8), 4+→"4 واجهات"(9)
+  {
+    // أولاً: إذا توفّر facadesCount كرقم — استخدم دالة fillFacadesCount
+    const fc = report.facadesCount ? Number(report.facadesCount) : null;
+    if (fc && fc > 0) {
+      await fillFacadesCount(session, fc);
+    } else {
+      // ثانياً: إذا لم يُستخرج الرقم — جرّب مطابقة streetFacades نصياً مع خيارات الـ select
+      // نستخدم نفس دالة fillSelectByPageScan مع regex يجد الـ select بـ label "واجهة" أو "attribute[8]"
+      // وإذا لم يُطابق النص نُجرّب مطابقة مباشرة بقيم الـ options
+      const sf = report.streetFacades as string | null | undefined;
+      if (sf && sf.trim()) {
+        addLog(session, `🔍 الواجهات: facadesCount فارغ — أحاول بـ streetFacades="${sf}"`);
+        await fillFacadesCount(session, (() => {
+          const t = sf.trim();
+          if (/واجهة واحدة|واحدة/i.test(t)) return 1;
+          if (/واجهتان|اثنتان|٢|2/i.test(t)) return 2;
+          if (/3 واجهات|ثلاث.*واجهات|٣|3 واجهة/i.test(t)) return 3;
+          if (/4 واجهات|أربع.*واجهات|٤|4 واجهة/i.test(t)) return 4;
+          // عدّ الاتجاهات المذكورة: شمال، جنوب، شرق، غرب
+          const dirs = (t.match(/شمال|جنوب|شرق|غرب|بحري|قبلي/g) || []).length;
+          return dirs > 0 ? dirs : null;
+        })());
+      } else {
+        addLog(session, "⏭️ الواجهات: لا facadesCount ولا streetFacades — تخطي");
+      }
+    }
+  }
 
   // ── أساليب التقييم (أسلوب السوق / الدخل / التكلفة) ──────────────────────
   // تُعبَّأ هنا في صفحة 3 لأن mat-select الأساليب يظهر في هذه الصفحة فعلياً
