@@ -1569,25 +1569,24 @@ async function fillApproachFields(
       await page.waitForSelector("mat-option, .mat-mdc-option", { timeout: 3000 });
       await page.waitForTimeout(200);
 
-      const result = await page.evaluate(() => {
-        const opts = Array.from(
-          document.querySelectorAll("mat-option, .mat-mdc-option"),
-        );
-        const target = opts.find(o =>
-          /أساسي.*(?:لتقدير|القيمة)|(?:لتقدير|القيمة).*أساسي/i.test(
-            (o.textContent || "").trim(),
-          ),
-        ) as HTMLElement | undefined;
-        if (target) { target.click(); return { ok: true, opts: [] as string[] }; }
-        return { ok: false, opts: opts.map(o => (o.textContent || "").trim()).filter(t => t) };
-      });
+      // ── اقرأ الخيارات المتاحة (قراءة فقط بـ page.evaluate) ───────────────
+      const availOpts = await page.evaluate(() =>
+        Array.from(document.querySelectorAll("mat-option, .mat-mdc-option"))
+          .map(o => (o.textContent || "").trim()).filter(t => t),
+      );
 
-      if (result.ok) {
-        addLog(session, `✅ ${ap.label}: "أساسي لتقدير القيمة" تم`);
+      // ── اختر بـ Playwright locator (مرئي لـ Angular) ─────────────────────
+      const optLoc = page.locator("mat-option, .mat-mdc-option")
+        .filter({ hasText: /أساسي.*(?:لتقدير|القيمة)|(?:لتقدير|القيمة).*أساسي/i });
+
+      const found = await optLoc.count();
+      if (found > 0) {
+        await optLoc.first().click({ timeout: 2000 });
+        addLog(session, `✅ ${ap.label}: "أساسي لتقدير القيمة" تم (Playwright click)`);
         statusDone = true;
       } else {
         await page.keyboard.press("Escape").catch(() => {});
-        addLog(session, `⚠️ ${ap.label}: خيار غير موجود. الخيارات: ${result.opts.join(" | ")}`);
+        addLog(session, `⚠️ ${ap.label}: خيار غير موجود. المتاح: ${availOpts.join(" | ")}`);
       }
       await page.waitForTimeout(300);
     } catch (err: any) {
@@ -2110,10 +2109,15 @@ async function fillAttributePage(
     byLabel(/floor.?count|floors|أدوار|طوابق/i);
   if (floorsEl) await fillAngular(session, buildSelector(floorsEl), report.floorsCount ?? report.permittedFloorsCount, "عدد الأدوار");
 
-  // ── نسبة البناء ───────────────────────────────────────────────────────────
+  // ── نسبة البناء المصرح بها (%) ───────────────────────────────────────────
+  // القاعدة: سكني = 60% ، غير سكني = 80%
   const ratioEl = byName("build_ratio") ?? byName("building_ratio") ??
     byLabel(/ratio|build.?ratio|نسبة.*بناء/i);
-  if (ratioEl) await fillAngular(session, buildSelector(ratioEl), report.permittedBuildingRatio, "نسبة البناء");
+  if (ratioEl) {
+    const buildRatio = /سكن/i.test(report.propertyUse ?? "") ? "60" : "80";
+    addLog(session, `ℹ️ نسبة البناء المصرح بها: ${buildRatio}% (استخدام: ${report.propertyUse ?? "غير محدد"})`);
+    await fillAngular(session, buildSelector(ratioEl), buildRatio, "نسبة البناء المصرح بها");
+  }
 
   // ── حالة البناء ───────────────────────────────────────────────────────────
   const statusEl = byName("building_status_id") ?? byLabel(/building.?status|حالة.*بناء/i);
@@ -2563,10 +2567,15 @@ async function fillPage3(session: AutomationSession, report: any, els: any[], pd
   if (buildEl) await fillAngular(session, buildSelector(buildEl), report.buildingArea, "مساحة البناء");
 
   // ── نسبة البناء المصرح بها (%) ────────────────────────────────────────────
+  // القاعدة: سكني = 60% ، غير سكني = 80%
   const ratioEl = findEl(inputs,
     /ratio|buildratio|permitratio|permit.?ratio|building.?ratio|نسبة.*بناء|نسبة.*مصرح|مصرح.*بناء/i,
   );
-  if (ratioEl) await fillAngular(session, buildSelector(ratioEl), report.permittedBuildingRatio, "نسبة البناء المصرح بها");
+  if (ratioEl) {
+    const buildRatio = /سكن/i.test(report.propertyUse ?? "") ? "60" : "80";
+    addLog(session, `ℹ️ نسبة البناء المصرح بها: ${buildRatio}% (استخدام: ${report.propertyUse ?? "غير محدد"})`);
+    await fillAngular(session, buildSelector(ratioEl), buildRatio, "نسبة البناء المصرح بها");
+  }
 
   // ── عدد الأدوار المصرح به ────────────────────────────────────────────────
   const floorsEl = findEl(inputs,
