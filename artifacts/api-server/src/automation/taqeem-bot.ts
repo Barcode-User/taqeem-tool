@@ -2210,32 +2210,101 @@ async function fillAttributePage(
   }
 
   // ── الواجهات المطلة على الشارع ──────────────────────────────────────────
-  // الاسم الفعلي: attribute[8] — الحل الجذري: selectByNameFuzzy مباشرة
-  // الخريطة: 1→"واجهة واحدة", 2→"واجهتان", 3→"ثلاث واجهات", 4+→"4 واجهات"
+  // الخريطة: 1→"واجهة واحدة"(6), 2→"واجهتان"(7), 3→"ثلاث واجهات"(8), 4+→"4 واجهات"(9)
+  // الكشف: نبحث عن أي <select> يحتوي خياراً بـ "واجهة واحدة" أو "واجهتان"
+  // ثم نختار بـ locator.selectOption() لضمان Angular change detection
   {
     const facadesNumToText = (n: number): string =>
       n <= 1 ? "واجهة واحدة" : n === 2 ? "واجهتان" : n === 3 ? "ثلاث واجهات" : "4 واجهات";
 
-    // استنتج النص من facadesCount أو من streetFacades
-    const fc = report.facadesCount ? Number(report.facadesCount) : null;
-    let facadesText: string | null = fc && fc > 0 ? facadesNumToText(Math.round(fc)) : null;
+    const facadesNumToValue = (n: number): string =>
+      n <= 1 ? "6" : n === 2 ? "7" : n === 3 ? "8" : "9";
 
-    if (!facadesText) {
+    // ── تحديد العدد من facadesCount أو من streetFacades ──────────────────
+    const fc = report.facadesCount ? Number(report.facadesCount) : null;
+    let facadesNum: number | null = fc && fc > 0 ? Math.round(fc) : null;
+
+    if (!facadesNum) {
       const sf = (report.streetFacades as string | null | undefined) ?? "";
       if (sf.trim()) {
         const t = sf.trim();
-        const n =
-          /واجهة واحدة|واحدة/i.test(t) ? 1 :
-          /واجهتان|اثنتان|٢/i.test(t)  ? 2 :
-          /ثلاث.*واجهات|٣/i.test(t)    ? 3 :
-          /أربع.*واجهات|٤/i.test(t)    ? 4 :
+        facadesNum =
+          /واجهة واحدة|واحدة/i.test(t)     ? 1 :
+          /واجهتان|اثنتان|٢|2/i.test(t)    ? 2 :
+          /ثلاث.*واجهات|٣|3/i.test(t)      ? 3 :
+          /أربع.*واجهات|٤|4/i.test(t)      ? 4 :
           (t.match(/شمال|جنوب|شرق|غرب|بحري|قبلي/g) || []).length || null;
-        facadesText = n ? facadesNumToText(n) : sf.trim();
-        if (facadesText) addLog(session, `🔍 الواجهات: استُنتج "${facadesText}" من streetFacades="${sf}"`);
+        if (facadesNum) addLog(session, `🔍 الواجهات: استُنتج ${facadesNum} من streetFacades="${sf}"`);
       }
     }
 
-    await selectByNameFuzzy(session, "attribute[8]", facadesText, "الواجهات المطلة");
+    if (!facadesNum) {
+      addLog(session, "⏭️ الواجهات المطلة: لا قيمة — تخطّي");
+    } else {
+      const optValue = facadesNumToValue(facadesNum);
+      const optLabel = facadesNumToText(facadesNum);
+      addLog(session, `🎯 الواجهات المطلة: ${facadesNum} → "${optLabel}" (value=${optValue})`);
+
+      // ── البحث عن الـ select بخياراته الفريدة (مستقل عن اسم الحقل) ──────
+      const selectorInfo = await session.page.evaluate(() => {
+        const selects = Array.from(document.querySelectorAll("select"));
+        const target = selects.find(s =>
+          Array.from(s.options).some(o =>
+            /واجهة واحدة|واجهتان/i.test(o.text),
+          ),
+        );
+        if (!target) {
+          const all = selects.map((s, i) => ({
+            i, name: s.name, id: s.id,
+            opts: Array.from(s.options).map(o => o.text.trim()).slice(0, 5),
+          }));
+          return { found: false as const, all };
+        }
+        return {
+          found: true  as const,
+          name: target.name || "",
+          id:   target.id   || "",
+          opts: Array.from(target.options).map(o => ({ v: o.value, t: o.text.trim() })),
+        };
+      });
+
+      if (!selectorInfo.found) {
+        addLog(session, `⚠️ الواجهات: select غير موجود — كل الـ selects: ${JSON.stringify((selectorInfo as any).all)}`);
+      } else {
+        addLog(session, `✅ الواجهات: وجدنا select name="${selectorInfo.name}" — خياراته: ${selectorInfo.opts.map(o => `"${o.t}"(${o.v})`).join(", ")}`);
+
+        // اختر بالـ value الرقمي أولاً، ثم بالنص احتياطاً
+        const xp = selectorInfo.name
+          ? `xpath=//select[@name="${selectorInfo.name}"]`
+          : (selectorInfo.id ? `#${selectorInfo.id}` : "select");
+
+        // تحقق من وجود الخيار (value أو label)
+        const exactOpt = selectorInfo.opts.find(o => o.v === optValue);
+        const labelOpt = selectorInfo.opts.find(o =>
+          o.t.replace(/\s+/g, " ").trim().includes(optLabel),
+        );
+        const chosenOpt = exactOpt ?? labelOpt ?? null;
+
+        if (!chosenOpt) {
+          addLog(session, `⚠️ الواجهات: الخيار "${optLabel}" غير موجود في القائمة`);
+        } else {
+          try {
+            await session.page.locator(xp).selectOption({ value: chosenOpt.v });
+            addLog(session, `✅ الواجهات: اختار "${chosenOpt.t}" (value=${chosenOpt.v})`);
+            await session.page.waitForTimeout(500);
+          } catch (e: any) {
+            addLog(session, `⚠️ الواجهات: selectOption فشل — ${e.message}`);
+            // محاولة بالنص مباشرة
+            try {
+              await session.page.locator(xp).selectOption({ label: chosenOpt.t });
+              addLog(session, `✅ الواجهات: اختار بالنص "${chosenOpt.t}"`);
+            } catch (e2: any) {
+              addLog(session, `❌ الواجهات: فشل كلياً — ${e2.message}`);
+            }
+          }
+        }
+      }
+    }
   }
 
   // ── المرافق (checkboxes) ─────────────────────────────────────────────────
