@@ -2109,14 +2109,17 @@ async function fillAttributePage(
     byLabel(/floor.?count|floors|أدوار|طوابق/i);
   if (floorsEl) await fillAngular(session, buildSelector(floorsEl), report.floorsCount ?? report.permittedFloorsCount, "عدد الأدوار");
 
-  // ── نسبة البناء المصرح بها (%) ───────────────────────────────────────────
-  // القاعدة: سكني = 60% ، غير سكني = 80%
+  // ── مساحة البناء المصرح بها (نسبة مئوية) ────────────────────────────────
+  // القاعدة: إذا استخدام/قطاع الأصل = سكني → 60% ، غير ذلك → 80%
   const ratioEl = byName("build_ratio") ?? byName("building_ratio") ??
-    byLabel(/ratio|build.?ratio|نسبة.*بناء/i);
+    byName("licensed_building_ratio") ?? byName("permit_ratio") ??
+    byLabel(/مساحة.*بناء.*مصرح|مصرح.*بناء|نسبة.*بناء|نسبة.*مصرح|build.?ratio|permit.?ratio/i);
   if (ratioEl) {
     const buildRatio = /سكن/i.test(report.propertyUse ?? "") ? "60" : "80";
-    addLog(session, `ℹ️ نسبة البناء المصرح بها: ${buildRatio}% (استخدام: ${report.propertyUse ?? "غير محدد"})`);
-    await fillAngular(session, buildSelector(ratioEl), buildRatio, "نسبة البناء المصرح بها");
+    addLog(session, `ℹ️ مساحة البناء المصرح بها: ${buildRatio}% (استخدام: ${report.propertyUse ?? "غير محدد"})`);
+    await fillAngular(session, buildSelector(ratioEl), buildRatio, "مساحة البناء المصرح بها (نسبة مئوية)");
+  } else {
+    addLog(session, "⚠️ لم يُعثر على حقل «مساحة البناء المصرح بها (نسبة مئوية)»");
   }
 
   // ── حالة البناء ───────────────────────────────────────────────────────────
@@ -2566,15 +2569,17 @@ async function fillPage3(session: AutomationSession, report: any, els: any[], pd
   );
   if (buildEl) await fillAngular(session, buildSelector(buildEl), report.buildingArea, "مساحة البناء");
 
-  // ── نسبة البناء المصرح بها (%) ────────────────────────────────────────────
-  // القاعدة: سكني = 60% ، غير سكني = 80%
+  // ── مساحة البناء المصرح بها (نسبة مئوية) ────────────────────────────────
+  // القاعدة: استخدام/قطاع الأصل = سكني → 60% ، غير ذلك → 80%
   const ratioEl = findEl(inputs,
-    /ratio|buildratio|permitratio|permit.?ratio|building.?ratio|نسبة.*بناء|نسبة.*مصرح|مصرح.*بناء/i,
+    /مساحة.*بناء.*مصرح|مصرح.*بناء|نسبة.*بناء|نسبة.*مصرح|ratio|buildratio|permitratio|permit.?ratio|building.?ratio/i,
   );
   if (ratioEl) {
     const buildRatio = /سكن/i.test(report.propertyUse ?? "") ? "60" : "80";
-    addLog(session, `ℹ️ نسبة البناء المصرح بها: ${buildRatio}% (استخدام: ${report.propertyUse ?? "غير محدد"})`);
-    await fillAngular(session, buildSelector(ratioEl), buildRatio, "نسبة البناء المصرح بها");
+    addLog(session, `ℹ️ مساحة البناء المصرح بها: ${buildRatio}% (استخدام: ${report.propertyUse ?? "غير محدد"})`);
+    await fillAngular(session, buildSelector(ratioEl), buildRatio, "مساحة البناء المصرح بها (نسبة مئوية)");
+  } else {
+    addLog(session, "⚠️ لم يُعثر على حقل «مساحة البناء المصرح بها (نسبة مئوية)»");
   }
 
   // ── عدد الأدوار المصرح به ────────────────────────────────────────────────
