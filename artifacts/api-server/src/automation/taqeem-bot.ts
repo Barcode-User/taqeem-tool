@@ -1443,17 +1443,12 @@ async function fillApproachFields(
   const { page } = session;
 
   /* ═══════════════════════════════════════════════════════════════════════
-     القاعدة: إذا قيمة الأسلوب > 0 → اختر "أساسي لتقدير القيمة" من
-              dropdown الأسلوب + عبّئ أول حقل "القيمة" تحته.
-     ════════════════════════════════════════════════════════════════════════
-
-     الاستراتيجية "افتح وتحقق":
-       بما أن بنية TAQEEM لا تعتمد على mat-label داخل mat-form-field،
-       نفتح كل mat-select على حدة ونفحص خياراته:
-         → إذا وجدنا "أساسي لتقدير القيمة" → هذا هو dropdown الأسلوب
-         → نغلقه بـ Escape ونحفظ مؤشره
-       ثم نحدد أي أسلوب هو (سوق/دخل/تكلفة) بالنص المحيط في DOM.
-     ════════════════════════════════════════════════════════════════════════ */
+     أساليب التقييم الثلاثة في TAQEEM هي native <select> وليس mat-select.
+     القاعدة:
+       - إذا قيمة الأسلوب > 0 → اختر "أساسي لتقدير القيمة"
+         ثم عبّئ أول input يظهر بعد هذا الـ select في DOM بالقيمة.
+       - إذا لا قيمة → تخطّ (يبقى "غير مستخدم").
+     ═══════════════════════════════════════════════════════════════════════ */
 
   const approaches = [
     { key: "market", label: "أسلوب السوق",   textRx: /السوق/i,   value: Number(report.marketValue) || 0 },
@@ -1465,151 +1460,165 @@ async function fillApproachFields(
     `📊 أساليب — سوق: ${approaches[0].value} | دخل: ${approaches[1].value} | تكلفة: ${approaches[2].value}`,
   );
 
-  // إجمالي mat-selects في الصفحة
-  const totalMS = await page.locator("mat-select").count();
-  addLog(session, `🔍 إجمالي mat-selects في الصفحة: ${totalMS}`);
+  // ── المرحلة 1: اكتشاف كل select أسلوب من native <select> ─────────────────
+  const nativeCount = await page.locator("select").count();
+  const matCount    = await page.locator("mat-select").count();
+  addLog(session, `🔍 <select>: ${nativeCount} | mat-select: ${matCount}`);
 
-  /* ────────────────────────────────────────────────────────────────────────
-     المرحلة 1: اكتشاف dropdown كل أسلوب عبر الفتح والتحقق
-     نفتح كل mat-select ونفحص: هل خياراته تحتوي "أساسي لتقدير القيمة"؟
-     إذا نعم → هذا هو dropdown أحد الأساليب → نغلقه ونحفظ مؤشره
-     ────────────────────────────────────────────────────────────────────── */
-  // map: nth → اسم الأسلوب (market/income/cost)
-  const statusNthMap: Record<string, number> = {};
+  // map: approach key → { type, index }
+  type SelType = "native" | "mat";
+  const approachMap: Record<string, { type: SelType; index: number }> = {};
 
-  // نفحص أول MAX_SCAN mat-select في الصفحة (لتجنب الإبطاء)
-  const MAX_SCAN = Math.min(totalMS, 25);
-
-  for (let i = 0; i < MAX_SCAN; i++) {
-    if (Object.keys(statusNthMap).length === 3) break; // وجدنا الثلاثة
-    const loc = page.locator("mat-select").nth(i);
-    try {
-      await loc.click({ timeout: 1500 });
-      await page.waitForTimeout(250);
-
-      // اقرأ الخيارات المتاحة + النص المحيط بالـ mat-select في DOM
-      const info = await page.evaluate((idx: number) => {
-        const opts = Array.from(
-          document.querySelectorAll("mat-option, .mat-mdc-option"),
-        ).map(o => (o.textContent || "").trim()).filter(t => t);
-
-        const hasApproachOpt = opts.some(o =>
-          /أساسي.*(?:لتقدير|القيمة)|(?:لتقدير|القيمة).*أساسي/i.test(o),
-        );
-
-        // النص المحيط بالـ mat-select (نصعد 5 مستويات)
-        let surroundingText = "";
-        const allMS = Array.from(document.querySelectorAll("mat-select"));
-        let el: Element | null = allMS[idx];
-        for (let d = 0; d < 6 && el; d++) {
-          const t = (el.textContent || "").replace(/\*/g, "").trim();
-          if (t.length > surroundingText.length && t.length < 200) surroundingText = t;
-          el = el.parentElement;
-        }
-        return { hasApproachOpt, opts, surroundingText };
-      }, i);
-
-      await page.keyboard.press("Escape");
-      await page.waitForTimeout(150);
-
-      if (!info.hasApproachOpt) continue;
-
-      // حدد أي أسلوب هو بالنص المحيط
-      const st = info.surroundingText;
-      const matchedKey =
-        /السوق/i.test(st) ? "market" :
-        /الدخل/i.test(st) ? "income" :
-        /التكلفة/i.test(st) ? "cost" : null;
-
-      addLog(session,
-        `🔍 nth=${i}: خيارات أسلوب → [${info.opts.slice(0, 4).join(" | ")}] | نص محيط: "${st.slice(0, 50)}"`,
-      );
-
-      if (matchedKey && statusNthMap[matchedKey] === undefined) {
-        statusNthMap[matchedKey] = i;
-        addLog(session, `✅ ${matchedKey} status dropdown → nth=${i}`);
-      } else if (!matchedKey) {
-        addLog(session, `⚠️ nth=${i}: له خيار أسلوب لكن لم نتعرف على نوعه من النص`);
-        // حاول التعيين بالترتيب إذا لم نعرف النوع
-        const missing = ["market", "income", "cost"].find(k => statusNthMap[k] === undefined);
-        if (missing) {
-          statusNthMap[missing] = i;
-          addLog(session, `↳ افتراض: ${missing} → nth=${i}`);
-        }
+  // ── فحص native selects أولاً (الأكثر شيوعاً في TAQEEM) ─────────────────
+  for (let i = 0; i < nativeCount && Object.keys(approachMap).length < 3; i++) {
+    const info = await page.locator("select").nth(i).evaluate((el: HTMLSelectElement) => {
+      const opts = Array.from(el.options).map(o => o.text.trim());
+      const hasApproach = opts.some(o => /أساسي.*(?:لتقدير|القيمة)/i.test(o));
+      if (!hasApproach) return null;
+      // استخرج النص المحيط (نصعد 8 مستويات للوصول لعنوان القسم)
+      let surround = "";
+      let p: Element | null = el;
+      for (let d = 0; d < 8 && p; d++) {
+        const t = (p.textContent || "").replace(/\s+/g, " ").replace(/\*/g, "").trim();
+        if (t.length > 5 && t.length < 500) surround = t;
+        p = p.parentElement;
       }
-    } catch {
-      await page.keyboard.press("Escape").catch(() => {});
+      return { surround, opts };
+    });
+    if (!info) continue;
+
+    const ap = approaches.find(a =>
+      a.textRx.test(info.surround) && !approachMap[a.key],
+    );
+    if (ap) {
+      approachMap[ap.key] = { type: "native", index: i };
+      addLog(session, `✅ ${ap.label} → native select[${i}] | نص: "${info.surround.slice(0, 60)}"`);
     }
   }
 
-  addLog(session, `📌 نتيجة الاكتشاف: ${JSON.stringify(statusNthMap)}`);
+  // ── احتياط: فحص mat-select إذا لم يكتمل الاكتشاف ──────────────────────
+  if (Object.keys(approachMap).length < 3) {
+    for (let i = 0; i < Math.min(matCount, 20) && Object.keys(approachMap).length < 3; i++) {
+      try {
+        await page.locator("mat-select").nth(i).click({ timeout: 1200 });
+        await page.waitForTimeout(200);
 
-  /* ────────────────────────────────────────────────────────────────────────
-     المرحلة 2: تعبئة كل أسلوب له قيمة
-     ────────────────────────────────────────────────────────────────────── */
+        const info = await page.evaluate((idx: number) => {
+          const opts = Array.from(document.querySelectorAll("mat-option, .mat-mdc-option"))
+            .map(o => (o.textContent || "").trim()).filter(Boolean);
+          if (!opts.some(o => /أساسي.*(?:لتقدير|القيمة)/i.test(o))) return null;
+          const allMS = Array.from(document.querySelectorAll("mat-select"));
+          let el: Element | null = allMS[idx];
+          let surround = "";
+          for (let d = 0; d < 7 && el; d++) {
+            const t = (el.textContent || "").replace(/\s+/g, " ").trim();
+            if (t.length > 5 && t.length < 400) surround = t;
+            el = el.parentElement;
+          }
+          return { surround };
+        }, i);
+
+        await page.keyboard.press("Escape");
+        await page.waitForTimeout(150);
+        if (!info) continue;
+
+        const ap = approaches.find(a => a.textRx.test(info.surround) && !approachMap[a.key]);
+        if (ap) {
+          approachMap[ap.key] = { type: "mat", index: i };
+          addLog(session, `✅ ${ap.label} → mat-select[${i}]`);
+        }
+      } catch {
+        await page.keyboard.press("Escape").catch(() => {});
+      }
+    }
+  }
+
+  addLog(session, `📌 الأساليب المكتشفة: ${JSON.stringify(approachMap)}`);
+
+  // ── المرحلة 2: تعبئة كل أسلوب له قيمة ──────────────────────────────────
   for (const ap of approaches) {
     if (ap.value <= 0) {
       addLog(session, `⏭️ ${ap.label}: لا قيمة — تخطّي`);
       continue;
     }
-
-    const statusNth = statusNthMap[ap.key];
-    if (statusNth === undefined) {
+    const found = approachMap[ap.key];
+    if (!found) {
       addLog(session, `⚠️ ${ap.label}: لم يُكتشف dropdown — تخطّي`);
       continue;
     }
 
-    addLog(session, `🎯 ${ap.label}: قيمة=${ap.value} | nth=${statusNth}`);
+    addLog(session, `🎯 ${ap.label}: قيمة=${ap.value} | type=${found.type}[${found.index}]`);
 
-    /* ── أ) اختيار "أساسي لتقدير القيمة" ───────────────────────────── */
+    // ── أ) اختيار "أساسي لتقدير القيمة" ──────────────────────────────────
     let statusDone = false;
-    try {
-      const statusLoc = page.locator("mat-select").nth(statusNth);
-      await statusLoc.click({ timeout: 3000 });
-      await page.waitForSelector("mat-option, .mat-mdc-option", { timeout: 3000 });
-      await page.waitForTimeout(200);
 
-      // ── اقرأ الخيارات المتاحة (قراءة فقط بـ page.evaluate) ───────────────
-      const availOpts = await page.evaluate(() =>
-        Array.from(document.querySelectorAll("mat-option, .mat-mdc-option"))
-          .map(o => (o.textContent || "").trim()).filter(t => t),
-      );
-
-      // ── اختر بـ Playwright locator (مرئي لـ Angular) ─────────────────────
-      const optLoc = page.locator("mat-option, .mat-mdc-option")
-        .filter({ hasText: /أساسي.*(?:لتقدير|القيمة)|(?:لتقدير|القيمة).*أساسي/i });
-
-      const found = await optLoc.count();
-      if (found > 0) {
-        await optLoc.first().click({ timeout: 2000 });
-        addLog(session, `✅ ${ap.label}: "أساسي لتقدير القيمة" تم (Playwright click)`);
-        statusDone = true;
-      } else {
-        await page.keyboard.press("Escape").catch(() => {});
-        addLog(session, `⚠️ ${ap.label}: خيار غير موجود. المتاح: ${availOpts.join(" | ")}`);
+    if (found.type === "native") {
+      // native <select>: استخدم locator.selectOption — مرئي لـ Angular
+      try {
+        const optValue = await page.locator("select").nth(found.index).evaluate(
+          (el: HTMLSelectElement) => {
+            const opt = Array.from(el.options).find(o =>
+              /أساسي.*(?:لتقدير|القيمة)/i.test(o.text),
+            );
+            return opt?.value ?? null;
+          },
+        );
+        if (optValue !== null) {
+          await page.locator("select").nth(found.index).selectOption({ value: optValue });
+          addLog(session, `✅ ${ap.label}: "أساسي لتقدير القيمة" (native selectOption)`);
+          statusDone = true;
+          await page.waitForTimeout(700); // انتظار ظهور الحقول الفرعية
+        }
+      } catch (e: any) {
+        addLog(session, `⚠️ ${ap.label}: native selectOption فشل — ${e.message}`);
       }
-      await page.waitForTimeout(300);
-    } catch (err: any) {
-      await page.keyboard.press("Escape").catch(() => {});
-      addLog(session, `⚠️ ${ap.label}: فشل النقر — ${err.message}`);
+    } else {
+      // mat-select: click + Playwright locator click على mat-option
+      try {
+        await page.locator("mat-select").nth(found.index).click({ timeout: 2000 });
+        await page.waitForSelector("mat-option, .mat-mdc-option", { timeout: 3000 });
+        await page.waitForTimeout(200);
+
+        const optLoc = page.locator("mat-option, .mat-mdc-option")
+          .filter({ hasText: /أساسي.*(?:لتقدير|القيمة)/i });
+        if (await optLoc.count() > 0) {
+          await optLoc.first().click({ timeout: 2000 });
+          addLog(session, `✅ ${ap.label}: "أساسي لتقدير القيمة" (mat-option click)`);
+          statusDone = true;
+          await page.waitForTimeout(700);
+        } else {
+          await page.keyboard.press("Escape").catch(() => {});
+          addLog(session, `⚠️ ${ap.label}: خيار "أساسي" غير موجود في mat-select`);
+        }
+      } catch (e: any) {
+        await page.keyboard.press("Escape").catch(() => {});
+        addLog(session, `⚠️ ${ap.label}: mat-select فشل — ${e.message}`);
+      }
     }
 
-    /* ── ب) تعبئة أول حقل "القيمة" بعد هذا dropdown في DOM ─────────── */
-    // nth-index في document.querySelectorAll("input") الكاملة
-    // ← يتطابق مع page.locator("input").nth()
-    const valueNth: number = await page.evaluate((msIdx: number) => {
-      const allMS     = Array.from(document.querySelectorAll("mat-select"));
-      const allInputs = Array.from(document.querySelectorAll("input"));
-      const ms        = allMS[msIdx];
-      if (!ms) return -1;
-      const first = allInputs.find(inp => {
-        if (["radio", "checkbox", "hidden"].includes((inp as HTMLInputElement).type)) return false;
-        return (ms.compareDocumentPosition(inp) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
-      });
-      return first ? allInputs.indexOf(first) : -1;
-    }, statusNth);
+    if (!statusDone) {
+      addLog(session, `ℹ️ ${ap.label}: اختيار الحالة لم يتم — تخطّي تعبئة القيمة`);
+      continue;
+    }
 
-    addLog(session, `🔍 ${ap.label}: input nth=${valueNth}`);
+    // ── ب) تعبئة أول input يظهر بعد الـ select في DOM ────────────────────
+    const selTag = found.type === "native" ? "select" : "mat-select";
+    const valueNth: number = await page.evaluate(
+      ({ tag, idx }: { tag: string; idx: number }) => {
+        const allSels   = Array.from(document.querySelectorAll(tag));
+        const allInputs = Array.from(document.querySelectorAll("input"));
+        const sel       = allSels[idx];
+        if (!sel) return -1;
+        const first = allInputs.find(inp => {
+          if (["radio", "checkbox", "hidden"].includes((inp as HTMLInputElement).type)) return false;
+          return (sel.compareDocumentPosition(inp) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+        });
+        return first ? allInputs.indexOf(first) : -1;
+      },
+      { tag: selTag, idx: found.index },
+    );
+
+    addLog(session, `🔍 ${ap.label}: أول input بعد الـ select → nth=${valueNth}`);
 
     if (valueNth >= 0) {
       try {
@@ -1617,13 +1626,13 @@ async function fillApproachFields(
         await inputLoc.click({ timeout: 2000 });
         await inputLoc.selectText().catch(() => {});
         await inputLoc.fill(String(ap.value));
-        addLog(session, `✅ ${ap.label}: قيمة=${ap.value}`);
-      } catch (err: any) {
-        addLog(session, `⚠️ ${ap.label}: فشل تعبئة القيمة — ${err.message}`);
+        addLog(session, `✅ ${ap.label}: قيمة=${ap.value} → input[${valueNth}]`);
+      } catch (e: any) {
+        addLog(session, `⚠️ ${ap.label}: فشل تعبئة القيمة — ${e.message}`);
       }
+    } else {
+      addLog(session, `⚠️ ${ap.label}: لم يُعثر على input للقيمة (قد تظهر بعد التأخير)`);
     }
-
-    if (!statusDone) addLog(session, `ℹ️ ${ap.label}: اختيار الحالة لم يتم`);
   }
 }
 
