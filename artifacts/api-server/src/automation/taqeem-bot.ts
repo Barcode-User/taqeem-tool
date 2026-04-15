@@ -1772,6 +1772,13 @@ async function fillAssetPage(
   } else if (!lng) {
     addLog(session, "⚠️ لا توجد قيمة لخط الطول في التقرير");
   }
+
+  // ── أساليب التقييم (السوق / الدخل / التكلفة) — موجودة في الصفحة 2 ────────
+  try {
+    await fillApproachFields(session, els, report);
+  } catch (e: any) {
+    addLog(session, `⚠️ fillApproachFields: ${e.message}`);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2176,14 +2183,6 @@ async function fillAttributePage(
     }
 
     await selectByNameFuzzy(session, "attribute[8]", facadesText, "الواجهات المطلة");
-  }
-
-  // ── أساليب التقييم (أسلوب السوق / الدخل / التكلفة) ──────────────────────
-  // تُعبَّأ هنا في صفحة 3 لأن mat-select الأساليب يظهر في هذه الصفحة فعلياً
-  try {
-    await fillApproachFields(session, els, report);
-  } catch (approachErr: any) {
-    addLog(session, `⚠️ fillApproachFields خطأ (غير مميت): ${(approachErr as Error).message}`);
   }
 
   // ── المرافق (checkboxes) ─────────────────────────────────────────────────
