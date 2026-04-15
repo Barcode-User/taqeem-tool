@@ -2221,8 +2221,9 @@ async function fillAttributePage(
       n <= 1 ? "6" : n === 2 ? "7" : n === 3 ? "8" : "9";
 
     // ── تحديد العدد من facadesCount أو من streetFacades ──────────────────
-    const fc = report.facadesCount ? Number(report.facadesCount) : null;
-    let facadesNum: number | null = fc && fc > 0 ? Math.round(fc) : null;
+    addLog(session, `🔎 الواجهات — facadesCount="${report.facadesCount}" (type=${typeof report.facadesCount}) | streetFacades="${report.streetFacades}"`);
+    const fc = report.facadesCount != null && report.facadesCount !== "" ? Number(report.facadesCount) : null;
+    let facadesNum: number | null = fc != null && !isNaN(fc) && fc > 0 ? Math.round(fc) : null;
 
     if (!facadesNum) {
       const sf = (report.streetFacades as string | null | undefined) ?? "";
