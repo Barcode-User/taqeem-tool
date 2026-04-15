@@ -1657,6 +1657,21 @@ async function fillAssetPage(
       : selectNativeByName(session, assetTypeEl.name || "", report.propertyType, "نوع الأصل"));
   } else addLog(session, "⚠️ لم يُعثر على «نوع الأصل»");
 
+  // ── انتظار تأثير الكاسكاد: نوع الأصل → استخدام/قطاع الأصل ─────────────
+  // TAQEEM تُطلق API call بعد اختيار نوع الأصل لتحميل خيارات استخدام/قطاع الأصل
+  // يجب الانتظار حتى تكتمل الاستجابة وإلا سيُعاد تصفير الاختيار
+  addLog(session, "⏳ انتظار تحميل خيارات استخدام/قطاع الأصل بعد اختيار نوع الأصل...");
+  await session.page.waitForLoadState("networkidle", { timeout: 8000 })
+    .catch(() => addLog(session, "⚠️ networkidle timeout — المتابعة على أي حال"));
+  // احتياط إضافي: انتظر حتى يكون للـ select خيارات فعلية
+  await session.page.waitForFunction(
+    () => {
+      const sel = document.querySelector<HTMLSelectElement>('[name="asset_usage_id"]');
+      return !!sel && sel.options.length > 1;
+    },
+    { timeout: 8000 },
+  ).catch(() => addLog(session, "⚠️ خيارات asset_usage_id لم تُحمَّل بعد 8 ثوانٍ"));
+
   // ── استخدام/قطاع الأصل ───────────────────────────────────────────────────
   // الاسم الفعلي: asset_usage_id — نفس أسلوب المنطقة (selectNativeByName)
   await selectNativeByName(session, "asset_usage_id", report.propertyUse, "استخدام/قطاع الأصل", "أخرى");
