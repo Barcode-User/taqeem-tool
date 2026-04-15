@@ -1647,20 +1647,8 @@ async function fillAssetPage(
   } else addLog(session, "⚠️ لم يُعثر على «نوع الأصل»");
 
   // ── استخدام/قطاع الأصل ───────────────────────────────────────────────────
-  // الاسم الفعلي في TAQEEM: asset_usage_id (وليس asset_use_id أو property_use_id)
-  const assetUseEl =
-    byName("asset_usage_id") ??   // ← الاسم الحقيقي في TAQEEM
-    byName("asset_use_id")   ??
-    byName("property_use_id") ??
-    byLabel(/usage|sector|استخدام|قطاع/i);
-  if (assetUseEl) {
-    await (assetUseEl.isMat
-      ? selectAngular(session, buildSelector(assetUseEl), report.propertyUse, "استخدام الأصل", true, "أخرى")
-      : selectNativeByName(session, assetUseEl.name || "", report.propertyUse, "استخدام الأصل", "أخرى"));
-  } else {
-    // مسح مباشر بالـ label المجاور في DOM (احتياط)
-    await fillSelectByPageScan(session, "استخدام|قطاع.*أصل|أصل.*قطاع", report.propertyUse, "استخدام/قطاع الأصل", "أخرى");
-  }
+  // الاسم الفعلي: asset_usage_id — الحل الجذري: selectByNameFuzzy مباشرة
+  await selectByNameFuzzy(session, "asset_usage_id", report.propertyUse, "استخدام/قطاع الأصل", "أخرى");
 
   // ── تاريخ المعاينة ────────────────────────────────────────────────────────
   const inspEl = byName("inspection_date") ?? byName("inspected_at") ??
@@ -1870,6 +1858,91 @@ async function fillSelectByPageScan(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// الحل الجذري: يجد <select> بالاسم الدقيق، يُطابق الخيار بالنص العربي بتطابق
+// ضبابي كاملاً داخل المتصفح — يعمل مع attribute[4] و attribute[8] وغيرهما.
+// XPath للانتظار (لا يتأثر بأقواس الاسم)، ثم querySelector في page.evaluate.
+// ─────────────────────────────────────────────────────────────────────────────
+async function selectByNameFuzzy(
+  session: AutomationSession,
+  selectName: string,
+  targetText: string | null | undefined,
+  fieldLabel: string,
+  fallbackText?: string,
+): Promise<boolean> {
+  if (!targetText?.trim()) {
+    addLog(session, `⏭️ [${fieldLabel}]: لا قيمة — تخطي`);
+    return false;
+  }
+  addLog(session, `🎯 selectByNameFuzzy [${fieldLabel}]: name="${selectName}" ← "${targetText}"`);
+
+  // انتظار ظهور الـ select — XPath يتجنب مشكلة أقواس CSS
+  try {
+    await session.page.waitForSelector(`xpath=//select[@name="${selectName}"]`, { timeout: 5000 });
+  } catch {
+    addLog(session, `⚠️ [${fieldLabel}]: select[name="${selectName}"] لم يظهر — تخطي`);
+    return false;
+  }
+
+  const result = await session.page.evaluate(
+    ({ sn, tv, fb }: { sn: string; tv: string; fb?: string }) => {
+      const nl = (s: string) =>
+        (s || "")
+          .replace(/[\u064B-\u065F\u0670]/g, "")
+          .replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي")
+          .replace(/\s+/g, " ").trim().toLowerCase();
+
+      // querySelector داخل المتصفح — صحيح لـ attribute[4] و attribute[8]
+      const sel = document.querySelector<HTMLSelectElement>(`select[name="${sn}"]`);
+      if (!sel) return { ok: false, reason: `no <select name="${sn}">` };
+
+      const opts = Array.from(sel.options).filter(o => o.value !== "" && o.value !== "0" && !o.disabled);
+      if (!opts.length) return { ok: false, reason: "no valid options" };
+
+      const target = nl(tv);
+      let bestOpt: HTMLOptionElement | null = null;
+      let bestScore = 0;
+
+      for (const opt of opts) {
+        const oN = nl(opt.text);
+        if (oN === target)                               { bestOpt = opt; bestScore = 100; break; }
+        if (oN.includes(target) || target.includes(oN)) {
+          const sc = 80 + (Math.min(oN.length, target.length) / Math.max(oN.length, target.length, 1)) * 20;
+          if (sc > bestScore) { bestOpt = opt; bestScore = sc; }
+        }
+        const ml = Math.min(3, oN.length, target.length);
+        if (ml >= 2 && oN.slice(0, ml) === target.slice(0, ml) && 50 > bestScore) {
+          bestOpt = opt; bestScore = 50;
+        }
+      }
+
+      if (!bestOpt && fb) {
+        const fN = nl(fb);
+        for (const opt of opts) {
+          if (nl(opt.text) === fN || nl(opt.text).includes(fN)) { bestOpt = opt; bestScore = 10; break; }
+        }
+      }
+
+      if (!bestOpt) {
+        return { ok: false, reason: `لا تطابق لـ "${tv}" — الخيارات: [${opts.map(o => `"${o.text.trim()}"(${o.value})`).join(", ")}]` };
+      }
+
+      sel.value = bestOpt.value;
+      sel.dispatchEvent(new Event("input",  { bubbles: true }));
+      sel.dispatchEvent(new Event("change", { bubbles: true }));
+      return { ok: true, chosen: bestOpt.text.trim(), value: bestOpt.value, score: Math.round(bestScore) };
+    },
+    { sn: selectName, tv: targetText ?? "", fb: fallbackText },
+  );
+
+  if (result.ok) {
+    addLog(session, `✅ [${fieldLabel}]: اختار "${result.chosen}" (value=${result.value}, score=${result.score}%)`);
+  } else {
+    addLog(session, `❌ [${fieldLabel}]: ${result.reason}`);
+  }
+  return result.ok;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // الواجهات المطلة على الشارع — يحوّل الرقم إلى الخيار المناسب في TAQEEM
 //   1  → "واجهة واحدة"   (value=6)
 //   2  → "واجهتان"        (value=7)
@@ -1971,19 +2044,8 @@ async function fillAttributePage(
   else addLog(session, "⚠️ لم يُعثر على «رقم الصك»");
 
   // ── نوع الملكية ───────────────────────────────────────────────────────────
-  // الاسم الفعلي في TAQEEM: attribute[4] (id=4) — لا ownership_type_id
-  // scanElements يُعيده بـ name="attribute[4]" ولذا byLabel هو الطريق الأمثل
-  const ownerEl =
-    byName("ownership_type_id") ??
-    byLabel(/نوع.*ملكية|ملكية.*نوع|ownership/i);
-  if (ownerEl) {
-    await (ownerEl.isMat
-      ? selectAngular(session, buildSelector(ownerEl), report.ownershipType, "نوع الملكية", true, "أخرى")
-      : selectNativeByName(session, ownerEl.name || "", report.ownershipType, "نوع الملكية", "أخرى"));
-  } else {
-    // احتياط: مسح مباشر بالـ label — يجد attribute[4] بغض النظر عن اسمه
-    await fillSelectByPageScan(session, "نوع.*ملكية|ملكية.*نوع|ownership", report.ownershipType, "نوع الملكية", "أخرى");
-  }
+  // الاسم الفعلي: attribute[4] — الحل الجذري: selectByNameFuzzy مباشرة
+  await selectByNameFuzzy(session, "attribute[4]", report.ownershipType, "نوع الملكية", "أخرى");
 
   // ── مساحة الأرض ───────────────────────────────────────────────────────────
   const landEl = byName("land_area") ?? byName("plot_area") ??
@@ -2025,34 +2087,32 @@ async function fillAttributePage(
   }
 
   // ── الواجهات المطلة على الشارع ──────────────────────────────────────────
-  // الاسم الفعلي: attribute[8] (id=8)
-  // الخريطة: 1→"واجهة واحدة"(6), 2→"واجهتان"(7), 3→"ثلاث واجهات"(8), 4+→"4 واجهات"(9)
+  // الاسم الفعلي: attribute[8] — الحل الجذري: selectByNameFuzzy مباشرة
+  // الخريطة: 1→"واجهة واحدة", 2→"واجهتان", 3→"ثلاث واجهات", 4+→"4 واجهات"
   {
-    // أولاً: إذا توفّر facadesCount كرقم — استخدم دالة fillFacadesCount
+    const facadesNumToText = (n: number): string =>
+      n <= 1 ? "واجهة واحدة" : n === 2 ? "واجهتان" : n === 3 ? "ثلاث واجهات" : "4 واجهات";
+
+    // استنتج النص من facadesCount أو من streetFacades
     const fc = report.facadesCount ? Number(report.facadesCount) : null;
-    if (fc && fc > 0) {
-      await fillFacadesCount(session, fc);
-    } else {
-      // ثانياً: إذا لم يُستخرج الرقم — جرّب مطابقة streetFacades نصياً مع خيارات الـ select
-      // نستخدم نفس دالة fillSelectByPageScan مع regex يجد الـ select بـ label "واجهة" أو "attribute[8]"
-      // وإذا لم يُطابق النص نُجرّب مطابقة مباشرة بقيم الـ options
-      const sf = report.streetFacades as string | null | undefined;
-      if (sf && sf.trim()) {
-        addLog(session, `🔍 الواجهات: facadesCount فارغ — أحاول بـ streetFacades="${sf}"`);
-        await fillFacadesCount(session, (() => {
-          const t = sf.trim();
-          if (/واجهة واحدة|واحدة/i.test(t)) return 1;
-          if (/واجهتان|اثنتان|٢|2/i.test(t)) return 2;
-          if (/ثلاث.*واجهات|3 واجهات|٣/i.test(t)) return 3;
-          if (/4 واجهات|أربع.*واجهات|٤|4 واجهة/i.test(t)) return 4;
-          // عدّ الاتجاهات المذكورة: شمال، جنوب، شرق، غرب
-          const dirs = (t.match(/شمال|جنوب|شرق|غرب|بحري|قبلي/g) || []).length;
-          return dirs > 0 ? dirs : null;
-        })());
-      } else {
-        addLog(session, "⏭️ الواجهات: لا facadesCount ولا streetFacades — تخطي");
+    let facadesText: string | null = fc && fc > 0 ? facadesNumToText(Math.round(fc)) : null;
+
+    if (!facadesText) {
+      const sf = (report.streetFacades as string | null | undefined) ?? "";
+      if (sf.trim()) {
+        const t = sf.trim();
+        const n =
+          /واجهة واحدة|واحدة/i.test(t) ? 1 :
+          /واجهتان|اثنتان|٢/i.test(t)  ? 2 :
+          /ثلاث.*واجهات|٣/i.test(t)    ? 3 :
+          /أربع.*واجهات|٤/i.test(t)    ? 4 :
+          (t.match(/شمال|جنوب|شرق|غرب|بحري|قبلي/g) || []).length || null;
+        facadesText = n ? facadesNumToText(n) : sf.trim();
+        if (facadesText) addLog(session, `🔍 الواجهات: استُنتج "${facadesText}" من streetFacades="${sf}"`);
       }
     }
+
+    await selectByNameFuzzy(session, "attribute[8]", facadesText, "الواجهات المطلة");
   }
 
   // ── أساليب التقييم (أسلوب السوق / الدخل / التكلفة) ──────────────────────
