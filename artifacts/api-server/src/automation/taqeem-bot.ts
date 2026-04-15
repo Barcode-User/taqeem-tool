@@ -1761,17 +1761,18 @@ async function fillAssetPage(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // مسح مباشر للصفحة: يبحث عن native <select> بنص التسمية (label) المجاورة
-// يعمل مع عناصر name="attribute[N]" التي لا تُكشف بـ scanElements
+// كل العمل داخل page.evaluate واحد — لا مشاكل في محددات Playwright
+// يعمل مع name="attribute[N]" وأي تسمية أخرى
 // ─────────────────────────────────────────────────────────────────────────────
 async function fillSelectByPageScan(
   session: AutomationSession,
-  labelRxSource: string,          // مصدر regex (نص، ليس RegExp — لنمرره للمتصفح)
+  labelRxSource: string,
   value: string | null | undefined,
   fieldLabel: string,
   fallback?: string,
 ): Promise<void> {
   if (!value || value.trim() === "") {
-    addLog(session, `⏭️ تخطي «${fieldLabel}» (مسح مباشر) — لا قيمة`);
+    addLog(session, `⏭️ تخطي «${fieldLabel}» — لا قيمة`);
     return;
   }
   const normVal = normalizeAr(value);
@@ -1779,68 +1780,80 @@ async function fillSelectByPageScan(
 
   const { page } = session;
   try {
-    // نجد المحدد CSS للـ select المطابق (بنص label المجاور)
-    // لا نستخدم CSS.escape داخل قيمة attribute — الأقواس [] مقبولة حرفياً
-    const sel: string | null = await page.evaluate((rxSrc: string) => {
-      const rx = new RegExp(rxSrc, "i");
-      const selects = Array.from(document.querySelectorAll("select"));
-      for (const s of selects) {
-        // 1) label[for=id] مرتبط مباشرة
-        if (s.id) {
-          const lbl = document.querySelector(`label[for="${s.id}"]`);
-          if (lbl && rx.test(lbl.textContent || "")) {
-            return s.name ? `[name="${s.name}"]` : `#${s.id}`;
-          }
-        }
-        // 2) label داخل أقرب container (.form-group, .field, .col, div)
-        const container = s.closest(".form-group, .field, .col, div");
-        if (container) {
-          const lbl = container.querySelector("label");
-          if (lbl && rx.test(lbl.textContent || "")) {
-            return s.name ? `[name="${s.name}"]` : (s.id ? `#${s.id}` : null);
-          }
-        }
-        // 3) نص الـ select نفسه أو الـ placeholder
-        if (rx.test(s.getAttribute("placeholder") || "")) {
-          return s.name ? `[name="${s.name}"]` : (s.id ? `#${s.id}` : null);
-        }
-      }
-      return null;
-    }, labelRxSource);
-
-    if (!sel) {
-      addLog(session, `⚠️ «${fieldLabel}» (مسح مباشر): لم يُعثر على select مطابق`);
-      return;
-    }
-
-    // نستخدم نفس منطق التطبيع العربي الشامل
-    const result = await page.evaluate(
+    type ScanResult = {
+      found: boolean;
+      matched: string | null;
+      usedFallback: boolean;
+      available: string[];
+      allSelects: Array<{ label: string; name: string; id: string; opts: string[] }>;
+    };
+    const result: ScanResult = await page.evaluate(
       new Function("args", `
         ${EVAL_NORM_FN}
-        var el = document.querySelector(args.sel);
-        if(!el) return {matched:null, usedFallback:false, available:[]};
-        var opts = Array.from(el.options);
+        var nl = function(t){ return (t||"").replace(/\\s+/g," ").trim(); };
+
+        // جمع معلومات كل select في الصفحة للتشخيص
+        var allSelects = Array.from(document.querySelectorAll("select")).map(function(s){
+          var lbl = "";
+          if(s.id){ var el=document.querySelector('label[for="'+s.id+'"]'); if(el) lbl=el.textContent||""; }
+          if(!lbl){ var c=s.closest(".form-group,.field,.col,.ng-star-inserted,.row,div"); if(c){ var l=c.querySelector("label"); if(l) lbl=l.textContent||""; } }
+          return {
+            label: nl(lbl),
+            name:  s.name||"",
+            id:    s.id||"",
+            opts:  Array.from(s.options).map(function(o){return o.text.trim();}).filter(Boolean).slice(0,6)
+          };
+        });
+
+        // إيجاد الـ select بالـ label
+        var rx = new RegExp(args.rxSrc, "i");
+        var target = null;
+        var selects = document.querySelectorAll("select");
+        for(var i=0;i<selects.length;i++){
+          var s = selects[i];
+          var lbl = "";
+          if(s.id){ var el=document.querySelector('label[for="'+s.id+'"]'); if(el) lbl=el.textContent||""; }
+          if(!lbl){
+            // نبحث في الـ containers بشكل متصاعد
+            var c = s.parentElement;
+            while(c && c !== document.body){
+              var l = c.querySelector("label");
+              if(l && rx.test(nl(l.textContent||""))){ lbl=l.textContent||""; break; }
+              c = c.parentElement;
+            }
+          }
+          if(rx.test(nl(lbl))){ target=s; break; }
+        }
+
+        if(!target){
+          return {found:false, matched:null, usedFallback:false, available:[], allSelects:allSelects};
+        }
+
+        var opts = Array.from(target.options);
         var available = opts.map(function(o){return o.text.trim();}).filter(Boolean);
         var opt = opts.find(function(o){ return _matches(o.text, args.nv); });
+        var usedFb = false;
         if(!opt && args.fb){
           opt = opts.find(function(o){ return _matches(o.text, args.fb); });
-          if(opt){
-            el.value = opt.value;
-            el.dispatchEvent(new Event('change',{bubbles:true}));
-            return {matched:opt.text, usedFallback:true, available:available};
-          }
+          if(opt) usedFb = true;
         }
         if(opt){
-          el.value = opt.value;
-          el.dispatchEvent(new Event('change',{bubbles:true}));
-          return {matched:opt.text, usedFallback:false, available:available};
+          target.value = opt.value;
+          target.dispatchEvent(new Event("change",{bubbles:true}));
+          target.dispatchEvent(new Event("input",{bubbles:true}));
+          return {found:true, matched:opt.text.trim(), usedFallback:usedFb, available:available, allSelects:allSelects};
         }
-        return {matched:null, usedFallback:false, available:available};
-      `) as (args: {sel:string; nv:string; fb:string}) => {matched:string|null; usedFallback:boolean; available:string[]},
-      { sel, nv: normVal, fb: normFb },
+        return {found:true, matched:null, usedFallback:false, available:available, allSelects:allSelects};
+      `) as (args: {rxSrc:string; nv:string; fb:string}) => ScanResult,
+      { rxSrc: labelRxSource, nv: normVal, fb: normFb },
     );
 
-    if (result.matched) {
+    if (!result.found) {
+      addLog(session, `⚠️ «${fieldLabel}»: لم يُعثر على select — سجل الـ selects في الصفحة:`);
+      (result.allSelects || []).forEach((s, i) => {
+        addLog(session, `  [${i}] label="${s.label}" name="${s.name}" id="${s.id}" → ${s.opts.join(" | ")}`);
+      });
+    } else if (result.matched) {
       if (result.usedFallback) {
         addLog(session, `⚠️ «${fieldLabel}»: "${value}" غير موجود — اختير "${result.matched}" بديلاً`);
       } else {
@@ -1850,17 +1863,17 @@ async function fillSelectByPageScan(
       addLog(session, `⚠️ «${fieldLabel}»: "${value}" غير موجود — المتاح: ${result.available.slice(0, 8).join(" | ")}`);
     }
   } catch (e: any) {
-    addLog(session, `⚠️ خطأ في «${fieldLabel}» (مسح مباشر): ${(e as Error).message}`);
+    addLog(session, `⚠️ خطأ في «${fieldLabel}»: ${(e as Error).message}`);
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// عدد الواجهات: يحوّل الرقم إلى الخيار المناسب في قائمة TAQEEM
-//   1 → "واجهة واحدة"  (value=6)
-//   2 → "واجهتان"      (value=7)
-//   3 → "3 واجهات"     (value=8)
-//  4+ → "4 واجهات"     (value=9)
-// يبحث بخيارات الـ select الفريدة (وليس بالاسم الذي قد يتغيّر بين النماذج)
+// الواجهات المطلة على الشارع — يحوّل الرقم إلى الخيار المناسب في TAQEEM
+//   1  → "واجهة واحدة"   (value=6)
+//   2  → "واجهتان"        (value=7)
+//   3  → "3 واجهات"       (value=8)
+//   4+ → "4 واجهات"       (value=9)
+// البحث بخيارات الـ select (مُعرِّف فريد) + كل العمل داخل المتصفح
 // ─────────────────────────────────────────────────────────────────────────────
 async function fillFacadesCount(
   session: AutomationSession,
@@ -1868,53 +1881,70 @@ async function fillFacadesCount(
 ): Promise<void> {
   const raw = Number(facadesCount ?? 0);
   if (!raw || raw <= 0) {
-    addLog(session, "⏭️ تخطي «عدد الواجهات» — لا قيمة");
+    addLog(session, "⏭️ تخطي «الواجهات المطلة» — لا قيمة");
     return;
   }
 
   const count = Math.round(raw);
   const optValue = count <= 1 ? "6" : count === 2 ? "7" : count === 3 ? "8" : "9";
   const optLabel = count <= 1 ? "واجهة واحدة" : count === 2 ? "واجهتان" : count === 3 ? "3 واجهات" : "4 واجهات";
-  addLog(session, `🔍 عدد الواجهات: ${count} → "${optLabel}" (قيمة=${optValue})`);
+  addLog(session, `🔍 الواجهات المطلة: ${count} → "${optLabel}" (value=${optValue})`);
 
   const { page } = session;
   try {
-    // نبحث عن الـ select الذي يحتوي "واجهة واحدة" كخيار — مُعرِّف فريد
-    // داخل قيمة الـ attribute selector لا نحتاج CSS.escape — الأقواس [] مقبولة حرفياً
-    const sel: string | null = await page.evaluate(() => {
+    type FacadeResult = {
+      found: boolean;
+      matched: string | null;
+      allSelects: Array<{ name: string; id: string; opts: string[] }>;
+    };
+
+    // كل العمل داخل page.evaluate — لا مشاكل في محددات Playwright
+    const result: FacadeResult = await page.evaluate((args: {ov:string; ol:string}) => {
+      const nl = (t: string) => t.replace(/\s+/g, " ").trim();
+
+      // تشخيص: جمع كل الـ selects
       const selects = Array.from(document.querySelectorAll("select"));
-      const t = selects.find(s =>
+      const allSelects = selects.map(s => ({
+        name: s.name || "",
+        id:   s.id   || "",
+        opts: Array.from(s.options).map(o => o.text.trim()).filter(Boolean).slice(0, 6),
+      }));
+
+      // إيجاد الـ select بخياراته الفريدة (واجهة واحدة / واجهتان)
+      const target = selects.find(s =>
         Array.from(s.options).some(o =>
-          o.text.includes("واجهة واحدة") || o.text.includes("واجهتان"),
+          nl(o.text).includes("واجهة واحدة") || nl(o.text).includes("واجهتان"),
         ),
       );
-      if (!t) return null;
-      if (t.name) return `[name="${t.name}"]`;   // أقواس [] مقبولة داخل ""
-      if (t.id)   return `#${t.id}`;
-      return null;
-    });
 
-    if (!sel) {
-      addLog(session, "⚠️ لم يُعثر على قائمة «عدد الواجهات» في الصفحة");
-      return;
-    }
+      if (!target) return { found: false, matched: null, allSelects };
 
-    // نختار أولاً بالقيمة الرقمية (أكثر موثوقية)، ثم بالنص كبديل
-    const chosen = await page
-      .selectOption(sel, { value: optValue })
-      .catch(() => page.selectOption(sel, { label: optLabel }).catch(() => []));
+      // محاولة 1: بالقيمة الرقمية المباشرة
+      let opt = Array.from(target.options).find(o => o.value === args.ov);
+      // محاولة 2: بالنص
+      if (!opt) opt = Array.from(target.options).find(o => nl(o.text).includes(args.ol));
 
-    if (Array.isArray(chosen) && chosen.length > 0) {
-      await page.evaluate((s: string) => {
-        (document.querySelector(s) as HTMLElement)
-          ?.dispatchEvent(new Event("change", { bubbles: true }));
-      }, sel);
-      addLog(session, `✅ عدد الواجهات: ${count} → "${optLabel}"`);
+      if (opt) {
+        target.value = opt.value;
+        target.dispatchEvent(new Event("change", { bubbles: true }));
+        target.dispatchEvent(new Event("input",  { bubbles: true }));
+        return { found: true, matched: nl(opt.text), allSelects };
+      }
+      return { found: true, matched: null, allSelects };
+    }, { ov: optValue, ol: optLabel });
+
+    if (result.found && result.matched) {
+      addLog(session, `✅ الواجهات المطلة: ${count} → "${result.matched}"`);
+    } else if (result.found) {
+      addLog(session, `⚠️ الواجهات: select موجود لكن القيمة "${optLabel}" غير موجودة — خياراته: ${result.allSelects.find(s => s.opts.some(o => o.includes("واجهة")))?.opts.join(" | ")}`);
     } else {
-      addLog(session, `⚠️ فشل اختيار «عدد الواجهات» (قيمة=${optValue} | نص="${optLabel}")`);
+      addLog(session, `⚠️ الواجهات: select غير موجود — كل الـ selects في الصفحة:`);
+      (result.allSelects || []).forEach((s, i) => {
+        addLog(session, `  [${i}] name="${s.name}" id="${s.id}" → ${s.opts.join(" | ")}`);
+      });
     }
   } catch (e: any) {
-    addLog(session, `⚠️ خطأ في «عدد الواجهات»: ${(e as Error).message}`);
+    addLog(session, `⚠️ خطأ في «الواجهات المطلة»: ${(e as Error).message}`);
   }
 }
 
