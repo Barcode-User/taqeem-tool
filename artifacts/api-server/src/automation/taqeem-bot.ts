@@ -1873,7 +1873,7 @@ async function fillSelectByPageScan(
 // الواجهات المطلة على الشارع — يحوّل الرقم إلى الخيار المناسب في TAQEEM
 //   1  → "واجهة واحدة"   (value=6)
 //   2  → "واجهتان"        (value=7)
-//   3  → "3 واجهات"       (value=8)
+//   3  → "ثلاث واجهات"   (value=8)
 //   4+ → "4 واجهات"       (value=9)
 // البحث بخيارات الـ select (مُعرِّف فريد) + كل العمل داخل المتصفح
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1889,7 +1889,7 @@ async function fillFacadesCount(
 
   const count = Math.round(raw);
   const optValue = count <= 1 ? "6" : count === 2 ? "7" : count === 3 ? "8" : "9";
-  const optLabel = count <= 1 ? "واجهة واحدة" : count === 2 ? "واجهتان" : count === 3 ? "3 واجهات" : "4 واجهات";
+  const optLabel = count <= 1 ? "واجهة واحدة" : count === 2 ? "واجهتان" : count === 3 ? "ثلاث واجهات" : "4 واجهات";
   addLog(session, `🔍 الواجهات المطلة: ${count} → "${optLabel}" (value=${optValue})`);
 
   const { page } = session;
@@ -2026,7 +2026,7 @@ async function fillAttributePage(
 
   // ── الواجهات المطلة على الشارع ──────────────────────────────────────────
   // الاسم الفعلي: attribute[8] (id=8)
-  // الخريطة: 1→"واجهة واحدة"(6), 2→"واجهتان"(7), 3→"3 واجهات"(8), 4+→"4 واجهات"(9)
+  // الخريطة: 1→"واجهة واحدة"(6), 2→"واجهتان"(7), 3→"ثلاث واجهات"(8), 4+→"4 واجهات"(9)
   {
     // أولاً: إذا توفّر facadesCount كرقم — استخدم دالة fillFacadesCount
     const fc = report.facadesCount ? Number(report.facadesCount) : null;
@@ -2043,7 +2043,7 @@ async function fillAttributePage(
           const t = sf.trim();
           if (/واجهة واحدة|واحدة/i.test(t)) return 1;
           if (/واجهتان|اثنتان|٢|2/i.test(t)) return 2;
-          if (/3 واجهات|ثلاث.*واجهات|٣|3 واجهة/i.test(t)) return 3;
+          if (/ثلاث.*واجهات|3 واجهات|٣/i.test(t)) return 3;
           if (/4 واجهات|أربع.*واجهات|٤|4 واجهة/i.test(t)) return 4;
           // عدّ الاتجاهات المذكورة: شمال، جنوب، شرق، غرب
           const dirs = (t.match(/شمال|جنوب|شرق|غرب|بحري|قبلي/g) || []).length;
