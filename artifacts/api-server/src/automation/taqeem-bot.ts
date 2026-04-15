@@ -1884,6 +1884,22 @@ async function selectByNameFuzzy(
     return false;
   }
 
+  // ── انتظار تحميل الخيارات من الـ API (أكثر من خيار "اختر" الافتراضي) ────────
+  // Angular يحمّل الخيارات بشكل غير متزامن — نختار فقط بعد اكتمال التحميل
+  try {
+    await session.page.waitForFunction(
+      (sn: string) => {
+        const sel = document.querySelector<HTMLSelectElement>(`select[name="${sn}"]`);
+        return !!sel && sel.options.length > 1;
+      },
+      selectName,
+      { timeout: 10000 },
+    );
+    addLog(session, `⏳ [${fieldLabel}]: الخيارات جاهزة`);
+  } catch {
+    addLog(session, `⚠️ [${fieldLabel}]: الخيارات لم تُحمَّل بعد 10 ثوانٍ — أحاول على أي حال`);
+  }
+
   // ── الخطوة 1: إيجاد قيمة الخيار الأنسب داخل المتصفح (بدون تعديل) ──────────
   const found = await session.page.evaluate(
     ({ sn, tv, fb }: { sn: string; tv: string; fb?: string }) => {
