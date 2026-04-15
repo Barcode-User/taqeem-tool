@@ -798,22 +798,65 @@ async function fillDate(
   }
 }
 
-// ─── تطبيع النص العربي: توحيد الياء والكاف والهمزات ────────────────────────
-// يحل مشكلة الياء الفارسية (ی) مقابل العربية (ي) الشائعة في PDF
+// ─── تطبيع النص العربي الشامل ───────────────────────────────────────────────
+// يحل مشكلة الياء الفارسية + الحركات + الحروف غير المرئية + التطويل
+const NORM_INVISIBLE = /[\u200B-\u200F\u202A-\u202E\uFEFF\u200C\u200D]/g;
+const NORM_TATWEEL   = /\u0640/g; // tatweel (ـ)
+const NORM_DIACRIT   = /[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06DC\u06DF-\u06E8\u06EA-\u06ED]/g;
+const NORM_YA        = /[يىیے]/g;
+const NORM_KAF       = /[كکڪ]/g;
+const NORM_ALEF      = /[أإآٱ]/g;
+
 function normalizeAr(s: string): string {
   return (s ?? "")
-    .trim()
-    .replace(/[يىیے]/g, "ي")   // توحيد جميع أشكال الياء
-    .replace(/[كکڪ]/g, "ك")   // توحيد الكاف
-    .replace(/ة/g, "ه")        // تاء مربوطة → هاء (اختياري — يحسن التطابق)
-    .replace(/\s+/g, " ");
+    .replace(NORM_INVISIBLE, "")
+    .replace(NORM_TATWEEL, "")
+    .replace(NORM_DIACRIT, "")
+    .replace(NORM_ALEF, "ا")   // توحيد الهمزات
+    .replace(NORM_YA, "ي")     // توحيد الياء
+    .replace(NORM_KAF, "ك")    // توحيد الكاف
+    .replace(/ة/g, "ه")        // تاء مربوطة
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
+// دالة مطابقة عربية مرنة: نص + تجريد "ال" + مطابقة جزئية
+function arMatches(a: string, b: string): boolean {
+  const na = normalizeAr(a);
+  const nb = normalizeAr(b);
+  const sa = na.replace(/^ال/, "");
+  const sb = nb.replace(/^ال/, "");
+  return na === nb || na.includes(nb) || nb.includes(na)
+    || sa === sb || sa.includes(sb) || sb.includes(sa);
+}
+
+// دالة تطبيع نص عربي داخل page.evaluate (مُعرَّفة كسلسلة نصية لحقنها في المتصفح)
+const EVAL_NORM_FN = `
+function _norm(s){
+  return (s||'')
+    .replace(/[\\u200B-\\u200F\\u202A-\\u202E\\uFEFF\\u200C\\u200D]/g,'')
+    .replace(/\\u0640/g,'')
+    .replace(/[\\u0610-\\u061A\\u064B-\\u065F\\u0670\\u06D6-\\u06DC\\u06DF-\\u06E8\\u06EA-\\u06ED]/g,'')
+    .replace(/[\\u0623\\u0625\\u0622\\u0671]/g,'\\u0627')
+    .replace(/[\\u064A\\u0649\\u06CC\\u06D2]/g,'\\u064A')
+    .replace(/[\\u0643\\u06A9\\u06AA]/g,'\\u0643')
+    .replace(/\\u0629/g,'\\u0647')
+    .replace(/\\s+/g,' ').trim();
+}
+function _matches(a,b){
+  var na=_norm(a), nb=_norm(b);
+  var sa=na.replace(/^\\u0627\\u0644/,''), sb=nb.replace(/^\\u0627\\u0644/,'');
+  return na===nb||na.includes(nb)||nb.includes(na)||sa===sb||sa.includes(sb)||sb.includes(sa);
+}
+`;
+
 // اختيار من قائمة منسدلة — يدعم native select و mat-select
+// fallback: خيار احتياطي يُختار إذا لم يُعثر على value الأصلية
 async function selectAngular(
   session: AutomationSession, selector: string,
   value: string | null | undefined, label: string,
   isMat = false,
+  fallback?: string,
 ): Promise<void> {
   if (!value || value.trim() === "") {
     addLog(session, `⏭️ تخطي "${label}" — لا توجد قيمة`);
@@ -840,8 +883,6 @@ async function selectAngular(
   }
 
   // ── محاولة 2: Angular Material mat-select — Playwright native click ────────
-  // استخدام Playwright locator بدلاً من JS click() لأن Angular CDK يحتاج
-  // أحداث الفأرة الحقيقية (mousedown/mouseup) وليس فقط click event
   try {
     await page.waitForSelector(selector, { timeout: 800 });
     await page.click(selector);
@@ -851,40 +892,38 @@ async function selectAngular(
     );
     await page.waitForTimeout(200);
 
-    // ابحث عن الخيار المطابق مع تطبيع النص العربي
-    const optionText = await page.evaluate((nv: string) => {
-      const opts = Array.from(
-        document.querySelectorAll("mat-option, .mat-option, .mat-mdc-option"),
-      );
-      const norm = (s: string) => (s ?? "")
-        .trim()
-        .replace(/[يىیے]/g, "ي")
-        .replace(/[كکڪ]/g, "ك")
-        .replace(/ة/g, "ه")
-        .replace(/\s+/g, " ");
-      const target = opts.find(o => {
-        const t = norm(o.textContent ?? "");
-        return t === nv || t.includes(nv) || nv.includes(t);
-      });
-      return target ? (target.textContent ?? "").trim() : null;
-    }, normVal);
+    // ابحث بمطابقة مرنة مع تطبيع شامل (داخل المتصفح)
+    const optionText = await page.evaluate(
+      new Function("nv", "fb", `
+        ${EVAL_NORM_FN}
+        var opts = Array.from(document.querySelectorAll('mat-option,.mat-option,.mat-mdc-option'));
+        var t = opts.find(function(o){ return _matches(o.textContent||'', nv); });
+        if(t) return {found:(t.textContent||'').trim(), usedFallback:false};
+        if(fb){
+          var ft = opts.find(function(o){ return _matches(o.textContent||'', fb); });
+          if(ft) return {found:(ft.textContent||'').trim(), usedFallback:true};
+        }
+        return {found:null, usedFallback:false,
+          available:opts.map(function(o){return (o.textContent||'').trim();}).filter(Boolean)};
+      `) as (nv: string, fb: string) => {found:string|null, usedFallback:boolean, available?:string[]},
+      normVal, fallback ? normalizeAr(fallback) : "",
+    );
 
-    if (optionText !== null) {
-      // استخدم Playwright locator لضمان أحداث الفأرة الحقيقية
+    if (optionText.found !== null) {
       const optLoc = page.locator("mat-option, .mat-option, .mat-mdc-option")
-        .filter({ hasText: optionText });
+        .filter({ hasText: optionText.found });
       await optLoc.first().click({ timeout: 2000 });
       await page.waitForTimeout(300);
-      addLog(session, `✅ ${label}: ${value}`);
+      if (optionText.usedFallback) {
+        addLog(session, `⚠️ "${label}": "${value}" غير موجود — تم اختيار "${optionText.found}" كبديل`);
+      } else {
+        addLog(session, `✅ ${label}: ${optionText.found}`);
+      }
       return;
     }
 
-    // لم يُعثر على الخيار → سجّل المتاح وأغلق
-    const available = await page.evaluate(() =>
-      Array.from(document.querySelectorAll("mat-option, .mat-option, .mat-mdc-option"))
-        .map(o => (o.textContent ?? "").trim()).filter(t => t),
-    );
-    addLog(session, `⚠️ "${label}": الخيار "${value}" غير موجود — المتاح: ${available.slice(0, 8).join(" | ")}`);
+    const avail = (optionText.available ?? []).slice(0, 8).join(" | ");
+    addLog(session, `⚠️ "${label}": "${value}" غير موجود — المتاح: ${avail}`);
     await page.keyboard.press("Escape");
   } catch (e: any) {
     addLog(session, `⚠️ لم يُحدَّد "${label}": ${value} — ${e.message}`);
@@ -1255,23 +1294,23 @@ async function fillFormPage(
 }
 
 // تعبئة native select بالـ name مباشرة (بالنص أو بالقيمة)
+// fallback: خيار احتياطي يُختار إذا لم تُوجد قيمة value
 async function selectNativeByName(
   session: AutomationSession,
   name: string,
   value: string | null | undefined,
   label: string,
+  fallback?: string,
 ): Promise<void> {
   if (!value || value.trim() === "") {
     addLog(session, `⏭️ تخطي "${label}" — لا توجد قيمة`);
     return;
   }
 
-  // نطبّق التطبيع هنا في Node.js ثم نمرره للمتصفح
-  const normVal = normalizeAr(value);
-  // نزيل "ال" التعريف من البداية للمطابقة الأكثر مرونة
-  const stemVal = normVal.replace(/^ال/, "");
-
+  const normVal  = normalizeAr(value);
+  const normFb   = fallback ? normalizeAr(fallback) : "";
   const sel = `[name="${name}"]`;
+
   try {
     await session.page.waitForSelector(sel, { timeout: 3000 });
 
@@ -1287,45 +1326,40 @@ async function selectNativeByName(
       return;
     }
 
-    // محاولة 2: مطابقة مرنة مع تطبيع عربي + تجريد "ال"
+    // محاولة 2: مطابقة مرنة شاملة + fallback
     const result = await session.page.evaluate(
-      (args: { sel: string; nv: string; stem: string }) => {
-        const norm = (s: string) => (s ?? "")
-          .trim()
-          .replace(/[يىیے]/g, "ي")
-          .replace(/[كکڪ]/g, "ك")
-          .replace(/ة/g, "ه")
-          .replace(/\s+/g, " ");
+      new Function("args", `
+        ${EVAL_NORM_FN}
+        var el = document.querySelector(args.sel);
+        if(!el) return {matched:null, usedFallback:false, available:[]};
+        var opts = Array.from(el.options);
+        var available = opts.map(function(o){return o.text.trim();}).filter(Boolean);
 
-        const el = document.querySelector<HTMLSelectElement>(args.sel);
-        if (!el) return { matched: null, available: [] as string[] };
-
-        const opts = Array.from(el.options);
-        const available = opts.map(o => o.text.trim()).filter(t => t);
-
-        const opt = opts.find(o => {
-          const t = norm(o.text);
-          const tStem = t.replace(/^ال/, "");
-          return (
-            t === args.nv ||
-            t.includes(args.nv) || args.nv.includes(t) ||
-            tStem === args.stem ||
-            tStem.includes(args.stem) || args.stem.includes(tStem)
-          );
-        });
-
-        if (opt) {
-          el.value = opt.value;
-          el.dispatchEvent(new Event("change", { bubbles: true }));
-          return { matched: opt.text, available };
+        var opt = opts.find(function(o){ return _matches(o.text, args.nv); });
+        if(!opt && args.fb){
+          opt = opts.find(function(o){ return _matches(o.text, args.fb); });
+          if(opt){
+            el.value = opt.value;
+            el.dispatchEvent(new Event('change',{bubbles:true}));
+            return {matched:opt.text, usedFallback:true, available:available};
+          }
         }
-        return { matched: null, available };
-      },
-      { sel, nv: normVal, stem: stemVal },
+        if(opt){
+          el.value = opt.value;
+          el.dispatchEvent(new Event('change',{bubbles:true}));
+          return {matched:opt.text, usedFallback:false, available:available};
+        }
+        return {matched:null, usedFallback:false, available:available};
+      `) as (args: {sel:string; nv:string; fb:string}) => {matched:string|null; usedFallback:boolean; available:string[]},
+      { sel, nv: normVal, fb: normFb },
     );
 
     if (result.matched) {
-      addLog(session, `✅ ${label}: ${result.matched} (مطابقة مرنة من "${value}")`);
+      if (result.usedFallback) {
+        addLog(session, `⚠️ "${label}": "${value}" غير موجود — تم اختيار "${result.matched}" كبديل`);
+      } else {
+        addLog(session, `✅ ${label}: ${result.matched} (من "${value}")`);
+      }
     } else {
       addLog(session, `⚠️ "${label}": "${value}" غير موجود — المتاح: ${result.available.slice(0, 8).join(" | ")}`);
     }
@@ -1617,8 +1651,8 @@ async function fillAssetPage(
     byLabel(/usage|sector|استخدام|قطاع/i);
   if (assetUseEl) {
     await (assetUseEl.isMat
-      ? selectAngular(session, buildSelector(assetUseEl), report.propertyUse, "استخدام الأصل", true)
-      : selectNativeByName(session, assetUseEl.name || "", report.propertyUse, "استخدام الأصل"));
+      ? selectAngular(session, buildSelector(assetUseEl), report.propertyUse, "استخدام الأصل", true, "أخرى")
+      : selectNativeByName(session, assetUseEl.name || "", report.propertyUse, "استخدام الأصل", "أخرى"));
   }
 
   // ── تاريخ المعاينة ────────────────────────────────────────────────────────
