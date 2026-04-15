@@ -833,8 +833,11 @@ export default function ReportDetails() {
                 </div>
                 <CopyField label="سعر المتر (ريال)" value={report.pricePerMeter ? report.pricePerMeter.toLocaleString("ar-SA") : null} />
                 <CopyField label="قيمة أسلوب السوق" value={report.marketValue ? report.marketValue.toLocaleString("ar-SA") : null} />
+                <CopyField label="نسبة أسلوب السوق (%)" value={report.marketApproachPercentage != null ? String(report.marketApproachPercentage) : null} />
                 <CopyField label="قيمة أسلوب الدخل" value={report.incomeValue ? report.incomeValue.toLocaleString("ar-SA") : null} />
+                <CopyField label="نسبة أسلوب الدخل (%)" value={report.incomeApproachPercentage != null ? String(report.incomeApproachPercentage) : null} />
                 <CopyField label="قيمة أسلوب التكلفة" value={report.costValue ? report.costValue.toLocaleString("ar-SA") : null} />
+                <CopyField label="نسبة أسلوب التكلفة (%)" value={report.costApproachPercentage != null ? String(report.costApproachPercentage) : null} />
               </CardContent>
             </Card>
 
