@@ -1875,15 +1875,17 @@ async function selectByNameFuzzy(
   }
   addLog(session, `🎯 selectByNameFuzzy [${fieldLabel}]: name="${selectName}" ← "${targetText}"`);
 
-  // انتظار ظهور الـ select — XPath يتجنب مشكلة أقواس CSS
+  // انتظار ظهور الـ select — XPath يتجنب مشكلة أقواس CSS في Playwright
+  const xp = `xpath=//select[@name="${selectName}"]`;
   try {
-    await session.page.waitForSelector(`xpath=//select[@name="${selectName}"]`, { timeout: 5000 });
+    await session.page.waitForSelector(xp, { timeout: 5000 });
   } catch {
-    addLog(session, `⚠️ [${fieldLabel}]: select[name="${selectName}"] لم يظهر — تخطي`);
+    addLog(session, `⚠️ [${fieldLabel}]: select[name="${selectName}"] لم يظهر خلال 5 ثوانٍ — تخطي`);
     return false;
   }
 
-  const result = await session.page.evaluate(
+  // ── الخطوة 1: إيجاد قيمة الخيار الأنسب داخل المتصفح (بدون تعديل) ──────────
+  const found = await session.page.evaluate(
     ({ sn, tv, fb }: { sn: string; tv: string; fb?: string }) => {
       const nl = (s: string) =>
         (s || "")
@@ -1891,12 +1893,11 @@ async function selectByNameFuzzy(
           .replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي")
           .replace(/\s+/g, " ").trim().toLowerCase();
 
-      // querySelector داخل المتصفح — صحيح لـ attribute[4] و attribute[8]
       const sel = document.querySelector<HTMLSelectElement>(`select[name="${sn}"]`);
-      if (!sel) return { ok: false, reason: `no <select name="${sn}">` };
+      if (!sel) return { ok: false as const, reason: `no <select name="${sn}">` };
 
       const opts = Array.from(sel.options).filter(o => o.value !== "" && o.value !== "0" && !o.disabled);
-      if (!opts.length) return { ok: false, reason: "no valid options" };
+      if (!opts.length) return { ok: false as const, reason: "no valid options" };
 
       const target = nl(tv);
       let bestOpt: HTMLOptionElement | null = null;
@@ -1923,23 +1924,36 @@ async function selectByNameFuzzy(
       }
 
       if (!bestOpt) {
-        return { ok: false, reason: `لا تطابق لـ "${tv}" — الخيارات: [${opts.map(o => `"${o.text.trim()}"(${o.value})`).join(", ")}]` };
+        const allOpts = opts.map(o => `"${o.text.trim()}"(${o.value})`).join(", ");
+        return { ok: false as const, reason: `لا تطابق لـ "${tv}" — الخيارات: [${allOpts}]` };
       }
 
-      sel.value = bestOpt.value;
-      sel.dispatchEvent(new Event("input",  { bubbles: true }));
-      sel.dispatchEvent(new Event("change", { bubbles: true }));
-      return { ok: true, chosen: bestOpt.text.trim(), value: bestOpt.value, score: Math.round(bestScore) };
+      return { ok: true as const, value: bestOpt.value, chosen: bestOpt.text.trim(), score: Math.round(bestScore) };
     },
     { sn: selectName, tv: targetText ?? "", fb: fallbackText },
   );
 
-  if (result.ok) {
-    addLog(session, `✅ [${fieldLabel}]: اختار "${result.chosen}" (value=${result.value}, score=${result.score}%)`);
-  } else {
-    addLog(session, `❌ [${fieldLabel}]: ${result.reason}`);
+  if (!found.ok) {
+    addLog(session, `❌ [${fieldLabel}]: ${found.reason}`);
+    return false;
   }
-  return result.ok;
+
+  // ── الخطوة 2: الاختيار عبر Playwright locator — يُشغّل Angular change detection ──
+  try {
+    await session.page.locator(xp).selectOption({ value: found.value });
+    addLog(session, `✅ [${fieldLabel}]: اختار "${found.chosen}" (value=${found.value}, score=${found.score}%)`);
+    return true;
+  } catch (e) {
+    addLog(session, `⚠️ [${fieldLabel}]: selectOption(value=${found.value}) فشل — أحاول بالنص مباشرة`);
+    try {
+      await session.page.locator(xp).selectOption({ label: found.chosen });
+      addLog(session, `✅ [${fieldLabel}]: اختار بالنص "${found.chosen}"`);
+      return true;
+    } catch (e2) {
+      addLog(session, `❌ [${fieldLabel}]: فشل كلياً — ${(e2 as Error).message}`);
+      return false;
+    }
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
