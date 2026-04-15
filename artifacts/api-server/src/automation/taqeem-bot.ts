@@ -1755,6 +1755,69 @@ async function fillAssetPage(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// عدد الواجهات: يحوّل الرقم إلى الخيار المناسب في قائمة TAQEEM
+//   1 → "واجهة واحدة"  (value=6)
+//   2 → "واجهتان"      (value=7)
+//   3 → "3 واجهات"     (value=8)
+//  4+ → "4 واجهات"     (value=9)
+// يبحث بخيارات الـ select الفريدة (وليس بالاسم الذي قد يتغيّر بين النماذج)
+// ─────────────────────────────────────────────────────────────────────────────
+async function fillFacadesCount(
+  session: AutomationSession,
+  facadesCount: number | null | undefined,
+): Promise<void> {
+  const raw = Number(facadesCount ?? 0);
+  if (!raw || raw <= 0) {
+    addLog(session, "⏭️ تخطي «عدد الواجهات» — لا قيمة");
+    return;
+  }
+
+  const count = Math.round(raw);
+  const optValue = count <= 1 ? "6" : count === 2 ? "7" : count === 3 ? "8" : "9";
+  const optLabel = count <= 1 ? "واجهة واحدة" : count === 2 ? "واجهتان" : count === 3 ? "3 واجهات" : "4 واجهات";
+  addLog(session, `🔍 عدد الواجهات: ${count} → "${optLabel}" (قيمة=${optValue})`);
+
+  const { page } = session;
+  try {
+    // نبحث عن الـ select الذي يحتوي "واجهة واحدة" كخيار — مُعرِّف فريد
+    const sel: string | null = await page.evaluate(() => {
+      const selects = Array.from(document.querySelectorAll("select"));
+      const t = selects.find(s =>
+        Array.from(s.options).some(o =>
+          o.text.includes("واجهة واحدة") || o.text.includes("واجهتان"),
+        ),
+      );
+      if (!t) return null;
+      if (t.name) return `[name="${CSS.escape(t.name)}"]`;
+      if (t.id)   return `#${CSS.escape(t.id)}`;
+      return null;
+    });
+
+    if (!sel) {
+      addLog(session, "⚠️ لم يُعثر على قائمة «عدد الواجهات» في الصفحة");
+      return;
+    }
+
+    // نختار أولاً بالقيمة الرقمية (أكثر موثوقية)، ثم بالنص كبديل
+    const chosen = await page
+      .selectOption(sel, { value: optValue })
+      .catch(() => page.selectOption(sel, { label: optLabel }).catch(() => []));
+
+    if (Array.isArray(chosen) && chosen.length > 0) {
+      await page.evaluate((s: string) => {
+        (document.querySelector(s) as HTMLElement)
+          ?.dispatchEvent(new Event("change", { bubbles: true }));
+      }, sel);
+      addLog(session, `✅ عدد الواجهات: ${count} → "${optLabel}"`);
+    } else {
+      addLog(session, `⚠️ فشل اختيار «عدد الواجهات» (قيمة=${optValue} | نص="${optLabel}")`);
+    }
+  } catch (e: any) {
+    addLog(session, `⚠️ خطأ في «عدد الواجهات»: ${(e as Error).message}`);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // الصفحة 3: /report/attribute/create/{id}
 // السمات والبيانات الإضافية للأصل
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1778,8 +1841,8 @@ async function fillAttributePage(
   const ownerEl = byName("ownership_type_id") ?? byLabel(/ownership|ملكية/i);
   if (ownerEl) {
     await (ownerEl.isMat
-      ? selectAngular(session, buildSelector(ownerEl), report.ownershipType, "نوع الملكية", true)
-      : selectNativeByName(session, ownerEl.name || "", report.ownershipType, "نوع الملكية"));
+      ? selectAngular(session, buildSelector(ownerEl), report.ownershipType, "نوع الملكية", true, "أخرى")
+      : selectNativeByName(session, ownerEl.name || "", report.ownershipType, "نوع الملكية", "أخرى"));
   }
 
   // ── مساحة الأرض ───────────────────────────────────────────────────────────
@@ -1811,13 +1874,20 @@ async function fillAttributePage(
       : selectNativeByName(session, statusEl.name || "", report.buildingStatus, "حالة البناء"));
   }
 
-  // ── الاتجاهات المطلة ──────────────────────────────────────────────────────
-  const facadeEl = byName("facade_id") ?? byLabel(/facade|direction|اتجاه|مطلة|واجهة/i);
-  if (facadeEl) {
-    await (facadeEl.isMat
-      ? selectAngular(session, buildSelector(facadeEl), report.streetFacades, "الاتجاهات", true)
-      : selectNativeByName(session, facadeEl.name || "", report.streetFacades, "الاتجاهات"));
+  // ── الاتجاه المطل (اختياري — قد لا يكون موجوداً في كل نماذج) ─────────────
+  // نبحث بـ name = facade_id فقط لتجنب التعارض مع select عدد الواجهات
+  const dirEl = byName("facade_id") ?? byName("street_direction_id") ??
+    byLabel(/اتجاه.*مطل|street.*dir|مطلة.*شارع/i);
+  if (dirEl) {
+    await (dirEl.isMat
+      ? selectAngular(session, buildSelector(dirEl), report.streetFacades, "اتجاه المطل", true, "أخرى")
+      : selectNativeByName(session, dirEl.name || "", report.streetFacades, "اتجاه المطل", "أخرى"));
   }
+
+  // ── عدد الواجهات المطلة على الشارع ──────────────────────────────────────
+  // الخريطة: 1→"واجهة واحدة", 2→"واجهتان", 3→"3 واجهات", 4+→"4 واجهات"
+  // البحث بالخيارات الفريدة لهذا الـ select (وليس بالاسم الذي قد يتغيّر)
+  await fillFacadesCount(session, report.facadesCount);
 
   // ── أساليب التقييم (أسلوب السوق / الدخل / التكلفة) ──────────────────────
   // تُعبَّأ هنا في صفحة 3 لأن mat-select الأساليب يظهر في هذه الصفحة فعلياً
