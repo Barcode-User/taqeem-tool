@@ -1647,8 +1647,8 @@ async function fillAssetPage(
   } else addLog(session, "⚠️ لم يُعثر على «نوع الأصل»");
 
   // ── استخدام/قطاع الأصل ───────────────────────────────────────────────────
-  // الاسم الفعلي: asset_usage_id — الحل الجذري: selectByNameFuzzy مباشرة
-  await selectByNameFuzzy(session, "asset_usage_id", report.propertyUse, "استخدام/قطاع الأصل", "أخرى");
+  // الاسم الفعلي: asset_usage_id — نفس أسلوب المنطقة (selectNativeByName)
+  await selectNativeByName(session, "asset_usage_id", report.propertyUse, "استخدام/قطاع الأصل", "أخرى");
 
   // ── تاريخ المعاينة ────────────────────────────────────────────────────────
   const inspEl = byName("inspection_date") ?? byName("inspected_at") ??
