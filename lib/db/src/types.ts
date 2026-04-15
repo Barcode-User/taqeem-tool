@@ -66,6 +66,9 @@ export interface Report {
   marketValue: number | null;
   incomeValue: number | null;
   costValue: number | null;
+  marketApproachPercentage: number | null;
+  incomeApproachPercentage: number | null;
+  costApproachPercentage: number | null;
   finalValue: number | null;
   pricePerMeter: number | null;
   companyName: string | null;

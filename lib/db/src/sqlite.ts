@@ -88,6 +88,9 @@ function getDb(): DatabaseSync {
       MarketValue               REAL,
       IncomeValue               REAL,
       CostValue                 REAL,
+      MarketApproachPercentage  REAL,
+      IncomeApproachPercentage  REAL,
+      CostApproachPercentage    REAL,
       FinalValue                REAL,
       PricePerMeter             REAL,
       CompanyName               TEXT,
@@ -114,10 +117,13 @@ function getDb(): DatabaseSync {
       console.log(`[DB] Migration: added column ${col}`);
     }
   };
-  addIfMissing("ValuationHypothesis", "TEXT");
-  addIfMissing("Latitude",     "REAL");
-  addIfMissing("Longitude",    "REAL");
-  addIfMissing("FacadesCount", "INTEGER");
+  addIfMissing("ValuationHypothesis",       "TEXT");
+  addIfMissing("Latitude",                  "REAL");
+  addIfMissing("Longitude",                 "REAL");
+  addIfMissing("FacadesCount",              "INTEGER");
+  addIfMissing("MarketApproachPercentage",  "REAL");
+  addIfMissing("IncomeApproachPercentage",  "REAL");
+  addIfMissing("CostApproachPercentage",    "REAL");
 
   // ─── جدول datasystem ──────────────────────────────────────────────────────
   _db.exec(`
@@ -181,6 +187,9 @@ function getDb(): DatabaseSync {
       MarketValue               REAL,
       IncomeValue               REAL,
       CostValue                 REAL,
+      MarketApproachPercentage  REAL,
+      IncomeApproachPercentage  REAL,
+      CostApproachPercentage    REAL,
       FinalValue                REAL,
       PricePerMeter             REAL,
       CompanyName               TEXT,
@@ -197,6 +206,18 @@ function getDb(): DatabaseSync {
     _db!.exec("ALTER TABLE Reports ADD COLUMN FilePath TEXT");
     console.log("[DB] Migration: added column FilePath to Reports");
   }
+
+  // ─── Migrations: datasystem ────────────────────────────────────────────────
+  const dsCols: string[] = (_db.prepare("PRAGMA table_info(datasystem)").all() as any[]).map((c: any) => c.name);
+  const addDsIfMissing = (col: string, def: string) => {
+    if (!dsCols.includes(col)) {
+      _db!.exec(`ALTER TABLE datasystem ADD COLUMN ${col} ${def}`);
+      console.log(`[DB] Migration datasystem: added column ${col}`);
+    }
+  };
+  addDsIfMissing("MarketApproachPercentage", "REAL");
+  addDsIfMissing("IncomeApproachPercentage", "REAL");
+  addDsIfMissing("CostApproachPercentage",   "REAL");
 
   console.log(`[DB] SQLite: ${DB_PATH}`);
   return _db;
@@ -269,6 +290,9 @@ function rowToReport(row: any): Report {
     marketValue: num(row.MarketValue),
     incomeValue: num(row.IncomeValue),
     costValue: num(row.CostValue),
+    marketApproachPercentage: num(row.MarketApproachPercentage),
+    incomeApproachPercentage: num(row.IncomeApproachPercentage),
+    costApproachPercentage: num(row.CostApproachPercentage),
     finalValue: num(row.FinalValue),
     pricePerMeter: num(row.PricePerMeter),
     companyName: str(row.CompanyName),
@@ -331,13 +355,14 @@ export async function sqliteInsertReport(data: InsertReport): Promise<Report> {
       BasementArea, AnnexArea, FloorsCount, PermittedFloorsCount,
       PermittedBuildingRatio, StreetWidth, StreetFacades, FacadesCount, Utilities, Coordinates,
       Latitude, Longitude,
-      ValuationMethod, MarketValue, IncomeValue, CostValue, FinalValue,
-      PricePerMeter, CompanyName, CommercialRegNumber, PdfFileName, PdfFilePath,
+      ValuationMethod, MarketValue, IncomeValue, CostValue,
+      MarketApproachPercentage, IncomeApproachPercentage, CostApproachPercentage,
+      FinalValue, PricePerMeter, CompanyName, CommercialRegNumber, PdfFileName, PdfFilePath,
       Notes, AutomationStatus, CreatedAt, UpdatedAt
     ) VALUES (
       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
     )
   `).run(
     data.reportNumber ?? null, data.reportDate ?? null, data.valuationDate ?? null,
@@ -364,7 +389,9 @@ export async function sqliteInsertReport(data: InsertReport): Promise<Report> {
     data.streetFacades ?? null, data.facadesCount ?? null, data.utilities ?? null, data.coordinates ?? null,
     data.latitude ?? null, data.longitude ?? null,
     data.valuationMethod ?? null, data.marketValue ?? null, data.incomeValue ?? null,
-    data.costValue ?? null, data.finalValue ?? null, data.pricePerMeter ?? null,
+    data.costValue ?? null,
+    data.marketApproachPercentage ?? null, data.incomeApproachPercentage ?? null, data.costApproachPercentage ?? null,
+    data.finalValue ?? null, data.pricePerMeter ?? null,
     data.companyName ?? null, data.commercialRegNumber ?? null,
     data.pdfFileName ?? null, data.pdfFilePath ?? null,
     data.notes ?? null, data.automationStatus ?? "pending",
@@ -407,7 +434,11 @@ export async function sqliteUpdateReport(id: number, data: Partial<InsertReport>
     streetFacades: "StreetFacades", facadesCount: "FacadesCount", utilities: "Utilities", coordinates: "Coordinates",
     latitude: "Latitude", longitude: "Longitude",
     valuationMethod: "ValuationMethod", marketValue: "MarketValue",
-    incomeValue: "IncomeValue", costValue: "CostValue", finalValue: "FinalValue",
+    incomeValue: "IncomeValue", costValue: "CostValue",
+    marketApproachPercentage: "MarketApproachPercentage",
+    incomeApproachPercentage: "IncomeApproachPercentage",
+    costApproachPercentage: "CostApproachPercentage",
+    finalValue: "FinalValue",
     pricePerMeter: "PricePerMeter", companyName: "CompanyName",
     commercialRegNumber: "CommercialRegNumber", pdfFileName: "PdfFileName",
     pdfFilePath: "PdfFilePath", notes: "Notes",
@@ -495,6 +526,9 @@ export interface DataSystemRecord {
   marketValue: number | null;
   incomeValue: number | null;
   costValue: number | null;
+  marketApproachPercentage: number | null;
+  incomeApproachPercentage: number | null;
+  costApproachPercentage: number | null;
   finalValue: number | null;
   pricePerMeter: number | null;
   companyName: string | null;
@@ -567,6 +601,9 @@ function rowToDataSystem(row: any): DataSystemRecord {
     marketValue: num(row.MarketValue),
     incomeValue: num(row.IncomeValue),
     costValue: num(row.CostValue),
+    marketApproachPercentage: num(row.MarketApproachPercentage),
+    incomeApproachPercentage: num(row.IncomeApproachPercentage),
+    costApproachPercentage: num(row.CostApproachPercentage),
     finalValue: num(row.FinalValue),
     pricePerMeter: num(row.PricePerMeter),
     companyName: str(row.CompanyName),
@@ -592,10 +629,12 @@ export async function sqliteInsertDataSystem(data: Omit<DataSystemRecord, "id" |
       DeedDate, OwnerName, OwnershipType, BuildingPermitNumber, BuildingStatus, BuildingAge,
       LandArea, BuildingArea, BasementArea, AnnexArea, FloorsCount, PermittedFloorsCount,
       PermittedBuildingRatio, StreetWidth, StreetFacades, Utilities, Coordinates,
-      ValuationMethod, MarketValue, IncomeValue, CostValue, FinalValue, PricePerMeter,
+      ValuationMethod, MarketValue, IncomeValue, CostValue,
+      MarketApproachPercentage, IncomeApproachPercentage, CostApproachPercentage,
+      FinalValue, PricePerMeter,
       CompanyName, CommercialRegNumber, Notes, LinkedReportId, CreatedAt
     ) VALUES (
-      ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+      ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
     )
   `).run(
     data.filePath ?? null, data.reportNumber ?? null, data.reportDate ?? null,
@@ -621,7 +660,9 @@ export async function sqliteInsertDataSystem(data: Omit<DataSystemRecord, "id" |
     data.permittedBuildingRatio ?? null, data.streetWidth ?? null,
     data.streetFacades ?? null, data.utilities ?? null, data.coordinates ?? null,
     data.valuationMethod ?? null, data.marketValue ?? null, data.incomeValue ?? null,
-    data.costValue ?? null, data.finalValue ?? null, data.pricePerMeter ?? null,
+    data.costValue ?? null,
+    data.marketApproachPercentage ?? null, data.incomeApproachPercentage ?? null, data.costApproachPercentage ?? null,
+    data.finalValue ?? null, data.pricePerMeter ?? null,
     data.companyName ?? null, data.commercialRegNumber ?? null,
     data.notes ?? null, data.linkedReportId ?? null, now
   );

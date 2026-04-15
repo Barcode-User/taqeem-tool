@@ -1450,14 +1450,55 @@ async function fillApproachFields(
        - إذا لا قيمة → تخطّ (يبقى "غير مستخدم").
      ═══════════════════════════════════════════════════════════════════════ */
 
+  // ── تحديد النسب (تدعم القيم كـ 70 أو 0.7 وتحوّلها لـ 0-100) ──────────────
+  const normPct = (v: any): number => {
+    const n = Number(v);
+    if (!n || isNaN(n)) return 0;
+    return n <= 1 ? n * 100 : n; // 0.7 → 70, 70 → 70
+  };
+
+  const mktPct  = normPct(report.marketApproachPercentage);
+  const incPct  = normPct(report.incomeApproachPercentage);
+  const cstPct  = normPct(report.costApproachPercentage);
+
+  // إذا لا توجد نسب مخزنة → استخدم القيمة المالية لتحديد النوع (الفلبكّ القديم)
+  const hasPct = mktPct + incPct + cstPct > 0;
+
   const approaches = [
-    { key: "market", label: "أسلوب السوق",   textRx: /السوق/i,   value: Number(report.marketValue) || 0 },
-    { key: "income", label: "أسلوب الدخل",   textRx: /الدخل/i,   value: Number(report.incomeValue) || 0 },
-    { key: "cost",   label: "أسلوب التكلفة", textRx: /التكلفة/i, value: Number(report.costValue)   || 0 },
+    {
+      key: "market", label: "أسلوب السوق",   textRx: /السوق/i,
+      value:      Number(report.marketValue) || 0,
+      percentage: mktPct,
+    },
+    {
+      key: "income", label: "أسلوب الدخل",   textRx: /الدخل/i,
+      value:      Number(report.incomeValue) || 0,
+      percentage: incPct,
+    },
+    {
+      key: "cost",   label: "أسلوب التكلفة", textRx: /التكلفة/i,
+      value:      Number(report.costValue)   || 0,
+      percentage: cstPct,
+    },
   ];
 
+  // تحديد الأسلوب الأساسي (الأعلى نسبة من النسب غير الصفرية)
+  const maxPct = Math.max(mktPct, incPct, cstPct);
+
+  // دالة: ماذا يكون حالة الأسلوب؟
+  const getApproachStatus = (ap: typeof approaches[0]): "أساسي" | "مساعد" | "غير مستخدم" => {
+    if (hasPct) {
+      if (ap.percentage <= 0)   return "غير مستخدم";
+      if (ap.percentage >= maxPct) return "أساسي";
+      return "مساعد";
+    } else {
+      // الفلبكّ: إذا لا نسب → أي أسلوب بقيمة موجبة = أساسي
+      return ap.value > 0 ? "أساسي" : "غير مستخدم";
+    }
+  };
+
   addLog(session,
-    `📊 أساليب — سوق: ${approaches[0].value} | دخل: ${approaches[1].value} | تكلفة: ${approaches[2].value}`,
+    `📊 أساليب — سوق: ${approaches[0].value} (${mktPct}%) | دخل: ${approaches[1].value} (${incPct}%) | تكلفة: ${approaches[2].value} (${cstPct}%) | hasPct=${hasPct}`,
   );
 
   // ── المرحلة 1: اكتشاف كل select أسلوب من native <select> ─────────────────
@@ -1535,39 +1576,51 @@ async function fillApproachFields(
 
   addLog(session, `📌 الأساليب المكتشفة: ${JSON.stringify(approachMap)}`);
 
-  // ── المرحلة 2: تعبئة كل أسلوب له قيمة ──────────────────────────────────
+  // ── أنماط regex لنصوص الخيارات الثلاثة ──────────────────────────────────
+  const STATUS_RX: Record<string, RegExp> = {
+    "أساسي":        /أساسي.*(?:لتقدير|القيمة)/i,
+    "مساعد":        /مساعد.*(?:لتقدير|القيمة)/i,
+    "غير مستخدم":  /غير.*مستخدم/i,
+  };
+
+  // ── المرحلة 2: تعبئة كل أسلوب ──────────────────────────────────────────
   for (const ap of approaches) {
-    if (ap.value <= 0) {
-      addLog(session, `⏭️ ${ap.label}: لا قيمة — تخطّي`);
+    const desiredStatus = getApproachStatus(ap);
+
+    if (desiredStatus === "غير مستخدم") {
+      addLog(session, `⏭️ ${ap.label}: ${hasPct ? `${ap.percentage}%` : "لا قيمة"} — غير مستخدم، تخطّي`);
       continue;
     }
+
     const found = approachMap[ap.key];
     if (!found) {
       addLog(session, `⚠️ ${ap.label}: لم يُكتشف dropdown — تخطّي`);
       continue;
     }
 
-    addLog(session, `🎯 ${ap.label}: قيمة=${ap.value} | type=${found.type}[${found.index}]`);
+    const statusLabel = desiredStatus === "أساسي" ? "أساسي لتقدير القيمة" : "مساعد لتقدير القيمة";
+    addLog(session, `🎯 ${ap.label}: ${ap.percentage}% → "${statusLabel}" | type=${found.type}[${found.index}]`);
 
-    // ── أ) اختيار "أساسي لتقدير القيمة" ──────────────────────────────────
+    // ── أ) اختيار حالة الأسلوب ────────────────────────────────────────────
     let statusDone = false;
+    const statusRx = STATUS_RX[desiredStatus];
 
     if (found.type === "native") {
       // native <select>: استخدم locator.selectOption — مرئي لـ Angular
       try {
         const optValue = await page.locator("select").nth(found.index).evaluate(
-          (el: HTMLSelectElement) => {
-            const opt = Array.from(el.options).find(o =>
-              /أساسي.*(?:لتقدير|القيمة)/i.test(o.text),
-            );
+          (el: HTMLSelectElement, rxSrc: string) => {
+            const rx = new RegExp(rxSrc, "i");
+            const opt = Array.from(el.options).find(o => rx.test(o.text));
             return opt?.value ?? null;
           },
+          statusRx.source,
         );
         if (optValue !== null) {
           await page.locator("select").nth(found.index).selectOption({ value: optValue });
-          addLog(session, `✅ ${ap.label}: "أساسي لتقدير القيمة" (native selectOption)`);
+          addLog(session, `✅ ${ap.label}: "${statusLabel}" (native selectOption)`);
           statusDone = true;
-          await page.waitForTimeout(700); // انتظار ظهور الحقول الفرعية
+          await page.waitForTimeout(700);
         }
       } catch (e: any) {
         addLog(session, `⚠️ ${ap.label}: native selectOption فشل — ${e.message}`);
@@ -1580,15 +1633,15 @@ async function fillApproachFields(
         await page.waitForTimeout(200);
 
         const optLoc = page.locator("mat-option, .mat-mdc-option")
-          .filter({ hasText: /أساسي.*(?:لتقدير|القيمة)/i });
+          .filter({ hasText: statusRx });
         if (await optLoc.count() > 0) {
           await optLoc.first().click({ timeout: 2000 });
-          addLog(session, `✅ ${ap.label}: "أساسي لتقدير القيمة" (mat-option click)`);
+          addLog(session, `✅ ${ap.label}: "${statusLabel}" (mat-option click)`);
           statusDone = true;
           await page.waitForTimeout(700);
         } else {
           await page.keyboard.press("Escape").catch(() => {});
-          addLog(session, `⚠️ ${ap.label}: خيار "أساسي" غير موجود في mat-select`);
+          addLog(session, `⚠️ ${ap.label}: خيار "${statusLabel}" غير موجود في mat-select`);
         }
       } catch (e: any) {
         await page.keyboard.press("Escape").catch(() => {});

@@ -138,6 +138,9 @@ const reportFormSchema = z.object({
   marketValue: numberOrNull,
   incomeValue: numberOrNull,
   costValue: numberOrNull,
+  marketApproachPercentage: numberOrNull,
+  incomeApproachPercentage: numberOrNull,
+  costApproachPercentage: numberOrNull,
   finalValue: numberOrNull,
   pricePerMeter: numberOrNull,
 
@@ -253,11 +256,14 @@ const COMPARE_GROUPS = [
     title: "القيمة",
     fields: [
       { key: "valuationMethod", label: "أسلوب التقييم" },
-      { key: "marketValue",     label: "القيمة السوقية" },
-      { key: "incomeValue",     label: "قيمة الدخل" },
-      { key: "costValue",       label: "قيمة التكلفة" },
-      { key: "finalValue",      label: "القيمة النهائية" },
-      { key: "pricePerMeter",   label: "سعر المتر" },
+      { key: "marketValue",              label: "القيمة السوقية" },
+      { key: "incomeValue",              label: "قيمة الدخل" },
+      { key: "costValue",                label: "قيمة التكلفة" },
+      { key: "marketApproachPercentage", label: "نسبة أسلوب السوق" },
+      { key: "incomeApproachPercentage", label: "نسبة أسلوب الدخل" },
+      { key: "costApproachPercentage",   label: "نسبة أسلوب التكلفة" },
+      { key: "finalValue",               label: "القيمة النهائية" },
+      { key: "pricePerMeter",            label: "سعر المتر" },
     ],
   },
 ];
@@ -1209,7 +1215,16 @@ export default function ReportDetails() {
                 <FormField control={form.control} name="costValue" render={({ field }) => (
                   <FormItem><FormLabel className="flex items-center gap-1.5">قيمة التكلفة<ScoreBadge score={dsFieldScores?.costValue} /></FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
-                
+                <FormField control={form.control} name="marketApproachPercentage" render={({ field }) => (
+                  <FormItem><FormLabel className="flex items-center gap-1.5">نسبة أسلوب السوق (%)<ScoreBadge score={dsFieldScores?.marketApproachPercentage} /></FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
+                )} />
+                <FormField control={form.control} name="incomeApproachPercentage" render={({ field }) => (
+                  <FormItem><FormLabel className="flex items-center gap-1.5">نسبة أسلوب الدخل (%)<ScoreBadge score={dsFieldScores?.incomeApproachPercentage} /></FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
+                )} />
+                <FormField control={form.control} name="costApproachPercentage" render={({ field }) => (
+                  <FormItem><FormLabel className="flex items-center gap-1.5">نسبة أسلوب التكلفة (%)<ScoreBadge score={dsFieldScores?.costApproachPercentage} /></FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
+                )} />
+
                 <FormField control={form.control} name="finalValue" render={({ field }) => (
                   <FormItem className="md:col-span-2 bg-primary/5 p-4 rounded-lg border border-primary/20">
                     <FormLabel className="flex items-center gap-1.5 text-primary font-bold text-lg">القيمة النهائية المعتمدة<ScoreBadge score={dsFieldScores?.finalValue} /></FormLabel>
