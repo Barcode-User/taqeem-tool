@@ -1647,12 +1647,17 @@ async function fillAssetPage(
   } else addLog(session, "⚠️ لم يُعثر على «نوع الأصل»");
 
   // ── استخدام/قطاع الأصل ───────────────────────────────────────────────────
+  // TAQEEM يستخدم name="attribute[N]" لهذا الحقل — byName لا يطابقه
+  // نستخدم: أولاً البحث عبر els (إذا كشفه scanElements)، ثم مسح مباشر للصفحة
   const assetUseEl = byName("asset_use_id") ?? byName("property_use_id") ??
     byLabel(/usage|sector|استخدام|قطاع/i);
   if (assetUseEl) {
     await (assetUseEl.isMat
       ? selectAngular(session, buildSelector(assetUseEl), report.propertyUse, "استخدام الأصل", true, "أخرى")
       : selectNativeByName(session, assetUseEl.name || "", report.propertyUse, "استخدام الأصل", "أخرى"));
+  } else {
+    // مسح مباشر بالـ label المجاور في DOM — يعمل مع attribute[N]
+    await fillSelectByPageScan(session, "استخدام|قطاع.*أصل|أصل.*قطاع|قطاع.*تقييم", report.propertyUse, "استخدام/قطاع الأصل", "أخرى");
   }
 
   // ── تاريخ المعاينة ────────────────────────────────────────────────────────
@@ -1755,6 +1760,101 @@ async function fillAssetPage(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// مسح مباشر للصفحة: يبحث عن native <select> بنص التسمية (label) المجاورة
+// يعمل مع عناصر name="attribute[N]" التي لا تُكشف بـ scanElements
+// ─────────────────────────────────────────────────────────────────────────────
+async function fillSelectByPageScan(
+  session: AutomationSession,
+  labelRxSource: string,          // مصدر regex (نص، ليس RegExp — لنمرره للمتصفح)
+  value: string | null | undefined,
+  fieldLabel: string,
+  fallback?: string,
+): Promise<void> {
+  if (!value || value.trim() === "") {
+    addLog(session, `⏭️ تخطي «${fieldLabel}» (مسح مباشر) — لا قيمة`);
+    return;
+  }
+  const normVal = normalizeAr(value);
+  const normFb  = fallback ? normalizeAr(fallback) : "";
+
+  const { page } = session;
+  try {
+    // نجد المحدد CSS للـ select المطابق (بنص label المجاور)
+    // لا نستخدم CSS.escape داخل قيمة attribute — الأقواس [] مقبولة حرفياً
+    const sel: string | null = await page.evaluate((rxSrc: string) => {
+      const rx = new RegExp(rxSrc, "i");
+      const selects = Array.from(document.querySelectorAll("select"));
+      for (const s of selects) {
+        // 1) label[for=id] مرتبط مباشرة
+        if (s.id) {
+          const lbl = document.querySelector(`label[for="${s.id}"]`);
+          if (lbl && rx.test(lbl.textContent || "")) {
+            return s.name ? `[name="${s.name}"]` : `#${s.id}`;
+          }
+        }
+        // 2) label داخل أقرب container (.form-group, .field, .col, div)
+        const container = s.closest(".form-group, .field, .col, div");
+        if (container) {
+          const lbl = container.querySelector("label");
+          if (lbl && rx.test(lbl.textContent || "")) {
+            return s.name ? `[name="${s.name}"]` : (s.id ? `#${s.id}` : null);
+          }
+        }
+        // 3) نص الـ select نفسه أو الـ placeholder
+        if (rx.test(s.getAttribute("placeholder") || "")) {
+          return s.name ? `[name="${s.name}"]` : (s.id ? `#${s.id}` : null);
+        }
+      }
+      return null;
+    }, labelRxSource);
+
+    if (!sel) {
+      addLog(session, `⚠️ «${fieldLabel}» (مسح مباشر): لم يُعثر على select مطابق`);
+      return;
+    }
+
+    // نستخدم نفس منطق التطبيع العربي الشامل
+    const result = await page.evaluate(
+      new Function("args", `
+        ${EVAL_NORM_FN}
+        var el = document.querySelector(args.sel);
+        if(!el) return {matched:null, usedFallback:false, available:[]};
+        var opts = Array.from(el.options);
+        var available = opts.map(function(o){return o.text.trim();}).filter(Boolean);
+        var opt = opts.find(function(o){ return _matches(o.text, args.nv); });
+        if(!opt && args.fb){
+          opt = opts.find(function(o){ return _matches(o.text, args.fb); });
+          if(opt){
+            el.value = opt.value;
+            el.dispatchEvent(new Event('change',{bubbles:true}));
+            return {matched:opt.text, usedFallback:true, available:available};
+          }
+        }
+        if(opt){
+          el.value = opt.value;
+          el.dispatchEvent(new Event('change',{bubbles:true}));
+          return {matched:opt.text, usedFallback:false, available:available};
+        }
+        return {matched:null, usedFallback:false, available:available};
+      `) as (args: {sel:string; nv:string; fb:string}) => {matched:string|null; usedFallback:boolean; available:string[]},
+      { sel, nv: normVal, fb: normFb },
+    );
+
+    if (result.matched) {
+      if (result.usedFallback) {
+        addLog(session, `⚠️ «${fieldLabel}»: "${value}" غير موجود — اختير "${result.matched}" بديلاً`);
+      } else {
+        addLog(session, `✅ ${fieldLabel}: ${result.matched} (من "${value}")`);
+      }
+    } else {
+      addLog(session, `⚠️ «${fieldLabel}»: "${value}" غير موجود — المتاح: ${result.available.slice(0, 8).join(" | ")}`);
+    }
+  } catch (e: any) {
+    addLog(session, `⚠️ خطأ في «${fieldLabel}» (مسح مباشر): ${(e as Error).message}`);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // عدد الواجهات: يحوّل الرقم إلى الخيار المناسب في قائمة TAQEEM
 //   1 → "واجهة واحدة"  (value=6)
 //   2 → "واجهتان"      (value=7)
@@ -1780,6 +1880,7 @@ async function fillFacadesCount(
   const { page } = session;
   try {
     // نبحث عن الـ select الذي يحتوي "واجهة واحدة" كخيار — مُعرِّف فريد
+    // داخل قيمة الـ attribute selector لا نحتاج CSS.escape — الأقواس [] مقبولة حرفياً
     const sel: string | null = await page.evaluate(() => {
       const selects = Array.from(document.querySelectorAll("select"));
       const t = selects.find(s =>
@@ -1788,8 +1889,8 @@ async function fillFacadesCount(
         ),
       );
       if (!t) return null;
-      if (t.name) return `[name="${CSS.escape(t.name)}"]`;
-      if (t.id)   return `#${CSS.escape(t.id)}`;
+      if (t.name) return `[name="${t.name}"]`;   // أقواس [] مقبولة داخل ""
+      if (t.id)   return `#${t.id}`;
       return null;
     });
 
