@@ -108,6 +108,8 @@ export interface UpdateReportBody {
   /** @nullable */
   streetFacades?: string | null;
   /** @nullable */
+  facadesCount?: number | null;
+  /** @nullable */
   utilities?: string | null;
   /** @nullable */
   coordinates?: string | null;
@@ -119,6 +121,12 @@ export interface UpdateReportBody {
   incomeValue?: number | null;
   /** @nullable */
   costValue?: number | null;
+  /** @nullable */
+  marketApproachPercentage?: number | null;
+  /** @nullable */
+  incomeApproachPercentage?: number | null;
+  /** @nullable */
+  costApproachPercentage?: number | null;
   /** @nullable */
   finalValue?: number | null;
   /** @nullable */

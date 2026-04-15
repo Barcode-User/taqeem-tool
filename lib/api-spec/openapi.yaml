@@ -275,6 +275,8 @@ components:
           type: ["number", "null"]
         streetFacades:
           type: ["string", "null"]
+        facadesCount:
+          type: ["integer", "null"]
         utilities:
           type: ["string", "null"]
         coordinates:
@@ -286,6 +288,12 @@ components:
         incomeValue:
           type: ["number", "null"]
         costValue:
+          type: ["number", "null"]
+        marketApproachPercentage:
+          type: ["number", "null"]
+        incomeApproachPercentage:
+          type: ["number", "null"]
+        costApproachPercentage:
           type: ["number", "null"]
         finalValue:
           type: ["number", "null"]
@@ -422,6 +430,8 @@ components:
           type: ["number", "null"]
         streetFacades:
           type: ["string", "null"]
+        facadesCount:
+          type: ["integer", "null"]
         utilities:
           type: ["string", "null"]
         coordinates:
@@ -433,6 +443,12 @@ components:
         incomeValue:
           type: ["number", "null"]
         costValue:
+          type: ["number", "null"]
+        marketApproachPercentage:
+          type: ["number", "null"]
+        incomeApproachPercentage:
+          type: ["number", "null"]
+        costApproachPercentage:
           type: ["number", "null"]
         finalValue:
           type: ["number", "null"]
