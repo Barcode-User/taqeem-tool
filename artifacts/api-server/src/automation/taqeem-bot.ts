@@ -1657,28 +1657,11 @@ async function fillAssetPage(
       : selectNativeByName(session, assetTypeEl.name || "", report.propertyType, "نوع الأصل"));
   } else addLog(session, "⚠️ لم يُعثر على «نوع الأصل»");
 
-  // ── انتظار تأثير الكاسكاد: نوع الأصل → استخدام/قطاع الأصل ─────────────
-  // TAQEEM تُطلق API call بعد اختيار نوع الأصل تُعيد تحميل خيارات استخدام/قطاع الأصل
-  // networkidle لا يكفي (ينتهي قبل وصول الاستجابة) — نراقب الخيارات مباشرة
-  addLog(session, "⏳ مراقبة كاسكاد: نوع الأصل → استخدام/قطاع الأصل...");
-
-  // المرحلة 1: انتظر حتى تتصفر القائمة (بداية الكاسكاد) — 3 ثوانٍ كحد أقصى
-  await session.page.waitForFunction(
-    () => {
-      const sel = document.querySelector<HTMLSelectElement>('[name="asset_usage_id"]');
-      return !sel || sel.options.length <= 1;
-    },
-    { timeout: 3000 },
-  ).catch(() => {}); // إذا لم تتصفر → ربما الخيارات ثابتة، نكمل
-
-  // المرحلة 2: انتظر حتى تمتلئ بالخيارات الجديدة — 10 ثوانٍ
-  await session.page.waitForFunction(
-    () => {
-      const sel = document.querySelector<HTMLSelectElement>('[name="asset_usage_id"]');
-      return !!sel && sel.options.length > 1;
-    },
-    { timeout: 10000 },
-  ).catch(() => addLog(session, "⚠️ خيارات asset_usage_id لم تُحمَّل بعد 10 ثوانٍ"));
+  // ── انتظار انتهاء كاسكاد نوع الأصل → استخدام/قطاع الأصل ────────────────
+  // TAQEEM تُطلق API call بعد اختيار نوع الأصل لتحديث قائمة استخدام/قطاع الأصل
+  // نمنح 2 ثانية لانتهاء الطلب قبل الاختيار
+  addLog(session, "⏳ انتظار انتهاء كاسكاد نوع الأصل...");
+  await session.page.waitForTimeout(2000);
 
   // ── استخدام/قطاع الأصل ───────────────────────────────────────────────────
   // الاسم الفعلي: asset_usage_id — نفس أسلوب المنطقة (selectNativeByName)
