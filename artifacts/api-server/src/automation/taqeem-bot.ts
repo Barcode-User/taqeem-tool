@@ -2229,10 +2229,11 @@ async function fillAttributePage(
       if (sf.trim()) {
         const t = sf.trim();
         facadesNum =
-          /واجهة واحدة|واحدة/i.test(t)     ? 1 :
-          /واجهتان|اثنتان|٢|2/i.test(t)    ? 2 :
-          /ثلاث.*واجهات|٣|3/i.test(t)      ? 3 :
-          /أربع.*واجهات|٤|4/i.test(t)      ? 4 :
+          /واجهة واحدة|واحدة|^1$|١/i.test(t)    ? 1 :
+          /واجهتان|اثنتان|^2$|٢/i.test(t)        ? 2 :
+          /ثلاث.*واجهات|^3$|٣/i.test(t)          ? 3 :
+          /أربع.*واجهات|^4$|٤/i.test(t)          ? 4 :
+          /^(\d+)$/.test(t) ? (parseInt(t) >= 1 && parseInt(t) <= 4 ? parseInt(t) : 4) :
           (t.match(/شمال|جنوب|شرق|غرب|بحري|قبلي/g) || []).length || null;
         if (facadesNum) addLog(session, `🔍 الواجهات: استُنتج ${facadesNum} من streetFacades="${sf}"`);
       }
