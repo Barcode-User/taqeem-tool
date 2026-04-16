@@ -44,6 +44,7 @@ function getDb(): DatabaseSync {
       SecondValuerPercentage    REAL,
       SecondValuerLicenseNumber TEXT,
       SecondValuerMembershipNumber TEXT,
+      ValuersInput              TEXT,
       TaqeemReportNumber        TEXT,
       ClientName                TEXT,
       ClientEmail               TEXT,
@@ -124,6 +125,7 @@ function getDb(): DatabaseSync {
   addIfMissing("MarketApproachPercentage",  "REAL");
   addIfMissing("IncomeApproachPercentage",  "REAL");
   addIfMissing("CostApproachPercentage",    "REAL");
+  addIfMissing("ValuersInput",              "TEXT");
 
   // ─── جدول datasystem ──────────────────────────────────────────────────────
   _db.exec(`
@@ -246,6 +248,7 @@ function rowToReport(row: any): Report {
     secondValuerPercentage: num(row.SecondValuerPercentage),
     secondValuerLicenseNumber: str(row.SecondValuerLicenseNumber),
     secondValuerMembershipNumber: str(row.SecondValuerMembershipNumber),
+    valuersInput: str(row.ValuersInput),
     taqeemReportNumber: str(row.TaqeemReportNumber),
     clientName: str(row.ClientName),
     clientEmail: str(row.ClientEmail),
@@ -417,6 +420,7 @@ export async function sqliteUpdateReport(id: number, data: Partial<InsertReport>
     secondValuerPercentage: "SecondValuerPercentage",
     secondValuerLicenseNumber: "SecondValuerLicenseNumber",
     secondValuerMembershipNumber: "SecondValuerMembershipNumber",
+    valuersInput: "ValuersInput",
     taqeemReportNumber: "TaqeemReportNumber",
     clientName: "ClientName", clientEmail: "ClientEmail", clientPhone: "ClientPhone",
     intendedUser: "IntendedUser", reportType: "ReportType",

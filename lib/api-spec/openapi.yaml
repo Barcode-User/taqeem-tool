@@ -207,6 +207,8 @@ components:
           type: ["string", "null"]
         secondValuerMembershipNumber:
           type: ["string", "null"]
+        valuersInput:
+          type: ["string", "null"]
         taqeemReportNumber:
           type: ["string", "null"]
         clientName:
@@ -361,6 +363,8 @@ components:
         secondValuerLicenseNumber:
           type: ["string", "null"]
         secondValuerMembershipNumber:
+          type: ["string", "null"]
+        valuersInput:
           type: ["string", "null"]
         taqeemReportNumber:
           type: ["string", "null"]

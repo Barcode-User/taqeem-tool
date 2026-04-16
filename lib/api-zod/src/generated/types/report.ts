@@ -43,6 +43,8 @@ export interface Report {
   /** @nullable */
   secondValuerMembershipNumber?: string | null;
   /** @nullable */
+  valuersInput?: string | null;
+  /** @nullable */
   taqeemReportNumber?: string | null;
   /** @nullable */
   clientName?: string | null;

@@ -54,6 +54,8 @@ export interface Report {
   /** @nullable */
   secondValuerMembershipNumber?: string | null;
   /** @nullable */
+  valuersInput?: string | null;
+  /** @nullable */
   taqeemReportNumber?: string | null;
   /** @nullable */
   clientName?: string | null;
@@ -206,6 +208,8 @@ export interface UpdateReportBody {
   secondValuerLicenseNumber?: string | null;
   /** @nullable */
   secondValuerMembershipNumber?: string | null;
+  /** @nullable */
+  valuersInput?: string | null;
   /** @nullable */
   taqeemReportNumber?: string | null;
   /** @nullable */

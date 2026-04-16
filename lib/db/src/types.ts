@@ -22,6 +22,7 @@ export interface Report {
   secondValuerPercentage: number | null;
   secondValuerLicenseNumber: string | null;
   secondValuerMembershipNumber: string | null;
+  valuersInput: string | null;
   taqeemReportNumber: string | null;
   clientName: string | null;
   clientEmail: string | null;

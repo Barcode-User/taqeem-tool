@@ -149,6 +149,7 @@ const reportFormSchema = z.object({
   secondValuerLicenseNumber: stringOrNull,
   secondValuerMembershipNumber: stringOrNull,
   secondValuerPercentage: numberOrNull,
+  valuersInput: stringOrNull,
 
   taqeemReportNumber: stringOrNull,
   notes: stringOrNull,
@@ -1281,7 +1282,53 @@ export default function ReportDetails() {
                 </CardTitle>
                 <CardDescription>يمكن أن يشارك أكثر من مقيم في إعداد التقرير</CardDescription>
               </CardHeader>
-              <CardContent className="pt-6 grid grid-cols-1 md:grid-cols-2 gap-8">
+              <CardContent className="pt-6 space-y-6">
+                {/* ── إدخال سريع ── */}
+                <div className="flex gap-2 items-end p-4 bg-muted/40 rounded-lg border border-dashed">
+                  <FormField control={form.control} name="valuersInput" render={({ field }) => (
+                    <FormItem className="flex-1">
+                      <FormLabel className="text-sm font-semibold">إدخال سريع للمقيمين</FormLabel>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          value={field.value || ""}
+                          disabled={!isEditable}
+                          placeholder="مثال: 112000210-50,122221101-50"
+                          className="font-mono text-sm"
+                          dir="ltr"
+                        />
+                      </FormControl>
+                      <p className="text-xs text-muted-foreground mt-1">الصيغة: رقم_العضوية-النسبة% (افصل بين مقيمين بفاصلة)</p>
+                    </FormItem>
+                  )} />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={!isEditable}
+                    onClick={() => {
+                      const input = (form.getValues("valuersInput") || "").trim();
+                      if (!input) return;
+                      const parts = input.split(",").map((p: string) => p.trim()).filter(Boolean);
+                      parts.forEach((part: string, idx: number) => {
+                        const lastDash = part.lastIndexOf("-");
+                        if (lastDash === -1) return;
+                        const membership = part.substring(0, lastDash).trim();
+                        const pct = parseFloat(part.substring(lastDash + 1).trim());
+                        if (idx === 0) {
+                          form.setValue("membershipNumber", membership, { shouldDirty: true });
+                          form.setValue("valuerPercentage", isNaN(pct) ? null : pct, { shouldDirty: true });
+                        } else if (idx === 1) {
+                          form.setValue("secondValuerMembershipNumber", membership, { shouldDirty: true });
+                          form.setValue("secondValuerPercentage", isNaN(pct) ? null : pct, { shouldDirty: true });
+                        }
+                      });
+                    }}
+                  >
+                    تحليل وملء
+                  </Button>
+                </div>
+                {/* ── شبكة المقيمين ── */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 {/* First Valuer */}
                 <div className="space-y-4">
                   <p className="text-sm font-semibold text-muted-foreground border-b pb-2">المقيّم الأول</p>
@@ -1325,6 +1372,7 @@ export default function ReportDetails() {
                     )} />
                   </div>
                 </div>
+                </div>{/* end grid md:grid-cols-2 */}
               </CardContent>
             </Card>
 
