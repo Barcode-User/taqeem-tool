@@ -1321,15 +1321,20 @@ async function fillFormPage(
   // ── المقيم الثاني (إن وُجد) ──
   if (report.secondValuerMembershipNumber || report.secondValuerName) {
     try {
-      // اضغط على زر "إضافة مقيم آخر"
+      // اضغط على زر "اضافة مقيم اخر" — يحمل id="duplicateValuer"
       const clicked = await session.page.evaluate(() => {
+        // أولاً: بحث بالـ id المباشر
+        const byId = document.querySelector<HTMLElement>("#duplicateValuer");
+        if (byId) { byId.click(); return "id"; }
+        // ثانياً: بحث بالنص مع تطبيع الهمزة
+        const normalize = (s: string) => s.replace(/[أإآ]/g, "ا").replace(/\s+/g, "");
         const btns = Array.from(document.querySelectorAll<HTMLElement>("button, a"));
-        const btn = btns.find(b => (b.textContent ?? "").includes("إضافة مقيم"));
-        if (btn) { btn.click(); return true; }
+        const btn = btns.find(b => normalize(b.textContent ?? "").includes("اضافةمقيم"));
+        if (btn) { btn.click(); return "text"; }
         return false;
       });
       if (clicked) {
-        addLog(session, "✅ ضغط زر إضافة مقيم آخر");
+        addLog(session, `✅ ضغط زر إضافة مقيم آخر (via ${clicked})`);
         await session.page.waitForTimeout(1500);
       } else {
         addLog(session, "⚠️ لم يُعثر على زر إضافة مقيم آخر");
