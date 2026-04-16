@@ -1269,25 +1269,76 @@ async function fillFormPage(
   // ── البريد الإلكتروني ─────────────────────────────────────────────────────
   await fillByName("client[0][email]", report.clientEmail, "البريد الإلكتروني");
 
-  // ── اسم المقيم (أول خيار متاح إذا لم يكن محدداً) ───────────────────────
-  if (report.valuerName) {
-    await selectByName("valuer[0][id]", report.valuerName, "اسم المقيم");
-  } else {
-    // اختر الخيار الأول المتاح
+  // ── بيانات المقيمين ──────────────────────────────────────────────────────
+  // دالة مساعدة: اختيار المقيم من الـ dropdown بـ رقم العضوية أو الاسم
+  const selectValuerById = async (index: number, membershipNum: string | null | undefined, valuerName: string | null | undefined, label: string) => {
+    const selName = `valuer[${index}][id]`;
+    const sel = `[name="${selName}"]`;
     try {
-      await session.page.evaluate(() => {
-        const sel = document.querySelector<HTMLSelectElement>('[name="valuer[0][id]"]');
-        if (sel && sel.options.length > 1) {
-          sel.selectedIndex = 1;
-          sel.dispatchEvent(new Event("change", { bubbles: true }));
-        }
-      });
-      addLog(session, "✅ اسم المقيم: اختيار تلقائي (أول خيار)");
-    } catch { addLog(session, "⚠️ لم يُحدد اسم المقيم"); }
-  }
+      await session.page.waitForSelector(sel, { timeout: 5000 });
+      // انتظر تحميل الخيارات من API
+      await session.page.waitForFunction(
+        (s: string) => { const el = document.querySelector<HTMLSelectElement>(s); return el ? el.options.length > 1 : false; },
+        sel, { timeout: 8000 }
+      ).catch(() => {});
 
-  // ── نسبة المساهمة (افتراضي 100%) ─────────────────────────────────────────
-  await selectByName("valuer[0][contribution]", report.valuerContribution ?? "100%", "نسبة المساهمة");
+      const searchTerm = membershipNum?.trim() || valuerName?.trim() || "";
+      if (!searchTerm) { addLog(session, `⏭️ تخطي "${label}" — لا توجد بيانات`); return; }
+
+      const matched = await session.page.evaluate((s: string, term: string) => {
+        const el = document.querySelector<HTMLSelectElement>(s);
+        if (!el) return null;
+        // ابحث عن خيار يحتوي على رقم العضوية أو الاسم
+        const opts = Array.from(el.options);
+        let found = opts.find(o => o.text.includes(term) || o.value === term);
+        if (!found && term.length > 4) {
+          // بحث جزئي
+          found = opts.find(o => o.text.replace(/\s/g, "").includes(term.replace(/\s/g, "")));
+        }
+        if (found) {
+          el.value = found.value;
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+          return found.text.trim();
+        }
+        return null;
+      }, sel, searchTerm);
+
+      if (matched) addLog(session, `✅ ${label}: ${matched}`);
+      else addLog(session, `⚠️ ${label}: لم يُعثر على "${searchTerm}" — تحقق من رقم العضوية`);
+    } catch (e) { addLog(session, `⚠️ ${label}: فشل الاختيار`); }
+  };
+
+  // دالة مساعدة: ضبط نسبة المساهمة
+  const setContribution = async (index: number, pct: number | null | undefined) => {
+    const pctStr = pct != null ? `${Math.round(pct)}%` : "100%";
+    await selectByName(`valuer[${index}][contribution]`, pctStr, `نسبة المساهمة [${index}]`);
+  };
+
+  // ── المقيم الأول ──
+  await selectValuerById(0, report.membershipNumber, report.valuerName, "المقيم الأول");
+  await setContribution(0, report.valuerPercentage);
+
+  // ── المقيم الثاني (إن وُجد) ──
+  if (report.secondValuerMembershipNumber || report.secondValuerName) {
+    try {
+      // اضغط على زر "إضافة مقيم آخر"
+      const clicked = await session.page.evaluate(() => {
+        const btns = Array.from(document.querySelectorAll<HTMLElement>("button, a"));
+        const btn = btns.find(b => (b.textContent ?? "").includes("إضافة مقيم"));
+        if (btn) { btn.click(); return true; }
+        return false;
+      });
+      if (clicked) {
+        addLog(session, "✅ ضغط زر إضافة مقيم آخر");
+        await session.page.waitForTimeout(1500);
+      } else {
+        addLog(session, "⚠️ لم يُعثر على زر إضافة مقيم آخر");
+      }
+    } catch { addLog(session, "⚠️ فشل الضغط على زر إضافة مقيم آخر"); }
+
+    await selectValuerById(1, report.secondValuerMembershipNumber, report.secondValuerName, "المقيم الثاني");
+    await setContribution(1, report.secondValuerPercentage);
+  }
 
   // ── رفع PDF ───────────────────────────────────────────────────────────────
   await uploadPdf(session, report, pdfState);
