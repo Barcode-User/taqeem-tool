@@ -119,6 +119,13 @@ const reportFormSchema = z.object({
   buildingPermitNumber: stringOrNull,
   buildingStatus: stringOrNull,
   buildingAge: stringOrNull,
+  buildingType: stringOrNull,
+  finishingStatus: stringOrNull,
+  furnitureStatus: stringOrNull,
+  airConditioningType: stringOrNull,
+  isLandRented: stringOrNull,
+  additionalFeatures: stringOrNull,
+  isBestUse: stringOrNull,
   landArea: numberOrNull,
   buildingArea: numberOrNull,
   basementArea: numberOrNull,
@@ -240,6 +247,13 @@ const COMPARE_GROUPS = [
       { key: "buildingPermitNumber",    label: "رقم رخصة البناء" },
       { key: "buildingStatus",          label: "حالة البناء" },
       { key: "buildingAge",             label: "عمر البناء" },
+      { key: "buildingType",            label: "نوع المبنى" },
+      { key: "finishingStatus",         label: "حالة التشطيب" },
+      { key: "furnitureStatus",         label: "حالة التأثيث" },
+      { key: "airConditioningType",     label: "التكييف" },
+      { key: "isLandRented",            label: "الأرض مستأجرة" },
+      { key: "additionalFeatures",      label: "ميزات إضافية" },
+      { key: "isBestUse",               label: "أفضل استخدام" },
       { key: "landArea",                label: "مساحة الأرض م²" },
       { key: "buildingArea",            label: "مساحة البناء م²" },
       { key: "basementArea",            label: "مساحة القبو م²" },
@@ -1160,6 +1174,27 @@ export default function ReportDetails() {
                 )} />
                 <FormField control={form.control} name="buildingAge" render={({ field }) => (
                   <FormItem><FormLabel className="flex items-center gap-1.5">عمر البناء<ScoreBadge score={dsFieldScores?.buildingAge} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} /></FormControl></FormItem>
+                )} />
+                <FormField control={form.control} name="buildingType" render={({ field }) => (
+                  <FormItem><FormLabel className="flex items-center gap-1.5">نوع المبنى<ScoreBadge score={dsFieldScores?.buildingType} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} placeholder="مثال: فيلا، شقة، تجاري" /></FormControl></FormItem>
+                )} />
+                <FormField control={form.control} name="finishingStatus" render={({ field }) => (
+                  <FormItem><FormLabel className="flex items-center gap-1.5">حالة التشطيب<ScoreBadge score={dsFieldScores?.finishingStatus} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} placeholder="مثال: كامل، جزئي، بدون تشطيب" /></FormControl></FormItem>
+                )} />
+                <FormField control={form.control} name="furnitureStatus" render={({ field }) => (
+                  <FormItem><FormLabel className="flex items-center gap-1.5">حالة التأثيث<ScoreBadge score={dsFieldScores?.furnitureStatus} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} placeholder="مثال: مؤثث، غير مؤثث" /></FormControl></FormItem>
+                )} />
+                <FormField control={form.control} name="airConditioningType" render={({ field }) => (
+                  <FormItem><FormLabel className="flex items-center gap-1.5">التكييف<ScoreBadge score={dsFieldScores?.airConditioningType} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} placeholder="مثال: مركزي، سبليت، بدون" /></FormControl></FormItem>
+                )} />
+                <FormField control={form.control} name="isLandRented" render={({ field }) => (
+                  <FormItem><FormLabel className="flex items-center gap-1.5">الأرض تحت المبنى مستأجرة<ScoreBadge score={dsFieldScores?.isLandRented} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} placeholder="نعم / لا" /></FormControl></FormItem>
+                )} />
+                <FormField control={form.control} name="isBestUse" render={({ field }) => (
+                  <FormItem><FormLabel className="flex items-center gap-1.5">يعتبر الاستخدام الحالي أفضل استخدام<ScoreBadge score={dsFieldScores?.isBestUse} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} placeholder="نعم / لا" /></FormControl></FormItem>
+                )} />
+                <FormField control={form.control} name="additionalFeatures" render={({ field }) => (
+                  <FormItem className="col-span-full"><FormLabel className="flex items-center gap-1.5">ميزات إضافية<ScoreBadge score={dsFieldScores?.additionalFeatures} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} placeholder="مثال: مسابح، مواقف سيارات، نادي رياضي" /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="floorsCount" render={({ field }) => (
                   <FormItem><FormLabel className="flex items-center gap-1.5">عدد الأدوار الفعلية<ScoreBadge score={dsFieldScores?.floorsCount} /></FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>

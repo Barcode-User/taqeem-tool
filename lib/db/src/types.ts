@@ -49,6 +49,13 @@ export interface Report {
   buildingPermitNumber: string | null;
   buildingStatus: string | null;
   buildingAge: string | null;
+  buildingType: string | null;
+  finishingStatus: string | null;
+  furnitureStatus: string | null;
+  airConditioningType: string | null;
+  isLandRented: string | null;
+  additionalFeatures: string | null;
+  isBestUse: string | null;
   landArea: number | null;
   buildingArea: number | null;
   basementArea: number | null;

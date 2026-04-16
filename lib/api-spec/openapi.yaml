@@ -259,6 +259,20 @@ components:
           type: ["string", "null"]
         buildingAge:
           type: ["string", "null"]
+        buildingType:
+          type: ["string", "null"]
+        finishingStatus:
+          type: ["string", "null"]
+        furnitureStatus:
+          type: ["string", "null"]
+        airConditioningType:
+          type: ["string", "null"]
+        isLandRented:
+          type: ["string", "null"]
+        additionalFeatures:
+          type: ["string", "null"]
+        isBestUse:
+          type: ["string", "null"]
         landArea:
           type: ["number", "null"]
         buildingArea:
@@ -415,6 +429,20 @@ components:
         buildingStatus:
           type: ["string", "null"]
         buildingAge:
+          type: ["string", "null"]
+        buildingType:
+          type: ["string", "null"]
+        finishingStatus:
+          type: ["string", "null"]
+        furnitureStatus:
+          type: ["string", "null"]
+        airConditioningType:
+          type: ["string", "null"]
+        isLandRented:
+          type: ["string", "null"]
+        additionalFeatures:
+          type: ["string", "null"]
+        isBestUse:
           type: ["string", "null"]
         landArea:
           type: ["number", "null"]

@@ -2813,12 +2813,116 @@ async function fillPage3(session: AutomationSession, report: any, els: any[], pd
     } else addLog(session, `ℹ️ لم يُعثر على حقل «عدد الواجهات» (facadesCount=${report.facadesCount})`);
   }
 
-  // تقدير الأصل ثاني أفضل استخدام → "نعم"
+  // ── نوع المبنى ────────────────────────────────────────────────────────────
+  if (report.buildingType) {
+    const bldTypeEl = findEl(selects,
+      /building.?type|buildingtype|asset.?type|property.?type|نوع.*مبنى|نوع.*أصل|نوع.*عقار/i,
+    );
+    if (bldTypeEl) await selectAngular(session, buildSelector(bldTypeEl), report.buildingType, "نوع المبنى", bldTypeEl.isMat);
+    else addLog(session, `ℹ️ لم يُعثر على حقل «نوع المبنى»`);
+  }
+
+  // ── حالة التشطيب ─────────────────────────────────────────────────────────
+  if (report.finishingStatus) {
+    const finEl = findEl(selects,
+      /finishing.?status|finish.?status|finishingstatus|حالة.*تشطيب|تشطيب/i,
+    );
+    if (finEl) await selectAngular(session, buildSelector(finEl), report.finishingStatus, "حالة التشطيب", finEl.isMat);
+    else addLog(session, `ℹ️ لم يُعثر على حقل «حالة التشطيب»`);
+  }
+
+  // ── حالة التأثيث ─────────────────────────────────────────────────────────
+  if (report.furnitureStatus) {
+    const furEl = findEl(selects,
+      /furniture.?status|furnishing|furnished|حالة.*تأثيث|تأثيث|مؤثث/i,
+    );
+    if (furEl) await selectAngular(session, buildSelector(furEl), report.furnitureStatus, "حالة التأثيث", furEl.isMat);
+    else addLog(session, `ℹ️ لم يُعثر على حقل «حالة التأثيث»`);
+  }
+
+  // ── نوع التكييف ───────────────────────────────────────────────────────────
+  if (report.airConditioningType) {
+    const acEl = findEl(selects,
+      /air.?condition|aircondition|cooling|تكييف|تبريد/i,
+    );
+    if (acEl) await selectAngular(session, buildSelector(acEl), report.airConditioningType, "التكييف", acEl.isMat);
+    else addLog(session, `ℹ️ لم يُعثر على حقل «التكييف»`);
+  }
+
+  // ── الأرض مستأجرة ────────────────────────────────────────────────────────
+  if (report.isLandRented) {
+    const rentedYes = report.isLandRented.trim() === "نعم";
+    try {
+      const rentedRadios = await page.$$('input[type="radio"]');
+      for (const radio of rentedRadios) {
+        const val = await radio.getAttribute("value");
+        const lbl = await radio.evaluate((el: Element) => {
+          const label = el.closest("label") || document.querySelector(`label[for="${(el as HTMLInputElement).id}"]`);
+          return label ? label.textContent?.trim() : "";
+        });
+        const isLandLabel = /land.?rent|أرض.*مستأجر|مستأجر.*أرض/i.test(lbl || "");
+        if (isLandLabel) {
+          if ((rentedYes && (val === "true" || val === "1")) || (!rentedYes && (val === "false" || val === "0"))) {
+            await radio.check();
+            addLog(session, `✅ الأرض مستأجرة: ${report.isLandRented}`);
+            break;
+          }
+        }
+      }
+    } catch {
+      addLog(session, `⚠️ فشل تحديد حقل «الأرض مستأجرة»`);
+    }
+  }
+
+  // ── الميزات الإضافية ─────────────────────────────────────────────────────
+  if (report.additionalFeatures) {
+    const features = report.additionalFeatures.split(/،|,/).map((f: string) => f.trim()).filter(Boolean);
+    for (const feat of features) {
+      try {
+        const checkboxes = await page.$$('input[type="checkbox"]');
+        for (const cb of checkboxes) {
+          const lbl = await cb.evaluate((el: Element) => {
+            const label = el.closest("label") || document.querySelector(`label[for="${(el as HTMLInputElement).id}"]`);
+            return label ? label.textContent?.trim() : (el as HTMLInputElement).value || "";
+          });
+          if (lbl && lbl.includes(feat)) {
+            const isChecked = await cb.isChecked();
+            if (!isChecked) await cb.check();
+            addLog(session, `✅ ميزة إضافية: ${feat}`);
+            break;
+          }
+        }
+      } catch {
+        addLog(session, `⚠️ فشل تفعيل ميزة: ${feat}`);
+      }
+    }
+  }
+
+  // ── أفضل استخدام ──────────────────────────────────────────────────────────
+  const isBestUse = !report.isBestUse || report.isBestUse.trim() === "نعم";
   try {
-    const bestUseYes = await page.$('input[type="radio"][value="true"], input[type="radio"][value="1"]');
-    if (bestUseYes) {
-      await bestUseYes.check();
-      addLog(session, `✅ أفضل استخدام: نعم`);
+    const allRadios = await page.$$('input[type="radio"]');
+    for (const radio of allRadios) {
+      const val = await radio.getAttribute("value");
+      const lbl = await radio.evaluate((el: Element) => {
+        const label = el.closest("label") || document.querySelector(`label[for="${(el as HTMLInputElement).id}"]`);
+        return label ? label.textContent?.trim() : "";
+      });
+      const isBestUseField = /best.?use|أفضل.*استخدام|استخدام.*أفضل/i.test(lbl || "");
+      if (isBestUseField) {
+        if ((isBestUse && (val === "true" || val === "1")) || (!isBestUse && (val === "false" || val === "0"))) {
+          await radio.check();
+          addLog(session, `✅ أفضل استخدام: ${isBestUse ? "نعم" : "لا"}`);
+          break;
+        }
+      }
+    }
+    if (!allRadios.length) {
+      const bestUseYes = await page.$('input[type="radio"][value="true"], input[type="radio"][value="1"]');
+      if (bestUseYes) {
+        await bestUseYes.check();
+        addLog(session, `✅ أفضل استخدام (fallback): نعم`);
+      }
     }
   } catch {
     addLog(session, `⚠️ لم يُحدَّد خيار أفضل استخدام`);

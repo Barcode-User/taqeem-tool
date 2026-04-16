@@ -71,6 +71,13 @@ function getDb(): DatabaseSync {
       BuildingPermitNumber      TEXT,
       BuildingStatus            TEXT,
       BuildingAge               TEXT,
+      BuildingType              TEXT,
+      FinishingStatus           TEXT,
+      FurnitureStatus           TEXT,
+      AirConditioningType       TEXT,
+      IsLandRented              TEXT,
+      AdditionalFeatures        TEXT,
+      IsBestUse                 TEXT,
       LandArea                  REAL,
       BuildingArea              REAL,
       BasementArea              REAL,
@@ -126,6 +133,13 @@ function getDb(): DatabaseSync {
   addIfMissing("IncomeApproachPercentage",  "REAL");
   addIfMissing("CostApproachPercentage",    "REAL");
   addIfMissing("ValuersInput",              "TEXT");
+  addIfMissing("BuildingType",              "TEXT");
+  addIfMissing("FinishingStatus",           "TEXT");
+  addIfMissing("FurnitureStatus",           "TEXT");
+  addIfMissing("AirConditioningType",       "TEXT");
+  addIfMissing("IsLandRented",              "TEXT");
+  addIfMissing("AdditionalFeatures",        "TEXT");
+  addIfMissing("IsBestUse",                 "TEXT");
 
   // ─── جدول datasystem ──────────────────────────────────────────────────────
   _db.exec(`
@@ -174,6 +188,13 @@ function getDb(): DatabaseSync {
       BuildingPermitNumber      TEXT,
       BuildingStatus            TEXT,
       BuildingAge               TEXT,
+      BuildingType              TEXT,
+      FinishingStatus           TEXT,
+      FurnitureStatus           TEXT,
+      AirConditioningType       TEXT,
+      IsLandRented              TEXT,
+      AdditionalFeatures        TEXT,
+      IsBestUse                 TEXT,
       LandArea                  REAL,
       BuildingArea              REAL,
       BasementArea              REAL,
@@ -275,6 +296,13 @@ function rowToReport(row: any): Report {
     buildingPermitNumber: str(row.BuildingPermitNumber),
     buildingStatus: str(row.BuildingStatus),
     buildingAge: str(row.BuildingAge),
+    buildingType: str(row.BuildingType),
+    finishingStatus: str(row.FinishingStatus),
+    furnitureStatus: str(row.FurnitureStatus),
+    airConditioningType: str(row.AirConditioningType),
+    isLandRented: str(row.IsLandRented),
+    additionalFeatures: str(row.AdditionalFeatures),
+    isBestUse: str(row.IsBestUse),
     landArea: num(row.LandArea),
     buildingArea: num(row.BuildingArea),
     basementArea: num(row.BasementArea),
@@ -431,7 +459,11 @@ export async function sqliteUpdateReport(id: number, data: Partial<InsertReport>
     propertyUse: "PropertyUse", deedNumber: "DeedNumber", deedDate: "DeedDate",
     ownerName: "OwnerName", ownershipType: "OwnershipType",
     buildingPermitNumber: "BuildingPermitNumber", buildingStatus: "BuildingStatus",
-    buildingAge: "BuildingAge", landArea: "LandArea", buildingArea: "BuildingArea",
+    buildingAge: "BuildingAge", buildingType: "BuildingType",
+    finishingStatus: "FinishingStatus", furnitureStatus: "FurnitureStatus",
+    airConditioningType: "AirConditioningType", isLandRented: "IsLandRented",
+    additionalFeatures: "AdditionalFeatures", isBestUse: "IsBestUse",
+    landArea: "LandArea", buildingArea: "BuildingArea",
     basementArea: "BasementArea", annexArea: "AnnexArea", floorsCount: "FloorsCount",
     permittedFloorsCount: "PermittedFloorsCount",
     permittedBuildingRatio: "PermittedBuildingRatio", streetWidth: "StreetWidth",
@@ -590,6 +622,13 @@ function rowToDataSystem(row: any): DataSystemRecord {
     buildingPermitNumber: str(row.BuildingPermitNumber),
     buildingStatus: str(row.BuildingStatus),
     buildingAge: str(row.BuildingAge),
+    buildingType: str(row.BuildingType),
+    finishingStatus: str(row.FinishingStatus),
+    furnitureStatus: str(row.FurnitureStatus),
+    airConditioningType: str(row.AirConditioningType),
+    isLandRented: str(row.IsLandRented),
+    additionalFeatures: str(row.AdditionalFeatures),
+    isBestUse: str(row.IsBestUse),
     landArea: num(row.LandArea),
     buildingArea: num(row.BuildingArea),
     basementArea: num(row.BasementArea),

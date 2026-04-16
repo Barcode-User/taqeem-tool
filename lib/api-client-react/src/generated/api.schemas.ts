@@ -106,6 +106,20 @@ export interface Report {
   /** @nullable */
   buildingAge?: string | null;
   /** @nullable */
+  buildingType?: string | null;
+  /** @nullable */
+  finishingStatus?: string | null;
+  /** @nullable */
+  furnitureStatus?: string | null;
+  /** @nullable */
+  airConditioningType?: string | null;
+  /** @nullable */
+  isLandRented?: string | null;
+  /** @nullable */
+  additionalFeatures?: string | null;
+  /** @nullable */
+  isBestUse?: string | null;
+  /** @nullable */
   landArea?: number | null;
   /** @nullable */
   buildingArea?: number | null;
@@ -260,6 +274,20 @@ export interface UpdateReportBody {
   buildingStatus?: string | null;
   /** @nullable */
   buildingAge?: string | null;
+  /** @nullable */
+  buildingType?: string | null;
+  /** @nullable */
+  finishingStatus?: string | null;
+  /** @nullable */
+  furnitureStatus?: string | null;
+  /** @nullable */
+  airConditioningType?: string | null;
+  /** @nullable */
+  isLandRented?: string | null;
+  /** @nullable */
+  additionalFeatures?: string | null;
+  /** @nullable */
+  isBestUse?: string | null;
   /** @nullable */
   landArea?: number | null;
   /** @nullable */
