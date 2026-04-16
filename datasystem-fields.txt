@@ -13,6 +13,7 @@
   "fileBytes": "base64string...",    ← الملف PDF محوّل لـ base64  (مطلوب)
   "fileName":  "report.pdf",         ← اسم الملف                  (اختياري)
 
+  ── بيانات التقرير الأساسية ──────────────────────────────────────
   "reportNumber":               "DC26153222",
   "reportDate":                 "2026-03-31",
   "valuationDate":              "2026-03-31",
@@ -24,24 +25,28 @@
   "valuationHypothesis":        "القيمة السوقية",
   "valuationBasis":             "القيمة السوقية العادلة",
 
+  ── بيانات المقيّمين ──────────────────────────────────────────────
+  "valuersInput":               "112000210-50,122221101-50",   ← إدخال سريع: عضوية-نسبة (فاصلة بين مقيمَين)
   "valuerName":                 "أحمد محمد",
-  "valuerPercentage":           100,
+  "valuerPercentage":           50,
   "licenseNumber":              "1301",
   "licenseDate":                "2024-01-01",
-  "membershipNumber":           "MEM-001",
+  "membershipNumber":           "112000210",
   "membershipType":             "عضو كامل",
-  "secondValuerName":           null,
-  "secondValuerPercentage":     null,
-  "secondValuerLicenseNumber":  null,
-  "secondValuerMembershipNumber": null,
+  "secondValuerName":           "خالد علي",
+  "secondValuerPercentage":     50,
+  "secondValuerLicenseNumber":  "1302",
+  "secondValuerMembershipNumber": "122221101",
   "companyName":                "شركة باركود للتقييم",
   "commercialRegNumber":        "1234567890",
 
+  ── بيانات العميل ─────────────────────────────────────────────────
   "clientName":                 "محمد علي",
   "clientEmail":                "client@email.com",
   "clientPhone":                "0501234567",
   "intendedUser":               "البنك الأهلي",
 
+  ── بيانات العقار ─────────────────────────────────────────────────
   "propertyType":               "فيلا",
   "propertySubType":            "سكني",
   "region":                     "منطقة الرياض",
@@ -54,11 +59,13 @@
   "propertyUse":                "سكني",
   "coordinates":                "24.7136,46.6753",
 
+  ── بيانات الصك والملكية ─────────────────────────────────────────
   "deedNumber":                 "123456789",
   "deedDate":                   "2020-01-15",
   "ownerName":                  "خالد العبدالله",
   "ownershipType":              "ملكية فردية",
 
+  ── بيانات المبنى والأرض ────────────────────────────────────────
   "buildingPermitNumber":       "BP-12345",
   "buildingStatus":             "مكتمل",
   "buildingAge":                "5 سنوات",
@@ -70,16 +77,22 @@
   "permittedFloorsCount":       3,
   "permittedBuildingRatio":     60.0,
   "streetWidth":                15.0,
-  "streetFacades":              "واجهة واحدة",
+  "streetFacades":              "واجهة واحدة",       ← نص: واجهة واحدة / واجهتان / ثلاث واجهات / 4 واجهات
+  "facadesCount":               1,                   ← رقم عدد الواجهات على الشارع (1 / 2 / 3 / 4)
   "utilities":                  "كهرباء، ماء، صرف صحي",
 
+  ── أساليب التقييم ────────────────────────────────────────────────
   "valuationMethod":            "أسلوب المقارنة",
   "marketValue":                1500000,
   "incomeValue":                null,
   "costValue":                  null,
+  "marketApproachPercentage":   100,                 ← نسبة أسلوب المقارنة (0-100)
+  "incomeApproachPercentage":   0,                   ← نسبة أسلوب الدخل     (0-100)
+  "costApproachPercentage":     0,                   ← نسبة أسلوب التكلفة   (0-100)
   "finalValue":                 1500000,
   "pricePerMeter":              3000,
 
+  ── ملاحظات ───────────────────────────────────────────────────────
   "notes":                      null
 }
 
@@ -89,10 +102,80 @@
   Content-Type: multipart/form-data
 ══════════════════════════════════════════════════
 
-file              ← ملف PDF مباشر       (مطلوب)
-reportNumber      ← رقم التقرير
-reportDate        ← تاريخ التقرير
-... (نفس أسماء الحقول في الجدول أعلاه، كلها كـ string)
+file                        ← ملف PDF مباشر                  (مطلوب)
+reportNumber                ← رقم التقرير
+reportDate                  ← تاريخ إصدار التقرير
+valuationDate               ← تاريخ التقييم
+inspectionDate              ← تاريخ المعاينة
+commissionDate              ← تاريخ الإسناد
+requestNumber               ← رقم الطلب
+reportType                  ← نوع التقرير
+valuationPurpose            ← الغرض من التقييم
+valuationHypothesis         ← فرضية القيمة
+valuationBasis              ← أساس القيمة
+
+valuersInput                ← إدخال سريع: "عضوية1-نسبة1,عضوية2-نسبة2"
+valuerName                  ← اسم المقيم الأول
+valuerPercentage            ← نسبة مشاركة المقيم الأول (رقم)
+licenseNumber               ← رقم ترخيص المقيم الأول
+licenseDate                 ← تاريخ الترخيص
+membershipNumber            ← رقم عضوية المقيم الأول
+membershipType              ← نوع العضوية
+secondValuerName            ← اسم المقيم الثاني
+secondValuerPercentage      ← نسبة مشاركة المقيم الثاني (رقم)
+secondValuerLicenseNumber   ← رقم ترخيص المقيم الثاني
+secondValuerMembershipNumber← رقم عضوية المقيم الثاني
+companyName                 ← اسم الشركة
+commercialRegNumber         ← رقم السجل التجاري
+
+clientName                  ← اسم العميل
+clientEmail                 ← بريد العميل
+clientPhone                 ← جوال العميل
+intendedUser                ← المستخدم المقصود
+
+propertyType                ← نوع العقار
+propertySubType             ← النوع الفرعي
+region                      ← المنطقة
+city                        ← المدينة
+district                    ← الحي
+street                      ← الشارع
+blockNumber                 ← رقم المربع
+plotNumber                  ← رقم القطعة
+planNumber                  ← رقم المخطط
+propertyUse                 ← استخدام العقار
+coordinates                 ← الإحداثيات (خط العرض,خط الطول)
+
+deedNumber                  ← رقم الصك
+deedDate                    ← تاريخ الصك
+ownerName                   ← اسم المالك
+ownershipType               ← نوع الملكية
+
+buildingPermitNumber        ← رقم رخصة البناء
+buildingStatus              ← حالة المبنى
+buildingAge                 ← عمر المبنى
+landArea                    ← مساحة الأرض (رقم)
+buildingArea                ← مساحة المبنى (رقم)
+basementArea                ← مساحة البدروم (رقم)
+annexArea                   ← مساحة الملحق (رقم)
+floorsCount                 ← عدد الأدوار (رقم)
+permittedFloorsCount        ← عدد الأدوار المسموحة (رقم)
+permittedBuildingRatio      ← نسبة البناء المسموحة (رقم)
+streetWidth                 ← عرض الشارع بالمتر (رقم)
+streetFacades               ← الواجهات المطلة (نص)
+facadesCount                ← عدد الواجهات على الشارع (رقم: 1-4)
+utilities                   ← الخدمات المتوفرة
+
+valuationMethod             ← أسلوب التقييم
+marketValue                 ← قيمة أسلوب المقارنة (رقم)
+incomeValue                 ← قيمة أسلوب الدخل (رقم)
+costValue                   ← قيمة أسلوب التكلفة (رقم)
+marketApproachPercentage    ← نسبة أسلوب المقارنة 0-100 (رقم)
+incomeApproachPercentage    ← نسبة أسلوب الدخل 0-100 (رقم)
+costApproachPercentage      ← نسبة أسلوب التكلفة 0-100 (رقم)
+finalValue                  ← القيمة النهائية (رقم)
+pricePerMeter               ← سعر المتر (رقم)
+
+notes                       ← ملاحظات إضافية
 
 
 =====================================================
@@ -122,3 +205,15 @@ reportDate        ← تاريخ التقرير
   ],
   "averageScore": 87
 }
+
+
+=====================================================
+  ملاحظات مهمة
+=====================================================
+
+• جميع الحقول اختيارية ما عدا fileBytes أو file
+• الحقول الرقمية (landArea, marketValue, facadesCount...) أرسلها كأرقام وليس نصوص
+• التواريخ بصيغة YYYY-MM-DD
+• valuersInput يُحلَّل تلقائياً عند الضغط على "تحليل وملء" في الواجهة
+• مجموع نسب الأساليب (market+income+cost) يجب أن يساوي 100 أو 0 إذا لم تُستخدم
+• facadesCount: 1=واجهة واحدة، 2=واجهتان، 3=ثلاث واجهات، 4 فأكثر=4 واجهات
