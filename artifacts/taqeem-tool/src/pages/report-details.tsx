@@ -1345,6 +1345,8 @@ export default function ReportDetails() {
                       const input = (form.getValues("valuersInput") || "").trim();
                       if (!input) return;
                       const parts = input.split(",").map((p: string) => p.trim()).filter(Boolean);
+                      let filled = 0;
+                      let extra = 0;
                       parts.forEach((part: string, idx: number) => {
                         const lastDash = part.lastIndexOf("-");
                         if (lastDash === -1) return;
@@ -1353,11 +1355,22 @@ export default function ReportDetails() {
                         if (idx === 0) {
                           form.setValue("membershipNumber", membership, { shouldDirty: true });
                           form.setValue("valuerPercentage", isNaN(pct) ? null : pct, { shouldDirty: true });
+                          filled++;
                         } else if (idx === 1) {
                           form.setValue("secondValuerMembershipNumber", membership, { shouldDirty: true });
                           form.setValue("secondValuerPercentage", isNaN(pct) ? null : pct, { shouldDirty: true });
+                          filled++;
+                        } else {
+                          extra++;
                         }
                       });
+                      if (extra > 0) {
+                        toast({
+                          title: `تم ملء ${filled} مقيم في الفورم`,
+                          description: `${extra} مقيم إضافي سيُملأ تلقائياً من حقل الإدخال السريع أثناء الأتمتة (لا حاجة لأي إجراء إضافي)`,
+                          duration: 6000,
+                        });
+                      }
                     }}
                   >
                     تحليل وملء

@@ -1314,19 +1314,12 @@ async function fillFormPage(
     await selectByName(`valuer[${index}][contribution]`, pctStr, `نسبة المساهمة [${index}]`);
   };
 
-  // ── المقيم الأول ──
-  await selectValuerById(0, report.membershipNumber, report.valuerName, "المقيم الأول");
-  await setContribution(0, report.valuerPercentage);
-
-  // ── المقيم الثاني (إن وُجد) ──
-  if (report.secondValuerMembershipNumber || report.secondValuerName) {
+  // ── دالة مساعدة: اضغط زر «إضافة مقيم آخر» ──────────────────────────────
+  const clickAddValuer = async (): Promise<boolean> => {
     try {
-      // اضغط على زر "اضافة مقيم اخر" — يحمل id="duplicateValuer"
       const clicked = await session.page.evaluate(() => {
-        // أولاً: بحث بالـ id المباشر
         const byId = document.querySelector<HTMLElement>("#duplicateValuer");
         if (byId) { byId.click(); return "id"; }
-        // ثانياً: بحث بالنص مع تطبيع الهمزة
         const normalize = (s: string) => s.replace(/[أإآ]/g, "ا").replace(/\s+/g, "");
         const btns = Array.from(document.querySelectorAll<HTMLElement>("button, a"));
         const btn = btns.find(b => normalize(b.textContent ?? "").includes("اضافةمقيم"));
@@ -1336,13 +1329,63 @@ async function fillFormPage(
       if (clicked) {
         addLog(session, `✅ ضغط زر إضافة مقيم آخر (via ${clicked})`);
         await session.page.waitForTimeout(1500);
-      } else {
-        addLog(session, "⚠️ لم يُعثر على زر إضافة مقيم آخر");
+        return true;
       }
-    } catch { addLog(session, "⚠️ فشل الضغط على زر إضافة مقيم آخر"); }
+      addLog(session, "⚠️ لم يُعثر على زر إضافة مقيم آخر");
+      return false;
+    } catch {
+      addLog(session, "⚠️ فشل الضغط على زر إضافة مقيم آخر");
+      return false;
+    }
+  };
 
-    await selectValuerById(1, report.secondValuerMembershipNumber, report.secondValuerName, "المقيم الثاني");
-    await setContribution(1, report.secondValuerPercentage);
+  // ── بناء قائمة المقيمين ──────────────────────────────────────────────────
+  // إن كان valuersInput ممتلئاً → يُستخدم كمصدر رئيسي لجميع المقيمين
+  // وإلا → نستخدم الحقول الفردية (membershipNumber / secondValuerMembershipNumber)
+  type ValuerEntry = { membership: string; pct: number | null };
+  let valuers: ValuerEntry[] = [];
+
+  if (report.valuersInput?.trim()) {
+    const raw = (report.valuersInput as string).trim();
+    for (const part of raw.split(",")) {
+      const p = part.trim();
+      if (!p) continue;
+      const lastDash = p.lastIndexOf("-");
+      if (lastDash === -1) {
+        valuers.push({ membership: p, pct: null });
+      } else {
+        const membership = p.substring(0, lastDash).trim();
+        const pct = parseFloat(p.substring(lastDash + 1).trim());
+        valuers.push({ membership, pct: isNaN(pct) ? null : pct });
+      }
+    }
+    addLog(session, `📋 valuersInput → ${valuers.length} مقيم: ${valuers.map(v => v.membership).join(", ")}`);
+  } else {
+    // المقيم الأول
+    if (report.membershipNumber || report.valuerName) {
+      valuers.push({ membership: report.membershipNumber || report.valuerName || "", pct: report.valuerPercentage ?? null });
+    }
+    // المقيم الثاني
+    if (report.secondValuerMembershipNumber || report.secondValuerName) {
+      valuers.push({ membership: report.secondValuerMembershipNumber || report.secondValuerName || "", pct: report.secondValuerPercentage ?? null });
+    }
+  }
+
+  // ── تعبئة المقيمين بالترتيب ──────────────────────────────────────────────
+  const ordinals = ["الأول", "الثاني", "الثالث", "الرابع", "الخامس"];
+  for (let i = 0; i < valuers.length; i++) {
+    const v = valuers[i];
+    const label = `المقيم ${ordinals[i] ?? `#${i + 1}`}`;
+    if (i > 0) {
+      // ضغط زر «إضافة مقيم آخر» قبل كل مقيم إضافي
+      await clickAddValuer();
+    }
+    await selectValuerById(i, v.membership, null, label);
+    await setContribution(i, v.pct);
+  }
+
+  if (valuers.length === 0) {
+    addLog(session, "⚠️ لم تُحدَّد بيانات أي مقيم");
   }
 
   // ── رفع PDF ───────────────────────────────────────────────────────────────
