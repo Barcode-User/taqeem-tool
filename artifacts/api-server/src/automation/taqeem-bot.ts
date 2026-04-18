@@ -2407,26 +2407,35 @@ async function fillUtilitiesCheckboxes(
 ): Promise<void> {
   if (!report.utilities) return;
 
-  const utilsStr = String(report.utilities).toLowerCase();
-  addLog(session, `🔧 تعبئة المرافق من النص: "${report.utilities}"`);
+  // تطبيع عربي: أإآ→ا، ة→ه، ى→ي، تجاهل التشكيل
+  const normalizeAr = (s: string) =>
+    s
+      .replace(/[\u064B-\u065F\u0670]/g, "")   // حذف التشكيل
+      .replace(/[أإآ]/g, "ا")
+      .replace(/ة/g, "ه")
+      .replace(/ى/g, "ي")
+      .toLowerCase();
 
-  // خريطة شاملة: [مفاتيح بحث في نص PDF] → [regex للـ checkbox]
+  const utilsNorm = normalizeAr(String(report.utilities));
+  addLog(session, `🔧 تعبئة المرافق — نص أصلي: "${report.utilities}" | مُطبَّع: "${utilsNorm}"`);
+
+  // خريطة: [مفاتيح بحث مُطبَّعة في نص PDF] → [regex للـ checkbox في TAQEEM] → [تسمية للسجل]
+  // الأسماء الكاملة في TAQEEM: "كهرباء حكومية" | "مياه شرب" | "صرف صحي" | "غاز طبيعي" | "طرق رئيسية"
   const utilMap: Array<{ keywords: RegExp; checkboxRx: RegExp; label: string }> = [
-    { keywords: /كهرباء|electricity|electric/i,        checkboxRx: /كهرباء|electricity|electric|power/i,          label: "كهرباء" },
-    { keywords: /مياه|ماء|water|drinking/i,             checkboxRx: /مياه|ماء|water|drinking/i,                    label: "مياه" },
-    { keywords: /صرف|sewage|sewer|drainage/i,           checkboxRx: /صرف|sewage|sewer|drain/i,                     label: "صرف صحي" },
-    { keywords: /غاز|gas/i,                             checkboxRx: /غاز|gas/i,                                    label: "غاز" },
-    { keywords: /طرق|road|street|access/i,              checkboxRx: /طرق|road|street|access/i,                     label: "طرق" },
-    { keywords: /هاتف|اتصالات|telephone|telecom|communication/i,
-                                                        checkboxRx: /هاتف|اتصالات|telephone|telecom|comm/i,        label: "اتصالات" },
-    { keywords: /إنترنت|انترنت|internet/i,              checkboxRx: /إنترنت|انترنت|internet/i,                     label: "إنترنت" },
-    { keywords: /إضاءة|اضاءة|lighting|light/i,          checkboxRx: /إضاءة|اضاءة|lighting/i,                      label: "إضاءة" },
+    { keywords: /كهرباء|electricity|electric|power/i,   checkboxRx: /كهرباء/i,  label: "كهرباء حكومية" },
+    { keywords: /مياه|مياة|ماء|water|drinking/i,        checkboxRx: /مياه/i,    label: "مياه شرب"      },
+    { keywords: /صرف|sewage|sewer|drainage/i,            checkboxRx: /صرف/i,     label: "صرف صحي"       },
+    { keywords: /غاز|gas/i,                              checkboxRx: /غاز/i,     label: "غاز طبيعي"     },
+    { keywords: /طرق|رئيسي|road|street|access/i,         checkboxRx: /طرق/i,     label: "طرق رئيسية"    },
+    { keywords: /هاتف|اتصالات|telephone|telecom/i,       checkboxRx: /هاتف|اتصالات|telecom/i, label: "اتصالات" },
+    { keywords: /إنترنت|انترنت|internet/i,               checkboxRx: /إنترنت|انترنت|internet/i, label: "إنترنت" },
+    { keywords: /إضاءة|اضاءه|اضاءة|lighting/i,          checkboxRx: /إضاءة|اضاء/i, label: "إضاءة" },
   ];
 
   const checkboxes = els.filter(e => e.type === "checkbox" || e.tag === "MAT-CHECKBOX");
 
   for (const util of utilMap) {
-    const shouldCheck = util.keywords.test(utilsStr);
+    const shouldCheck = util.keywords.test(utilsNorm);
 
     // ابحث في els المكتشفة أولاً
     const cbEl = checkboxes.find(e => {
