@@ -2407,10 +2407,10 @@ async function fillUtilitiesCheckboxes(
 ): Promise<void> {
   if (!report.utilities) return;
 
-  // تطبيع عربي: أإآ→ا، ة→ه، ى→ي، تجاهل التشكيل
+  // ── تطبيع عربي: أإآ→ا، ة→ه، ى→ي، حذف التشكيل ─────────────────────────
   const normalizeAr = (s: string) =>
     s
-      .replace(/[\u064B-\u065F\u0670]/g, "")   // حذف التشكيل
+      .replace(/[\u064B-\u065F\u0670]/g, "")
       .replace(/[أإآ]/g, "ا")
       .replace(/ة/g, "ه")
       .replace(/ى/g, "ي")
@@ -2419,60 +2419,76 @@ async function fillUtilitiesCheckboxes(
   const utilsNorm = normalizeAr(String(report.utilities));
   addLog(session, `🔧 تعبئة المرافق — نص أصلي: "${report.utilities}" | مُطبَّع: "${utilsNorm}"`);
 
-  // خريطة: [مفاتيح بحث مُطبَّعة في نص PDF] → [regex للـ checkbox في TAQEEM] → [تسمية للسجل]
-  // الأسماء الكاملة في TAQEEM: "كهرباء حكومية" | "مياه شرب" | "صرف صحي" | "غاز طبيعي" | "طرق رئيسية"
-  const utilMap: Array<{ keywords: RegExp; checkboxRx: RegExp; label: string }> = [
-    { keywords: /كهرباء|electricity|electric|power/i,   checkboxRx: /كهرباء/i,  label: "كهرباء حكومية" },
-    { keywords: /مياه|مياة|ماء|water|drinking/i,        checkboxRx: /مياه/i,    label: "مياه شرب"      },
-    { keywords: /صرف|sewage|sewer|drainage/i,            checkboxRx: /صرف/i,     label: "صرف صحي"       },
-    { keywords: /غاز|gas/i,                              checkboxRx: /غاز/i,     label: "غاز طبيعي"     },
-    { keywords: /طرق|رئيسي|road|street|access/i,         checkboxRx: /طرق/i,     label: "طرق رئيسية"    },
-    { keywords: /هاتف|اتصالات|telephone|telecom/i,       checkboxRx: /هاتف|اتصالات|telecom/i, label: "اتصالات" },
-    { keywords: /إنترنت|انترنت|internet/i,               checkboxRx: /إنترنت|انترنت|internet/i, label: "إنترنت" },
-    { keywords: /إضاءة|اضاءه|اضاءة|lighting/i,          checkboxRx: /إضاءة|اضاء/i, label: "إضاءة" },
-  ];
+  // ── مسح جميع mat-checkbox الموجودة في الصفحة مع نصها ─────────────────
+  // هذا المسح لأغراض التشخيص فقط — الاختيار يُنفَّذ لاحقاً بـ Playwright locator
+  const allCbs = await session.page.evaluate(() =>
+    Array.from(document.querySelectorAll("mat-checkbox"))
+      .map((el, i) => ({
+        idx: i,
+        text: el.textContent?.replace(/\s+/g, " ").trim() ?? "",
+        checked: (el.querySelector("input[type='checkbox']") as HTMLInputElement)?.checked ?? false,
+      }))
+  ).catch(() => [] as { idx: number; text: string; checked: boolean }[]);
 
-  const checkboxes = els.filter(e => e.type === "checkbox" || e.tag === "MAT-CHECKBOX");
+  addLog(session, `🔍 checkboxes في الصفحة: ${allCbs.map(c => `"${c.text}"(${c.checked ? "✓" : "○"})`).join(" | ")}`);
+
+  // ── خريطة المرافق: [كلمات مفتاحية من PDF] → [نص الـ checkbox في TAQEEM] ──
+  // الأسماء الكاملة في TAQEEM: "كهرباء حكومية" | "مياه شرب" | "صرف صحي" | "غاز طبيعي" | "طرق رئيسية"
+  const utilMap: Array<{ keywords: RegExp; cbTextRx: RegExp; label: string }> = [
+    { keywords: /كهرباء|electricity|electric|power/i,        cbTextRx: /كهرباء/i,             label: "كهرباء حكومية" },
+    { keywords: /مياه|مياة|ماء|water|drinking/i,             cbTextRx: /مياه/i,               label: "مياه شرب"      },
+    { keywords: /صرف|sewage|sewer|drainage/i,                 cbTextRx: /صرف/i,                label: "صرف صحي"       },
+    { keywords: /غاز|gas/i,                                   cbTextRx: /غاز/i,                label: "غاز طبيعي"     },
+    { keywords: /طرق|رئيسي|road|street|access/i,              cbTextRx: /طرق/i,                label: "طرق رئيسية"    },
+    { keywords: /هاتف|اتصالات|telephone|telecom/i,            cbTextRx: /هاتف|اتصالات/i,      label: "اتصالات"       },
+    { keywords: /إنترنت|انترنت|internet/i,                    cbTextRx: /إنترنت|انترنت/i,     label: "إنترنت"        },
+    { keywords: /إضاءة|اضاءه|اضاءة|lighting/i,               cbTextRx: /إضاءة|اضاء/i,        label: "إضاءة"         },
+  ];
 
   for (const util of utilMap) {
     const shouldCheck = util.keywords.test(utilsNorm);
+    addLog(session, `  ↪ "${util.label}": ${shouldCheck ? "يجب تفعيله" : "لا حاجة"}`);
+    if (!shouldCheck) continue;
 
-    // ابحث في els المكتشفة أولاً
-    const cbEl = checkboxes.find(e => {
-      const combined = `${e.formControlName ?? ""}|${e.name ?? ""}|${e.labelText ?? ""}|${e.ariaLabel ?? ""}`;
-      return util.checkboxRx.test(combined);
-    });
+    // ── البحث عبر Playwright locator بالنص — الأكثر موثوقية مع Angular Material ──
+    // نجرب عدة صيغ للحصول على العنصر الصحيح
+    const matCbLocator = session.page
+      .locator("mat-checkbox")
+      .filter({ hasText: util.cbTextRx });
 
-    if (cbEl) {
-      await checkBox(session, buildSelector(cbEl), shouldCheck, `مرفق: ${util.label}`);
+    const count = await matCbLocator.count().catch(() => 0);
+
+    if (count > 0) {
+      try {
+        // انقر على input الداخلي — Playwright يتحقق تلقائياً من حالة checked
+        const inputLoc = matCbLocator.first().locator("input[type='checkbox']");
+        const isChecked = await inputLoc.isChecked().catch(() => false);
+        if (!isChecked) {
+          // نقرة على mat-checkbox نفسه (ليس input) لتفعيل Angular change detection
+          await matCbLocator.first().click({ force: true });
+          await session.page.waitForTimeout(150);
+        }
+        const nowChecked = await inputLoc.isChecked().catch(() => false);
+        addLog(session, nowChecked
+          ? `✅ مرفق: ${util.label} — تم التفعيل`
+          : `⚠️ مرفق: ${util.label} — النقر لم يُفعّل الـ checkbox`);
+      } catch (e) {
+        addLog(session, `⚠️ مرفق: ${util.label} — استثناء: ${String(e).slice(0, 60)}`);
+      }
       continue;
     }
 
-    // إذا لم يُعثر عليها في els → ابحث في DOM مباشرة
-    if (shouldCheck) {
-      const clicked = await session.page.evaluate((rx: string) => {
-        const r = new RegExp(rx, "i");
-        // ابحث في mat-checkbox وعناصر label
-        const candidates = Array.from(document.querySelectorAll<HTMLElement>(
-          "mat-checkbox, input[type='checkbox']"
-        ));
-        for (const el of candidates) {
-          const lbl = el.textContent?.trim() ?? el.getAttribute("aria-label") ?? "";
-          if (r.test(lbl)) {
-            // إذا كان mat-checkbox انقر عليه
-            const cb = el.querySelector<HTMLInputElement>("input[type='checkbox']") ?? el as any;
-            if (!cb.checked) { el.click(); }
-            return lbl;
-          }
-        }
-        return null;
-      }, util.checkboxRx.source).catch(() => null);
-
-      if (clicked) {
-        addLog(session, `✅ مرفق (DOM مباشر): ${util.label} — ${clicked}`);
-      } else {
-        addLog(session, `ℹ️ مرفق "${util.label}" غير موجود في الصفحة`);
+    // ── fallback: input[type=checkbox] بحث بـ aria-label أو name ────────────
+    const cbByIdx = allCbs.find(c => util.cbTextRx.test(c.text));
+    if (cbByIdx != null) {
+      try {
+        await session.page.locator("mat-checkbox").nth(cbByIdx.idx).click({ force: true });
+        addLog(session, `✅ مرفق (بـ index): ${util.label}`);
+      } catch {
+        addLog(session, `⚠️ مرفق: ${util.label} — فشل النقر بالفهرس`);
       }
+    } else {
+      addLog(session, `ℹ️ مرفق "${util.label}" غير موجود في الصفحة`);
     }
   }
 }
