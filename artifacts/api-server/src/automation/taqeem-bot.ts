@@ -1286,38 +1286,44 @@ async function fillFormPage(
       const searchTerm = membershipNum?.trim() || valuerName?.trim() || "";
       if (!searchTerm) { addLog(session, `⏭️ تخطي "${label}" — لا توجد بيانات`); return; }
 
-      // ── أولاً: اجمع نص جميع الخيارات لإيجاد أقرب تطابق ────────────────────
-      const optionLabel = await session.page.evaluate((s: string, term: string) => {
+      // ── ابحث عن الخيار وارجع قيمته الفعلية (value attribute) وليس نصه ─────
+      // سبب: page.selectOption({ value }) دقيق 100% بخلاف { label } الذي يفشل
+      // بسبب المسافات أو الـ encoding في نص الخيار
+      const found = await session.page.evaluate((s: string, term: string) => {
         const el = document.querySelector<HTMLSelectElement>(s);
         if (!el) return null;
-        const opts = Array.from(el.options);
-        // بحث مباشر: النص يحتوي على رقم العضوية
-        let found = opts.find(o => o.text.includes(term));
-        // بحث بالقيمة
-        if (!found) found = opts.find(o => o.value === term);
-        // بحث جزئي بدون مسافات
-        if (!found) found = opts.find(o => o.text.replace(/\s/g, "").includes(term.replace(/\s/g, "")));
-        return found ? found.text.trim() : null;
+        const opts = Array.from(el.options).filter(o => o.value && o.value !== "");
+        // 1. النص يحتوي على رقم العضوية
+        let opt = opts.find(o => o.text.includes(term));
+        // 2. الـ value يساوي رقم العضوية
+        if (!opt) opt = opts.find(o => o.value === term);
+        // 3. بحث جزئي بدون مسافات
+        if (!opt) opt = opts.find(o => o.text.replace(/\s/g, "").includes(term.replace(/\s/g, "")));
+        if (!opt) {
+          // سجّل الخيارات المتاحة لتسهيل التشخيص
+          return { value: null, text: null, available: opts.slice(0, 8).map(o => o.text.trim()) };
+        }
+        return { value: opt.value, text: opt.text.trim(), available: null };
       }, sel, searchTerm);
 
-      if (!optionLabel) {
-        addLog(session, `⚠️ ${label}: لم يُعثر على "${searchTerm}" في قائمة الخيارات`);
+      if (!found?.value) {
+        const avail = found?.available?.join(" | ") ?? "—";
+        addLog(session, `⚠️ ${label}: لم يُعثر على "${searchTerm}" | الخيارات: ${avail}`);
         return;
       }
 
-      // ── استخدم page.selectOption — الطريقة الوحيدة المرئية لـ Angular ───────
+      // ── page.selectOption بـ value الفعلي — موثوق ومرئي لـ Angular ──────────
       const chosen = await session.page
-        .selectOption(sel, { label: optionLabel })
-        .catch(() => session.page.selectOption(sel, { value: searchTerm }).catch(() => []));
+        .selectOption(sel, { value: found.value })
+        .catch(() => [] as string[]);
 
       if (Array.isArray(chosen) && chosen.length > 0) {
-        // أطلق change event لضمان تفاعل Angular
         await session.page.evaluate((s: string) => {
           document.querySelector(s)?.dispatchEvent(new Event("change", { bubbles: true }));
         }, sel);
-        addLog(session, `✅ ${label}: ${optionLabel}`);
+        addLog(session, `✅ ${label}: ${found.text} (value=${found.value})`);
       } else {
-        addLog(session, `⚠️ ${label}: selectOption فشل للخيار "${optionLabel}"`);
+        addLog(session, `⚠️ ${label}: selectOption({ value: "${found.value}" }) فشل — قد يكون mat-select`);
       }
     } catch (e) {
       addLog(session, `⚠️ ${label}: استثناء أثناء الاختيار — ${String(e).slice(0, 80)}`);
@@ -1344,7 +1350,14 @@ async function fillFormPage(
       });
       if (clicked) {
         addLog(session, `✅ ضغط زر إضافة مقيم آخر (via ${clicked})`);
-        await session.page.waitForTimeout(1500);
+        await session.page.waitForTimeout(2000);
+        // سجّل أسماء جميع الـ selects ذات الصلة للتشخيص
+        const selectNames = await session.page.evaluate(() =>
+          Array.from(document.querySelectorAll<HTMLSelectElement>("select[name]"))
+            .map(s => s.getAttribute("name"))
+            .filter(n => n && n.includes("valuer"))
+        );
+        addLog(session, `🔍 selects بعد الإضافة: ${selectNames.join(", ") || "لا شيء"}`);
         return true;
       }
       addLog(session, "⚠️ لم يُعثر على زر إضافة مقيم آخر");
