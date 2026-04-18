@@ -1271,63 +1271,17 @@ async function fillFormPage(
 
   // ── بيانات المقيمين ──────────────────────────────────────────────────────
   // دالة مساعدة: اختيار المقيم من الـ dropdown بـ رقم العضوية أو الاسم
-  const selectValuerById = async (index: number, membershipNum: string | null | undefined, valuerName: string | null | undefined, label: string) => {
-    const selName = `valuer[${index}][id]`;
-    const sel = `[name="${selName}"]`;
-    try {
-      await session.page.waitForSelector(sel, { timeout: 5000 });
-
-      // انتظر تحميل الخيارات من API (Angular يحمّلها بشكل غير متزامن)
-      await session.page.waitForFunction(
-        (s: string) => { const el = document.querySelector<HTMLSelectElement>(s); return !!el && el.options.length > 1; },
-        sel, { timeout: 10000 },
-      ).catch(() => addLog(session, `⚠️ ${label}: الخيارات لم تُحمَّل بعد، سأحاول على أي حال`));
-
-      const searchTerm = membershipNum?.trim() || valuerName?.trim() || "";
-      if (!searchTerm) { addLog(session, `⏭️ تخطي "${label}" — لا توجد بيانات`); return; }
-
-      // ── ابحث عن الخيار وارجع قيمته الفعلية (value attribute) وليس نصه ─────
-      // سبب: page.selectOption({ value }) دقيق 100% بخلاف { label } الذي يفشل
-      // بسبب المسافات أو الـ encoding في نص الخيار
-      const found = await session.page.evaluate((s: string, term: string) => {
-        const el = document.querySelector<HTMLSelectElement>(s);
-        if (!el) return null;
-        const opts = Array.from(el.options).filter(o => o.value && o.value !== "");
-        // 1. النص يحتوي على رقم العضوية
-        let opt = opts.find(o => o.text.includes(term));
-        // 2. الـ value يساوي رقم العضوية
-        if (!opt) opt = opts.find(o => o.value === term);
-        // 3. بحث جزئي بدون مسافات
-        if (!opt) opt = opts.find(o => o.text.replace(/\s/g, "").includes(term.replace(/\s/g, "")));
-        if (!opt) {
-          // سجّل الخيارات المتاحة لتسهيل التشخيص
-          return { value: null, text: null, available: opts.slice(0, 8).map(o => o.text.trim()) };
-        }
-        return { value: opt.value, text: opt.text.trim(), available: null };
-      }, sel, searchTerm);
-
-      if (!found?.value) {
-        const avail = found?.available?.join(" | ") ?? "—";
-        addLog(session, `⚠️ ${label}: لم يُعثر على "${searchTerm}" | الخيارات: ${avail}`);
-        return;
-      }
-
-      // ── page.selectOption بـ value الفعلي — موثوق ومرئي لـ Angular ──────────
-      const chosen = await session.page
-        .selectOption(sel, { value: found.value })
-        .catch(() => [] as string[]);
-
-      if (Array.isArray(chosen) && chosen.length > 0) {
-        await session.page.evaluate((s: string) => {
-          document.querySelector(s)?.dispatchEvent(new Event("change", { bubbles: true }));
-        }, sel);
-        addLog(session, `✅ ${label}: ${found.text} (value=${found.value})`);
-      } else {
-        addLog(session, `⚠️ ${label}: selectOption({ value: "${found.value}" }) فشل — قد يكون mat-select`);
-      }
-    } catch (e) {
-      addLog(session, `⚠️ ${label}: استثناء أثناء الاختيار — ${String(e).slice(0, 80)}`);
-    }
+  // selectValuerById: يستخدم selectByNameFuzzy — XPath + locator.selectOption
+  // هذه هي الطريقة الوحيدة الموثوقة مع Angular وأسماء المصفوفات valuer[N][id]
+  const selectValuerById = async (
+    index: number,
+    membershipNum: string | null | undefined,
+    valuerName: string | null | undefined,
+    label: string,
+  ) => {
+    const term = membershipNum?.trim() || valuerName?.trim() || "";
+    if (!term) { addLog(session, `⏭️ تخطي "${label}" — لا توجد بيانات`); return; }
+    await selectByNameFuzzy(session, `valuer[${index}][id]`, term, label);
   };
 
   // دالة مساعدة: ضبط نسبة المساهمة
