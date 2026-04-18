@@ -203,6 +203,7 @@ const COMPARE_GROUPS = [
       { key: "secondValuerMembershipNumber",label: "عضوية المقيم الثاني" },
       { key: "companyName",                 label: "اسم شركة التقييم" },
       { key: "commercialRegNumber",         label: "رقم السجل التجاري" },
+      { key: "valuersInput",                label: "إدخال المقيمين السريع" },
     ],
   },
   {
