@@ -1276,36 +1276,52 @@ async function fillFormPage(
     const sel = `[name="${selName}"]`;
     try {
       await session.page.waitForSelector(sel, { timeout: 5000 });
-      // انتظر تحميل الخيارات من API
+
+      // انتظر تحميل الخيارات من API (Angular يحمّلها بشكل غير متزامن)
       await session.page.waitForFunction(
-        (s: string) => { const el = document.querySelector<HTMLSelectElement>(s); return el ? el.options.length > 1 : false; },
-        sel, { timeout: 8000 }
-      ).catch(() => {});
+        (s: string) => { const el = document.querySelector<HTMLSelectElement>(s); return !!el && el.options.length > 1; },
+        sel, { timeout: 10000 },
+      ).catch(() => addLog(session, `⚠️ ${label}: الخيارات لم تُحمَّل بعد، سأحاول على أي حال`));
 
       const searchTerm = membershipNum?.trim() || valuerName?.trim() || "";
       if (!searchTerm) { addLog(session, `⏭️ تخطي "${label}" — لا توجد بيانات`); return; }
 
-      const matched = await session.page.evaluate((s: string, term: string) => {
+      // ── أولاً: اجمع نص جميع الخيارات لإيجاد أقرب تطابق ────────────────────
+      const optionLabel = await session.page.evaluate((s: string, term: string) => {
         const el = document.querySelector<HTMLSelectElement>(s);
         if (!el) return null;
-        // ابحث عن خيار يحتوي على رقم العضوية أو الاسم
         const opts = Array.from(el.options);
-        let found = opts.find(o => o.text.includes(term) || o.value === term);
-        if (!found && term.length > 4) {
-          // بحث جزئي
-          found = opts.find(o => o.text.replace(/\s/g, "").includes(term.replace(/\s/g, "")));
-        }
-        if (found) {
-          el.value = found.value;
-          el.dispatchEvent(new Event("change", { bubbles: true }));
-          return found.text.trim();
-        }
-        return null;
+        // بحث مباشر: النص يحتوي على رقم العضوية
+        let found = opts.find(o => o.text.includes(term));
+        // بحث بالقيمة
+        if (!found) found = opts.find(o => o.value === term);
+        // بحث جزئي بدون مسافات
+        if (!found) found = opts.find(o => o.text.replace(/\s/g, "").includes(term.replace(/\s/g, "")));
+        return found ? found.text.trim() : null;
       }, sel, searchTerm);
 
-      if (matched) addLog(session, `✅ ${label}: ${matched}`);
-      else addLog(session, `⚠️ ${label}: لم يُعثر على "${searchTerm}" — تحقق من رقم العضوية`);
-    } catch (e) { addLog(session, `⚠️ ${label}: فشل الاختيار`); }
+      if (!optionLabel) {
+        addLog(session, `⚠️ ${label}: لم يُعثر على "${searchTerm}" في قائمة الخيارات`);
+        return;
+      }
+
+      // ── استخدم page.selectOption — الطريقة الوحيدة المرئية لـ Angular ───────
+      const chosen = await session.page
+        .selectOption(sel, { label: optionLabel })
+        .catch(() => session.page.selectOption(sel, { value: searchTerm }).catch(() => []));
+
+      if (Array.isArray(chosen) && chosen.length > 0) {
+        // أطلق change event لضمان تفاعل Angular
+        await session.page.evaluate((s: string) => {
+          document.querySelector(s)?.dispatchEvent(new Event("change", { bubbles: true }));
+        }, sel);
+        addLog(session, `✅ ${label}: ${optionLabel}`);
+      } else {
+        addLog(session, `⚠️ ${label}: selectOption فشل للخيار "${optionLabel}"`);
+      }
+    } catch (e) {
+      addLog(session, `⚠️ ${label}: استثناء أثناء الاختيار — ${String(e).slice(0, 80)}`);
+    }
   };
 
   // دالة مساعدة: ضبط نسبة المساهمة
