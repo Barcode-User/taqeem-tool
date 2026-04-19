@@ -241,6 +241,7 @@ function getDb(): DatabaseSync {
   addDsIfMissing("MarketApproachPercentage", "REAL");
   addDsIfMissing("IncomeApproachPercentage", "REAL");
   addDsIfMissing("CostApproachPercentage",   "REAL");
+  addDsIfMissing("ReportCode",               "TEXT");
 
   console.log(`[DB] SQLite: ${DB_PATH}`);
   return _db;
@@ -504,6 +505,7 @@ export async function sqliteUpdateReport(id: number, data: Partial<InsertReport>
 
 export interface DataSystemRecord {
   id: number;
+  reportCode: string | null;
   filePath: string | null;
   reportNumber: string | null;
   reportDate: string | null;
@@ -579,6 +581,7 @@ function rowToDataSystem(row: any): DataSystemRecord {
   const str = (v: any) => (v != null ? String(v) : null);
   return {
     id: row.Id,
+    reportCode: str(row.ReportCode),
     filePath: str(row.FilePath),
     reportNumber: str(row.ReportNumber),
     reportDate: str(row.ReportDate),
@@ -662,7 +665,7 @@ export async function sqliteInsertDataSystem(data: Omit<DataSystemRecord, "id" |
   const now = new Date().toISOString();
   const result = db.prepare(`
     INSERT INTO datasystem (
-      FilePath, ReportNumber, ReportDate, ValuationDate, InspectionDate, CommissionDate,
+      ReportCode, FilePath, ReportNumber, ReportDate, ValuationDate, InspectionDate, CommissionDate,
       RequestNumber, ValuerName, ValuerPercentage, LicenseNumber, LicenseDate,
       MembershipNumber, MembershipType, SecondValuerName, SecondValuerPercentage,
       SecondValuerLicenseNumber, SecondValuerMembershipNumber, TaqeemReportNumber,
@@ -677,9 +680,10 @@ export async function sqliteInsertDataSystem(data: Omit<DataSystemRecord, "id" |
       FinalValue, PricePerMeter,
       CompanyName, CommercialRegNumber, Notes, LinkedReportId, CreatedAt
     ) VALUES (
-      ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+      ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
     )
   `).run(
+    data.reportCode ?? null,
     data.filePath ?? null, data.reportNumber ?? null, data.reportDate ?? null,
     data.valuationDate ?? null, data.inspectionDate ?? null, data.commissionDate ?? null,
     data.requestNumber ?? null, data.valuerName ?? null, data.valuerPercentage ?? null,

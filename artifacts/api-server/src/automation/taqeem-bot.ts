@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
 import * as fs from "fs";
 import * as path from "path";
-import { getReportById, updateReport } from "@workspace/db";
+import { getReportById, updateReport, sqliteGetDataSystemByReportId } from "@workspace/db";
 import {
   createSession,
   closeSession,
@@ -3311,10 +3311,13 @@ async function submitAndDownloadCertificate(
   // ── 8. إرسال QRInformationApi → http://localhost:8080/External/QrInformationApi ─
   addLog(session, "▶ الخطوة 7: إرسال QRInformationApi");
   try {
-    // reportCode = taqeemReportNumber المحفوظ في جدول النظام (reports + datasystem)
-    // هو نفس taqeemReportId المُسند من TAQEEM عند إنشاء التقرير
+    // reportCode: جلب من جدول datasystem — الكود المُرسَل من النظام الخارجي
+    const dsRecord = await sqliteGetDataSystemByReportId(reportId).catch(() => null);
+    const reportCode = dsRecord?.reportCode ?? "";
+    addLog(session, `🔑 reportCode من datasystem: "${reportCode}"`);
+
     const formData = new FormData();
-    formData.append("reportCode",         taqeemReportId);
+    formData.append("reportCode",         reportCode);
     formData.append("taqeemReportNumber", taqeemReportId);
     formData.append("taqeemSubmittedAt",  submittedAt);
     formData.append("qrCodeBase64",       qrBase64 ?? "");

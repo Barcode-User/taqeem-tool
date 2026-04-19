@@ -229,6 +229,7 @@ function extractFields(body: Record<string, any>, filePath: string) {
 
   return {
     filePath,
+    reportCode:                 s(body.reportCode),
     reportNumber:               s(body.reportNumber),
     reportDate:                 s(body.reportDate),
     valuationDate:              s(body.valuationDate),
