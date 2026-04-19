@@ -373,14 +373,12 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
 
     await screenshot(page, `review_${reportId}`);
     const finalUrl = page.url();
-    const finalIdMatch = finalUrl.match(/\/(\d+)(?:\/|$)/);
-    const finalId = finalIdMatch ? finalIdMatch[1] : "غير معروف";
-    addLog(session, `✅ الانتهاء — URL: ${finalUrl}`);
-    addLog(session, `🆔 تأكيد التسلسل: TAQEEM ID = ${taqeemReportId} | ID في URL النهائي = ${finalId}`);
-    addLog(session, "🔵 اكتمل الإدخال — راجع البيانات ثم أرسل التقرير يدوياً.");
+    addLog(session, `✅ الصفحة النهائية: ${finalUrl}`);
 
-    await updateReport(reportId, { automationStatus: "waiting_review", automationError: null });
-    closeSession(session.sessionId);
+    // ════════════════════════════════════════════════════════════════════════
+    // مرحلة الإرسال: تحديد الموافقة + إرسال التقرير + تنزيل الشهادة
+    // ════════════════════════════════════════════════════════════════════════
+    await submitAndDownloadCertificate(session, reportId, report);
 
   } catch (err: any) {
     addLog(session, `❌ خطأ: ${err.message}`);
@@ -3152,6 +3150,167 @@ async function uploadPdf(
   }
 
   addLog(session, "⚠️ لم يُرفع PDF — المتابعة بدونه");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// إرسال التقرير + تنزيل شهادة التسجيل + التقاط QR Code
+// ─────────────────────────────────────────────────────────────────────────────
+async function submitAndDownloadCertificate(
+  session: AutomationSession,
+  reportId: number,
+  report: any,
+): Promise<void> {
+  const { page } = session;
+
+  addLog(session, "═══════════════════════════════════════════════");
+  addLog(session, "▶ إرسال التقرير — الخطوة 1: الموافقة على البنود");
+
+  // ── 1. انتظار قسم "الإجراءات" ────────────────────────────────────────────
+  await page.waitForSelector("text=الإجراءات", { timeout: 20000 }).catch(() =>
+    addLog(session, "⚠️ قسم الإجراءات لم يظهر خلال 20 ثانية"),
+  );
+
+  // ── 2. تحديد checkbox الموافقة ────────────────────────────────────────────
+  const termsLocator = page
+    .locator("mat-checkbox")
+    .filter({ hasText: /السياسات|اللوائح|البنود|لقد قرأت/i });
+  const termsCount = await termsLocator.count().catch(() => 0);
+
+  if (termsCount > 0) {
+    const isChecked = await termsLocator
+      .first()
+      .locator("input[type='checkbox']")
+      .isChecked()
+      .catch(() => false);
+    if (!isChecked) {
+      await termsLocator.first().click({ force: true });
+      await page.waitForTimeout(400);
+    }
+    addLog(session, '✅ "لقد قرأت السياسات واللوائح وأوافق عليها" — تم التحديد');
+  } else {
+    // Fallback: ابحث عن input[type=checkbox] بجوار نص الموافقة
+    const fallbackChecked = await page.evaluate(() => {
+      const labels = Array.from(document.querySelectorAll("label, span, p"));
+      const target = labels.find(el => /السياسات|اللوائح|لقد قرأت/i.test(el.textContent ?? ""));
+      if (!target) return false;
+      const cb =
+        target.querySelector<HTMLInputElement>("input[type='checkbox']") ??
+        target.closest("label")?.querySelector<HTMLInputElement>("input[type='checkbox']");
+      if (cb && !cb.checked) { cb.click(); return true; }
+      return !!cb;
+    });
+    addLog(session, fallbackChecked
+      ? '✅ terms (fallback) — تم التحديد'
+      : '⚠️ checkbox الموافقة لم يُعثر عليه — تابع على مسؤوليتك');
+  }
+  await page.waitForTimeout(600);
+
+  // ── 3. ضغط "إرسال التقرير" ───────────────────────────────────────────────
+  addLog(session, "▶ الخطوة 2: ضغط إرسال التقرير");
+  const submitBtn = page.locator("button").filter({ hasText: /إرسال التقرير/i });
+  const submitCount = await submitBtn.count().catch(() => 0);
+
+  if (submitCount === 0) {
+    addLog(session, '⚠️ زر "إرسال التقرير" غير موجود — الانتظار للمراجعة اليدوية');
+    await updateReport(reportId, { automationStatus: "waiting_review", automationError: null });
+    closeSession(session.sessionId);
+    return;
+  }
+
+  await submitBtn.first().click();
+  addLog(session, '✅ تم الضغط على "إرسال التقرير"');
+
+  // ── 4. انتظار صفحة التأكيد ───────────────────────────────────────────────
+  addLog(session, "▶ الخطوة 3: انتظار صفحة التأكيد");
+  await page.waitForLoadState("networkidle", { timeout: 30000 }).catch(() => {});
+  await page.waitForTimeout(3000);
+  await screenshot(page, `submitted_${reportId}`);
+  addLog(session, `📄 صفحة ما بعد الإرسال: ${page.url()}`);
+
+  // ── 5. التقاط QR Code ────────────────────────────────────────────────────
+  addLog(session, "▶ الخطوة 4: التقاط QR Code");
+  let qrBase64: string | null = null;
+
+  // محاولة 1: img data:image بداخل الصفحة
+  qrBase64 = await page.evaluate(() => {
+    const imgs = Array.from(document.querySelectorAll<HTMLImageElement>("img"));
+    const qr = imgs.find(img =>
+      img.src.startsWith("data:image") && img.naturalWidth > 50 && img.naturalHeight > 50,
+    );
+    return qr ? qr.src : null;
+  }).catch(() => null);
+
+  // محاولة 2: canvas
+  if (!qrBase64) {
+    qrBase64 = await page.evaluate(() => {
+      const canvases = Array.from(document.querySelectorAll<HTMLCanvasElement>("canvas"));
+      const qr = canvases.find(c => c.width > 50 && c.height > 50);
+      return qr ? qr.toDataURL("image/png") : null;
+    }).catch(() => null);
+  }
+
+  // محاولة 3: screenshot لأي img كبيرة في الصفحة (likely QR)
+  if (!qrBase64) {
+    try {
+      const imgLocator = page.locator("img").last();
+      if ((await imgLocator.count()) > 0) {
+        const buf = await imgLocator.screenshot({ type: "png" });
+        qrBase64 = `data:image/png;base64,${buf.toString("base64")}`;
+      }
+    } catch { /* تجاهل */ }
+  }
+
+  if (qrBase64) {
+    addLog(session, `✅ QR Code التُقط (${Math.round(qrBase64.length / 1024)} KB)`);
+  } else {
+    addLog(session, "⚠️ لم يُعثر على QR Code في الصفحة");
+  }
+
+  // ── 6. تنزيل شهادة التسجيل ───────────────────────────────────────────────
+  addLog(session, "▶ الخطوة 5: تنزيل شهادة التسجيل");
+  let certificatePath: string | null = null;
+
+  const certBtn = page.locator("button").filter({ hasText: /شهادة التسجيل/i });
+  const certCount = await certBtn.count().catch(() => 0);
+
+  if (certCount > 0) {
+    try {
+      const certDir = path.join(process.cwd(), "uploads", "certificates");
+      await fs.promises.mkdir(certDir, { recursive: true });
+
+      const [download] = await Promise.all([
+        page.waitForEvent("download", { timeout: 30000 }),
+        certBtn.first().click(),
+      ]);
+      const suggestedName = download.suggestedFilename() || `certificate_${reportId}.pdf`;
+      const savePath = path.join(certDir, `${reportId}_${suggestedName}`);
+      await download.saveAs(savePath);
+      certificatePath = savePath;
+      addLog(session, `✅ شهادة التسجيل نُزِّلت: ${savePath}`);
+    } catch (e) {
+      addLog(session, `⚠️ فشل تنزيل الشهادة: ${String(e).slice(0, 80)}`);
+    }
+  } else {
+    addLog(session, '⚠️ زر "شهادة التسجيل" غير موجود بعد');
+  }
+
+  // ── 7. حفظ في قاعدة البيانات ─────────────────────────────────────────────
+  addLog(session, "▶ الخطوة 6: حفظ QR والشهادة في قاعدة البيانات");
+  const updateData: Record<string, any> = {
+    status: "submitted",
+    automationStatus: "completed",
+    automationError: null,
+    taqeemSubmittedAt: new Date().toISOString(),
+  };
+  if (qrBase64) updateData.qrCodeBase64 = qrBase64;
+  if (certificatePath) updateData.certificatePath = certificatePath;
+  await updateReport(reportId, updateData);
+
+  addLog(session, "═══════════════════════════════════════════════");
+  addLog(session, `✅ اكتمل إرسال التقرير [id=${reportId}] — QR: ${qrBase64 ? "✓" : "✗"} | شهادة: ${certificatePath ? "✓" : "✗"}`);
+  addLog(session, "═══════════════════════════════════════════════");
+
+  closeSession(session.sessionId);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

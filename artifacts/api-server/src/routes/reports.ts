@@ -952,4 +952,74 @@ router.patch("/reports/:id/status", async (req, res) => {
   }
 });
 
+// ─── QRInformationApi ─────────────────────────────────────────────────────
+// GET /reports/:id/qr-information
+// يُرجع: رقم التقرير، QR Code (base64)، مسار الشهادة، كود الوثيقة
+router.get("/reports/:id/qr-information", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) { res.status(400).json({ error: "Invalid ID" }); return; }
+    const report = await getReportById(id);
+    if (!report) { res.status(404).json({ error: "Report not found" }); return; }
+    res.json({
+      reportId: report.id,
+      reportNumber: report.reportNumber,
+      documentCode: report.deedNumber,
+      qrCodeBase64: report.qrCodeBase64 ?? null,
+      certificatePath: report.certificatePath ?? null,
+      taqeemSubmittedAt: report.taqeemSubmittedAt ?? null,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Failed to get QR information");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /reports/:id/qr-information
+// يستقبل: reportNumber، qrCodeBase64 (body)، certificate (multipart)، documentCode من DB
+// يحفظ البيانات ويُرجع السجل المحدَّث
+const certStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    const dir = path.join(process.cwd(), "uploads", "certificates");
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (_req, file, cb) => {
+    const unique = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    cb(null, `${unique}_${file.originalname}`);
+  },
+});
+const uploadCert = multer({ storage: certStorage, limits: { fileSize: 20 * 1024 * 1024 } });
+
+router.post("/reports/:id/qr-information", uploadCert.single("certificate"), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) { res.status(400).json({ error: "Invalid ID" }); return; }
+
+    const report = await getReportById(id);
+    if (!report) { res.status(404).json({ error: "Report not found" }); return; }
+
+    const { qrCodeBase64 } = req.body ?? {};
+    const certFile = req.file;
+
+    const updateData: Record<string, any> = {};
+    if (qrCodeBase64) updateData.qrCodeBase64 = qrCodeBase64;
+    if (certFile?.path) updateData.certificatePath = certFile.path;
+
+    const updated = await updateReport(id, updateData);
+
+    res.json({
+      success: true,
+      reportId: id,
+      reportNumber: report.reportNumber,
+      documentCode: report.deedNumber,
+      qrCodeBase64: updated?.qrCodeBase64 ?? null,
+      certificatePath: updated?.certificatePath ?? null,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Failed to save QR information");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 export default router;
