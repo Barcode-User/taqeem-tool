@@ -2316,7 +2316,21 @@ async function fillAttributePage(
 
   // ── نوع الملكية ───────────────────────────────────────────────────────────
   // الاسم الفعلي: attribute[4] — الحل الجذري: selectByNameFuzzy مباشرة
-  await selectByNameFuzzy(session, "attribute[4]", report.ownershipType, "نوع الملكية", "أخرى");
+  // تطبيع: "ملكية مطلقة" أو أي نص يحتوي "ملكية" (بدون مشاعة/انتفاع/إيجار) → "ملكية"
+  {
+    const raw = (report.ownershipType ?? "").trim();
+    const containsOwnership = /ملكية/.test(raw);
+    const isShared     = /مشاع/.test(raw);
+    const isUsufruct   = /انتفاع/.test(raw);
+    const isRent       = /إيجار|ايجار/.test(raw);
+    const normalizedOwnership = (containsOwnership && !isShared && !isUsufruct && !isRent)
+      ? "ملكية"
+      : raw;
+    if (normalizedOwnership !== raw) {
+      addLog(session, `🔄 نوع الملكية: "${raw}" → "${normalizedOwnership}"`);
+    }
+    await selectByNameFuzzy(session, "attribute[4]", normalizedOwnership, "نوع الملكية", "أخرى");
+  }
 
   // ── مساحة الأرض ───────────────────────────────────────────────────────────
   const landEl = byName("land_area") ?? byName("plot_area") ??
