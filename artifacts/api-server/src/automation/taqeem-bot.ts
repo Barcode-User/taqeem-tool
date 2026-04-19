@@ -378,7 +378,7 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     // ════════════════════════════════════════════════════════════════════════
     // مرحلة الإرسال: تحديد الموافقة + إرسال التقرير + تنزيل الشهادة
     // ════════════════════════════════════════════════════════════════════════
-    await submitAndDownloadCertificate(session, reportId, report);
+    await submitAndDownloadCertificate(session, reportId, report, taqeemReportId);
 
   } catch (err: any) {
     addLog(session, `❌ خطأ: ${err.message}`);
@@ -3159,6 +3159,7 @@ async function submitAndDownloadCertificate(
   session: AutomationSession,
   reportId: number,
   report: any,
+  taqeemReportId: string,
 ): Promise<void> {
   const { page } = session;
 
@@ -3296,15 +3297,46 @@ async function submitAndDownloadCertificate(
 
   // ── 7. حفظ في قاعدة البيانات ─────────────────────────────────────────────
   addLog(session, "▶ الخطوة 6: حفظ QR والشهادة في قاعدة البيانات");
+  const submittedAt = new Date().toISOString();
   const updateData: Record<string, any> = {
     status: "submitted",
     automationStatus: "completed",
     automationError: null,
-    taqeemSubmittedAt: new Date().toISOString(),
+    taqeemSubmittedAt: submittedAt,
   };
   if (qrBase64) updateData.qrCodeBase64 = qrBase64;
   if (certificatePath) updateData.certificatePath = certificatePath;
   await updateReport(reportId, updateData);
+
+  // ── 8. إرسال QRInformationApi → http://localhost:8080/External/QrInformationApi ─
+  addLog(session, "▶ الخطوة 7: إرسال QRInformationApi");
+  try {
+    const formData = new FormData();
+    formData.append("reportCode",         String(report.reportNumber ?? ""));
+    formData.append("taqeemReportNumber", taqeemReportId);
+    formData.append("taqeemSubmittedAt",  submittedAt);
+    formData.append("qrCodeBase64",       qrBase64 ?? "");
+
+    if (certificatePath && fs.existsSync(certificatePath)) {
+      const fileBuffer = fs.readFileSync(certificatePath);
+      const blob = new Blob([fileBuffer], { type: "application/pdf" });
+      formData.append("certificatePath", blob, path.basename(certificatePath));
+    }
+
+    const resp = await fetch("http://localhost:8080/External/QrInformationApi", {
+      method: "POST",
+      body: formData,
+    });
+
+    if (resp.ok) {
+      addLog(session, `✅ QRInformationApi: ${resp.status} ${resp.statusText}`);
+    } else {
+      const body = await resp.text().catch(() => "");
+      addLog(session, `⚠️ QRInformationApi: ${resp.status} — ${body.slice(0, 120)}`);
+    }
+  } catch (e) {
+    addLog(session, `⚠️ QRInformationApi فشل الاتصال: ${String(e).slice(0, 100)}`);
+  }
 
   addLog(session, "═══════════════════════════════════════════════");
   addLog(session, `✅ اكتمل إرسال التقرير [id=${reportId}] — QR: ${qrBase64 ? "✓" : "✗"} | شهادة: ${certificatePath ? "✓" : "✗"}`);
