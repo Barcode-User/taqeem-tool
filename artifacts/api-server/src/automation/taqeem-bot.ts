@@ -70,6 +70,82 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     const report = await getReportById(reportId);
     if (!report) throw new Error(`التقرير ${reportId} غير موجود`);
 
+    // ── جلب بيانات datasystem وإعطائها الأولوية على بيانات جدول reports ──────
+    const dsRecord = await sqliteGetDataSystemByReportId(reportId).catch(() => null);
+    const mergedReport: any = dsRecord ? {
+      ...report,
+      reportNumber:                 dsRecord.reportNumber                 ?? report.reportNumber,
+      reportDate:                   dsRecord.reportDate                   ?? report.reportDate,
+      valuationDate:                dsRecord.valuationDate                ?? report.valuationDate,
+      inspectionDate:               dsRecord.inspectionDate               ?? report.inspectionDate,
+      commissionDate:               dsRecord.commissionDate               ?? report.commissionDate,
+      requestNumber:                dsRecord.requestNumber                ?? report.requestNumber,
+      valuerName:                   dsRecord.valuerName                   ?? report.valuerName,
+      valuerPercentage:             dsRecord.valuerPercentage             ?? report.valuerPercentage,
+      licenseNumber:                dsRecord.licenseNumber                ?? report.licenseNumber,
+      licenseDate:                  dsRecord.licenseDate                  ?? report.licenseDate,
+      membershipNumber:             dsRecord.membershipNumber             ?? report.membershipNumber,
+      membershipType:               dsRecord.membershipType               ?? report.membershipType,
+      secondValuerName:             dsRecord.secondValuerName             ?? report.secondValuerName,
+      secondValuerPercentage:       dsRecord.secondValuerPercentage       ?? report.secondValuerPercentage,
+      secondValuerLicenseNumber:    dsRecord.secondValuerLicenseNumber    ?? report.secondValuerLicenseNumber,
+      secondValuerMembershipNumber: dsRecord.secondValuerMembershipNumber ?? report.secondValuerMembershipNumber,
+      taqeemReportNumber:           dsRecord.taqeemReportNumber           ?? report.taqeemReportNumber,
+      clientName:                   dsRecord.clientName                   ?? report.clientName,
+      clientEmail:                  dsRecord.clientEmail                  ?? report.clientEmail,
+      clientPhone:                  dsRecord.clientPhone                  ?? report.clientPhone,
+      intendedUser:                 dsRecord.intendedUser                 ?? report.intendedUser,
+      reportType:                   dsRecord.reportType                   ?? report.reportType,
+      valuationPurpose:             dsRecord.valuationPurpose             ?? report.valuationPurpose,
+      valuationHypothesis:          dsRecord.valuationHypothesis          ?? report.valuationHypothesis,
+      valuationBasis:               dsRecord.valuationBasis               ?? report.valuationBasis,
+      propertyType:                 dsRecord.propertyType                 ?? report.propertyType,
+      propertySubType:              dsRecord.propertySubType              ?? report.propertySubType,
+      region:                       dsRecord.region                       ?? report.region,
+      city:                         dsRecord.city                         ?? report.city,
+      district:                     dsRecord.district                     ?? report.district,
+      street:                       dsRecord.street                       ?? report.street,
+      blockNumber:                  dsRecord.blockNumber                  ?? report.blockNumber,
+      plotNumber:                   dsRecord.plotNumber                   ?? report.plotNumber,
+      planNumber:                   dsRecord.planNumber                   ?? report.planNumber,
+      propertyUse:                  dsRecord.propertyUse                  ?? report.propertyUse,
+      deedNumber:                   dsRecord.deedNumber                   ?? report.deedNumber,
+      deedDate:                     dsRecord.deedDate                     ?? report.deedDate,
+      ownerName:                    dsRecord.ownerName                    ?? report.ownerName,
+      ownershipType:                dsRecord.ownershipType                ?? report.ownershipType,
+      buildingPermitNumber:         dsRecord.buildingPermitNumber         ?? report.buildingPermitNumber,
+      buildingStatus:               dsRecord.buildingStatus               ?? report.buildingStatus,
+      buildingAge:                  dsRecord.buildingAge                  ?? report.buildingAge,
+      landArea:                     dsRecord.landArea                     ?? report.landArea,
+      buildingArea:                 dsRecord.buildingArea                 ?? report.buildingArea,
+      basementArea:                 dsRecord.basementArea                 ?? report.basementArea,
+      annexArea:                    dsRecord.annexArea                    ?? report.annexArea,
+      floorsCount:                  dsRecord.floorsCount                  ?? report.floorsCount,
+      permittedFloorsCount:         dsRecord.permittedFloorsCount         ?? report.permittedFloorsCount,
+      permittedBuildingRatio:       dsRecord.permittedBuildingRatio       ?? report.permittedBuildingRatio,
+      streetWidth:                  dsRecord.streetWidth                  ?? report.streetWidth,
+      streetFacades:                dsRecord.streetFacades                ?? report.streetFacades,
+      utilities:                    dsRecord.utilities                    ?? report.utilities,
+      coordinates:                  dsRecord.coordinates                  ?? report.coordinates,
+      valuationMethod:              dsRecord.valuationMethod              ?? report.valuationMethod,
+      marketValue:                  dsRecord.marketValue                  ?? report.marketValue,
+      incomeValue:                  dsRecord.incomeValue                  ?? report.incomeValue,
+      costValue:                    dsRecord.costValue                    ?? report.costValue,
+      marketApproachPercentage:     dsRecord.marketApproachPercentage     ?? report.marketApproachPercentage,
+      incomeApproachPercentage:     dsRecord.incomeApproachPercentage     ?? report.incomeApproachPercentage,
+      costApproachPercentage:       dsRecord.costApproachPercentage       ?? report.costApproachPercentage,
+      finalValue:                   dsRecord.finalValue                   ?? report.finalValue,
+      pricePerMeter:                dsRecord.pricePerMeter                ?? report.pricePerMeter,
+      companyName:                  dsRecord.companyName                  ?? report.companyName,
+      notes:                        dsRecord.notes                        ?? report.notes,
+    } : report;
+
+    if (dsRecord) {
+      addLog(session, `✅ تم جلب بيانات datasystem — الأولوية لها في تعبئة النموذج`);
+    } else {
+      addLog(session, `⚠️ لا يوجد سجل datasystem — سيُستخدم جدول reports فقط`);
+    }
+
     addLog(session, "بدء عملية الرفع الآلي...");
 
     // ── تتبع كل تغييرات URL تلقائياً ──────────────────────────────────────
@@ -181,7 +257,7 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     await screenshot(page, `p1_before_${reportId}`);
     addLog(session, `📋 عدد حقول الصفحة 1: ${elsPage1.length}`);
 
-    await fillFormPage(session, report, elsPage1, pdfState);
+    await fillFormPage(session, mergedReport, elsPage1, pdfState);
     // انتظر قصير لتستقر Angular form validation قبل الحفظ
     await page.waitForTimeout(600);
 
@@ -256,7 +332,7 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     await screenshot(page, `p2_before_${reportId}`);
     addLog(session, `📋 عدد حقول الصفحة 2: ${elsPage2.length}`);
 
-    await fillAssetPage(session, report, elsPage2);
+    await fillAssetPage(session, mergedReport, elsPage2);
     // انتظر قصير لتستقر Angular form validation قبل الحفظ
     await page.waitForTimeout(600);
     await screenshot(page, `p2_after_${reportId}`);
@@ -341,7 +417,7 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     // ── تعبئة الصفحة 3 مع حماية من الانتقال المفاجئ ────────────────────
     const urlAtStartP3 = page.url();
     try {
-      await fillAttributePage(session, report, elsPage3);
+      await fillAttributePage(session, mergedReport, elsPage3);
     } catch (fillErr: any) {
       addLog(session, `⚠️ خطأ أثناء تعبئة الصفحة 3 (نتابع): ${fillErr.message}`);
     }
@@ -378,7 +454,7 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     // ════════════════════════════════════════════════════════════════════════
     // مرحلة الإرسال: تحديد الموافقة + إرسال التقرير + تنزيل الشهادة
     // ════════════════════════════════════════════════════════════════════════
-    await submitAndDownloadCertificate(session, reportId, report, taqeemReportId);
+    await submitAndDownloadCertificate(session, reportId, mergedReport, taqeemReportId);
 
   } catch (err: any) {
     addLog(session, `❌ خطأ: ${err.message}`);
