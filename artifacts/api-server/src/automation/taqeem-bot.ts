@@ -3311,8 +3311,10 @@ async function submitAndDownloadCertificate(
   // ── 8. إرسال QRInformationApi → http://localhost:8080/External/QrInformationApi ─
   addLog(session, "▶ الخطوة 7: إرسال QRInformationApi");
   try {
+    // reportCode = taqeemReportNumber المحفوظ في جدول النظام (reports + datasystem)
+    // هو نفس taqeemReportId المُسند من TAQEEM عند إنشاء التقرير
     const formData = new FormData();
-    formData.append("reportCode",         String(report.reportNumber ?? ""));
+    formData.append("reportCode",         taqeemReportId);
     formData.append("taqeemReportNumber", taqeemReportId);
     formData.append("taqeemSubmittedAt",  submittedAt);
     formData.append("qrCodeBase64",       qrBase64 ?? "");
