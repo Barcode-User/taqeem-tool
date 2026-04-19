@@ -90,6 +90,7 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
       secondValuerPercentage:       dsRecord.secondValuerPercentage       ?? report.secondValuerPercentage,
       secondValuerLicenseNumber:    dsRecord.secondValuerLicenseNumber    ?? report.secondValuerLicenseNumber,
       secondValuerMembershipNumber: dsRecord.secondValuerMembershipNumber ?? report.secondValuerMembershipNumber,
+      valuersInput:                 dsRecord.valuersInput                 ?? report.valuersInput,
       taqeemReportNumber:           dsRecord.taqeemReportNumber           ?? report.taqeemReportNumber,
       clientName:                   dsRecord.clientName                   ?? report.clientName,
       clientEmail:                  dsRecord.clientEmail                  ?? report.clientEmail,
