@@ -3322,6 +3322,14 @@ async function submitAndDownloadCertificate(
     formData.append("taqeemSubmittedAt",  submittedAt);
     formData.append("qrCodeBase64",       qrBase64 ?? "");
 
+    // ── إرسال كامل بيانات جدول datasystem كـ JSON ────────────────────────────
+    if (dsRecord) {
+      // إزالة الحقول التقنية الداخلية، إبقاء بيانات التقرير فقط
+      const { id: _id, filePath: _fp, reportCode: _rc, ...reportFields } = dsRecord;
+      formData.append("reportData", JSON.stringify(reportFields));
+      addLog(session, `📋 reportData: ${Object.keys(reportFields).length} حقل مُرفق`);
+    }
+
     if (certificatePath && fs.existsSync(certificatePath)) {
       const fileBuffer = fs.readFileSync(certificatePath);
       const blob = new Blob([fileBuffer], { type: "application/pdf" });
