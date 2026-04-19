@@ -217,6 +217,7 @@ const COMPARE_FIELDS: { key: string; label: string }[] = [
   { key: "pricePerMeter", label: "سعر المتر" },
   { key: "companyName", label: "اسم الشركة" },
   { key: "commercialRegNumber", label: "رقم السجل التجاري" },
+  { key: "valuersInput", label: "إدخال المقيمين السريع" },
 ];
 
 // ─── دالة مساعدة: تحوّل الـ body (JSON أو multipart) إلى بيانات موحّدة ────────

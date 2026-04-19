@@ -3,6 +3,7 @@ import { Upload, FileText, Loader2, CheckCircle2, AlertCircle, ChevronDown, Chev
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
@@ -243,15 +244,25 @@ export default function DatasystemCompare() {
                   <CardContent>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                       {group.fields.map(({ key, label, type }) => (
-                        <div key={key} className="space-y-1">
+                        <div key={key} className={`space-y-1 ${key === "valuersInput" ? "sm:col-span-2 lg:col-span-3" : ""}`}>
                           <Label className="text-xs text-gray-600">{label}</Label>
-                          <Input
-                            type={type ?? "text"}
-                            value={formData[key] ?? ""}
-                            onChange={(e) => handleFieldChange(key, e.target.value)}
-                            placeholder={label}
-                            className="h-8 text-sm"
-                          />
+                          {key === "valuersInput" ? (
+                            <Textarea
+                              value={formData[key] ?? ""}
+                              onChange={(e) => handleFieldChange(key, e.target.value)}
+                              placeholder={label}
+                              className="text-sm min-h-[80px] resize-y"
+                              dir="rtl"
+                            />
+                          ) : (
+                            <Input
+                              type={type ?? "text"}
+                              value={formData[key] ?? ""}
+                              onChange={(e) => handleFieldChange(key, e.target.value)}
+                              placeholder={label}
+                              className="h-8 text-sm"
+                            />
+                          )}
                         </div>
                       ))}
                     </div>
@@ -331,14 +342,26 @@ export default function DatasystemCompare() {
                       >
                         <td className="p-3 font-medium text-gray-700 text-xs">{row.label}</td>
                         <td className="p-3">
-                          <span className="text-blue-800 bg-blue-50 rounded px-2 py-0.5 text-xs block max-w-xs truncate" title={String(row.datasystemValue ?? "")}>
-                            {row.datasystemValue != null ? String(row.datasystemValue) : <span className="text-gray-400 italic">—</span>}
-                          </span>
+                          {row.key === "valuersInput" ? (
+                            <pre className="text-blue-800 bg-blue-50 rounded px-2 py-1 text-xs whitespace-pre-wrap max-w-xs font-sans">
+                              {row.datasystemValue != null ? String(row.datasystemValue) : <span className="text-gray-400 italic">—</span>}
+                            </pre>
+                          ) : (
+                            <span className="text-blue-800 bg-blue-50 rounded px-2 py-0.5 text-xs block max-w-xs truncate" title={String(row.datasystemValue ?? "")}>
+                              {row.datasystemValue != null ? String(row.datasystemValue) : <span className="text-gray-400 italic">—</span>}
+                            </span>
+                          )}
                         </td>
                         <td className="p-3">
-                          <span className="text-purple-800 bg-purple-50 rounded px-2 py-0.5 text-xs block max-w-xs truncate" title={String(row.reportValue ?? "")}>
-                            {row.reportValue != null ? String(row.reportValue) : <span className="text-gray-400 italic">—</span>}
-                          </span>
+                          {row.key === "valuersInput" ? (
+                            <pre className="text-purple-800 bg-purple-50 rounded px-2 py-1 text-xs whitespace-pre-wrap max-w-xs font-sans">
+                              {row.reportValue != null ? String(row.reportValue) : <span className="text-gray-400 italic">—</span>}
+                            </pre>
+                          ) : (
+                            <span className="text-purple-800 bg-purple-50 rounded px-2 py-0.5 text-xs block max-w-xs truncate" title={String(row.reportValue ?? "")}>
+                              {row.reportValue != null ? String(row.reportValue) : <span className="text-gray-400 italic">—</span>}
+                            </span>
+                          )}
                         </td>
                         <td className="p-3">
                           <div className="flex flex-col items-center gap-1">
