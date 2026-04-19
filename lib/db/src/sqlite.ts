@@ -242,6 +242,7 @@ function getDb(): DatabaseSync {
   addDsIfMissing("IncomeApproachPercentage", "REAL");
   addDsIfMissing("CostApproachPercentage",   "REAL");
   addDsIfMissing("ReportCode",               "TEXT");
+  addDsIfMissing("ValuersInput",             "TEXT");
 
   console.log(`[DB] SQLite: ${DB_PATH}`);
   return _db;
@@ -523,6 +524,7 @@ export interface DataSystemRecord {
   secondValuerPercentage: number | null;
   secondValuerLicenseNumber: string | null;
   secondValuerMembershipNumber: string | null;
+  valuersInput: string | null;
   taqeemReportNumber: string | null;
   clientName: string | null;
   clientEmail: string | null;
@@ -599,6 +601,7 @@ function rowToDataSystem(row: any): DataSystemRecord {
     secondValuerPercentage: num(row.SecondValuerPercentage),
     secondValuerLicenseNumber: str(row.SecondValuerLicenseNumber),
     secondValuerMembershipNumber: str(row.SecondValuerMembershipNumber),
+    valuersInput: str(row.ValuersInput),
     taqeemReportNumber: str(row.TaqeemReportNumber),
     clientName: str(row.ClientName),
     clientEmail: str(row.ClientEmail),
@@ -668,7 +671,7 @@ export async function sqliteInsertDataSystem(data: Omit<DataSystemRecord, "id" |
       ReportCode, FilePath, ReportNumber, ReportDate, ValuationDate, InspectionDate, CommissionDate,
       RequestNumber, ValuerName, ValuerPercentage, LicenseNumber, LicenseDate,
       MembershipNumber, MembershipType, SecondValuerName, SecondValuerPercentage,
-      SecondValuerLicenseNumber, SecondValuerMembershipNumber, TaqeemReportNumber,
+      SecondValuerLicenseNumber, SecondValuerMembershipNumber, ValuersInput, TaqeemReportNumber,
       ClientName, ClientEmail, ClientPhone, IntendedUser, ReportType, ValuationPurpose,
       ValuationHypothesis, ValuationBasis, PropertyType, PropertySubType, Region, City,
       District, Street, BlockNumber, PlotNumber, PlanNumber, PropertyUse, DeedNumber,
@@ -680,7 +683,7 @@ export async function sqliteInsertDataSystem(data: Omit<DataSystemRecord, "id" |
       FinalValue, PricePerMeter,
       CompanyName, CommercialRegNumber, Notes, LinkedReportId, CreatedAt
     ) VALUES (
-      ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+      ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
     )
   `).run(
     data.reportCode ?? null,
@@ -691,6 +694,7 @@ export async function sqliteInsertDataSystem(data: Omit<DataSystemRecord, "id" |
     data.membershipNumber ?? null, data.membershipType ?? null,
     data.secondValuerName ?? null, data.secondValuerPercentage ?? null,
     data.secondValuerLicenseNumber ?? null, data.secondValuerMembershipNumber ?? null,
+    data.valuersInput ?? null,
     data.taqeemReportNumber ?? null,
     data.clientName ?? null, data.clientEmail ?? null, data.clientPhone ?? null,
     data.intendedUser ?? null, data.reportType ?? null, data.valuationPurpose ?? null,

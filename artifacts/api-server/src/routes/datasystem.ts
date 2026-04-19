@@ -247,6 +247,7 @@ function extractFields(body: Record<string, any>, filePath: string) {
     secondValuerPercentage:     n(body.secondValuerPercentage),
     secondValuerLicenseNumber:  s(body.secondValuerLicenseNumber),
     secondValuerMembershipNumber: s(body.secondValuerMembershipNumber),
+    valuersInput:               s(body.valuersInput),
     taqeemReportNumber:         s(body.taqeemReportNumber),
     clientName:                 s(body.clientName),
     clientEmail:                s(body.clientEmail),
