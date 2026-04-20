@@ -68,10 +68,11 @@ function getDb(): DatabaseSync {
       DeedDate                  TEXT,
       OwnerName                 TEXT,
       OwnershipType             TEXT,
-      BuildingPermitNumber      TEXT,
-      BuildingStatus            TEXT,
-      BuildingAge               TEXT,
-      BuildingType              TEXT,
+      BuildingPermitNumber            TEXT,
+      BuildingStatus                  TEXT,
+      BuildingAge                     TEXT,
+      BuildingCompletionPercentage    TEXT,
+      BuildingType                    TEXT,
       FinishingStatus           TEXT,
       FurnitureStatus           TEXT,
       AirConditioningType       TEXT,
@@ -185,10 +186,11 @@ function getDb(): DatabaseSync {
       DeedDate                  TEXT,
       OwnerName                 TEXT,
       OwnershipType             TEXT,
-      BuildingPermitNumber      TEXT,
-      BuildingStatus            TEXT,
-      BuildingAge               TEXT,
-      BuildingType              TEXT,
+      BuildingPermitNumber            TEXT,
+      BuildingStatus                  TEXT,
+      BuildingAge                     TEXT,
+      BuildingCompletionPercentage    TEXT,
+      BuildingType                    TEXT,
       FinishingStatus           TEXT,
       FurnitureStatus           TEXT,
       AirConditioningType       TEXT,
@@ -229,6 +231,10 @@ function getDb(): DatabaseSync {
     _db!.exec("ALTER TABLE Reports ADD COLUMN FilePath TEXT");
     console.log("[DB] Migration: added column FilePath to Reports");
   }
+  if (!repCols.includes("BuildingCompletionPercentage")) {
+    _db!.exec("ALTER TABLE Reports ADD COLUMN BuildingCompletionPercentage TEXT");
+    console.log("[DB] Migration: added column BuildingCompletionPercentage to Reports");
+  }
 
   // ─── Migrations: datasystem ────────────────────────────────────────────────
   const dsCols: string[] = (_db.prepare("PRAGMA table_info(datasystem)").all() as any[]).map((c: any) => c.name);
@@ -241,8 +247,9 @@ function getDb(): DatabaseSync {
   addDsIfMissing("MarketApproachPercentage", "REAL");
   addDsIfMissing("IncomeApproachPercentage", "REAL");
   addDsIfMissing("CostApproachPercentage",   "REAL");
-  addDsIfMissing("ReportCode",               "TEXT");
-  addDsIfMissing("ValuersInput",             "TEXT");
+  addDsIfMissing("ReportCode",                    "TEXT");
+  addDsIfMissing("ValuersInput",                  "TEXT");
+  addDsIfMissing("BuildingCompletionPercentage",  "TEXT");
 
   console.log(`[DB] SQLite: ${DB_PATH}`);
   return _db;
@@ -298,6 +305,7 @@ function rowToReport(row: any): Report {
     buildingPermitNumber: str(row.BuildingPermitNumber),
     buildingStatus: str(row.BuildingStatus),
     buildingAge: str(row.BuildingAge),
+    buildingCompletionPercentage: str(row.BuildingCompletionPercentage),
     buildingType: str(row.BuildingType),
     finishingStatus: str(row.FinishingStatus),
     furnitureStatus: str(row.FurnitureStatus),
@@ -384,7 +392,7 @@ export async function sqliteInsertReport(data: InsertReport): Promise<Report> {
       ReportType, ValuationPurpose, ValuationHypothesis, ValuationBasis, PropertyType, PropertySubType,
       Region, City, District, Street, BlockNumber, PlotNumber, PlanNumber,
       PropertyUse, DeedNumber, DeedDate, OwnerName, OwnershipType,
-      BuildingPermitNumber, BuildingStatus, BuildingAge, LandArea, BuildingArea,
+      BuildingPermitNumber, BuildingStatus, BuildingAge, BuildingCompletionPercentage, LandArea, BuildingArea,
       BasementArea, AnnexArea, FloorsCount, PermittedFloorsCount,
       PermittedBuildingRatio, StreetWidth, StreetFacades, FacadesCount, Utilities, Coordinates,
       Latitude, Longitude,
@@ -415,6 +423,7 @@ export async function sqliteInsertReport(data: InsertReport): Promise<Report> {
     data.propertyUse ?? null, data.deedNumber ?? null, data.deedDate ?? null,
     data.ownerName ?? null, data.ownershipType ?? null,
     data.buildingPermitNumber ?? null, data.buildingStatus ?? null, data.buildingAge ?? null,
+    data.buildingCompletionPercentage ?? null,
     data.landArea ?? null, data.buildingArea ?? null,
     data.basementArea ?? null, data.annexArea ?? null,
     data.floorsCount ?? null, data.permittedFloorsCount ?? null,
@@ -461,7 +470,8 @@ export async function sqliteUpdateReport(id: number, data: Partial<InsertReport>
     propertyUse: "PropertyUse", deedNumber: "DeedNumber", deedDate: "DeedDate",
     ownerName: "OwnerName", ownershipType: "OwnershipType",
     buildingPermitNumber: "BuildingPermitNumber", buildingStatus: "BuildingStatus",
-    buildingAge: "BuildingAge", buildingType: "BuildingType",
+    buildingAge: "BuildingAge", buildingCompletionPercentage: "BuildingCompletionPercentage",
+    buildingType: "BuildingType",
     finishingStatus: "FinishingStatus", furnitureStatus: "FurnitureStatus",
     airConditioningType: "AirConditioningType", isLandRented: "IsLandRented",
     additionalFeatures: "AdditionalFeatures", isBestUse: "IsBestUse",
@@ -551,6 +561,7 @@ export interface DataSystemRecord {
   buildingPermitNumber: string | null;
   buildingStatus: string | null;
   buildingAge: string | null;
+  buildingCompletionPercentage: string | null;
   landArea: number | null;
   buildingArea: number | null;
   basementArea: number | null;
@@ -628,6 +639,7 @@ function rowToDataSystem(row: any): DataSystemRecord {
     buildingPermitNumber: str(row.BuildingPermitNumber),
     buildingStatus: str(row.BuildingStatus),
     buildingAge: str(row.BuildingAge),
+    buildingCompletionPercentage: str(row.BuildingCompletionPercentage),
     buildingType: str(row.BuildingType),
     finishingStatus: str(row.FinishingStatus),
     furnitureStatus: str(row.FurnitureStatus),
@@ -676,6 +688,7 @@ export async function sqliteInsertDataSystem(data: Omit<DataSystemRecord, "id" |
       ValuationHypothesis, ValuationBasis, PropertyType, PropertySubType, Region, City,
       District, Street, BlockNumber, PlotNumber, PlanNumber, PropertyUse, DeedNumber,
       DeedDate, OwnerName, OwnershipType, BuildingPermitNumber, BuildingStatus, BuildingAge,
+      BuildingCompletionPercentage,
       LandArea, BuildingArea, BasementArea, AnnexArea, FloorsCount, PermittedFloorsCount,
       PermittedBuildingRatio, StreetWidth, StreetFacades, Utilities, Coordinates,
       ValuationMethod, MarketValue, IncomeValue, CostValue,
@@ -683,7 +696,7 @@ export async function sqliteInsertDataSystem(data: Omit<DataSystemRecord, "id" |
       FinalValue, PricePerMeter,
       CompanyName, CommercialRegNumber, Notes, LinkedReportId, CreatedAt
     ) VALUES (
-      ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+      ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
     )
   `).run(
     data.reportCode ?? null,
@@ -705,6 +718,7 @@ export async function sqliteInsertDataSystem(data: Omit<DataSystemRecord, "id" |
     data.propertyUse ?? null, data.deedNumber ?? null, data.deedDate ?? null,
     data.ownerName ?? null, data.ownershipType ?? null,
     data.buildingPermitNumber ?? null, data.buildingStatus ?? null, data.buildingAge ?? null,
+    data.buildingCompletionPercentage ?? null,
     data.landArea ?? null, data.buildingArea ?? null,
     data.basementArea ?? null, data.annexArea ?? null,
     data.floorsCount ?? null, data.permittedFloorsCount ?? null,

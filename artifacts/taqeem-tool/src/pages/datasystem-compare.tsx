@@ -83,6 +83,7 @@ const FIELD_GROUPS = [
       { key: "buildingPermitNumber", label: "رقم رخصة البناء" },
       { key: "buildingStatus", label: "حالة البناء" },
       { key: "buildingAge", label: "عمر البناء" },
+      { key: "buildingCompletionPercentage", label: "نسبة اكتمال البناء %" },
       { key: "buildingType", label: "نوع المبنى" },
       { key: "finishingStatus", label: "حالة التشطيب" },
       { key: "furnitureStatus", label: "حالة التأثيث" },
