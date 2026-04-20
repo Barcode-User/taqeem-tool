@@ -1405,19 +1405,22 @@ async function fillFormPage(
 
   if (report.valuersInput?.trim()) {
     const raw = (report.valuersInput as string).trim();
-    for (const part of raw.split(",")) {
-      const p = part.trim();
-      if (!p) continue;
+    // يدعم الصيغتين:
+    //   فاصلة:    "1220000122-90.12,10000001-10"
+    //   سطر جديد: "1220000122 -90.12\n10000001 -10."
+    const parts = raw.split(/[\n,]+/).map((p: string) => p.trim()).filter(Boolean);
+    for (const p of parts) {
+      // ابحث عن آخر "-" (قد يسبقه مسافة مثل "123456 -70")
       const lastDash = p.lastIndexOf("-");
       if (lastDash === -1) {
-        valuers.push({ membership: p, pct: null });
+        valuers.push({ membership: p.trim(), pct: null });
       } else {
         const membership = p.substring(0, lastDash).trim();
         const pct = parseFloat(p.substring(lastDash + 1).trim());
         valuers.push({ membership, pct: isNaN(pct) ? null : pct });
       }
     }
-    addLog(session, `📋 valuersInput → ${valuers.length} مقيم: ${valuers.map(v => v.membership).join(", ")}`);
+    addLog(session, `📋 valuersInput → ${valuers.length} مقيم: ${valuers.map((v: ValuerEntry) => `${v.membership}(${v.pct ?? "?"}%)`).join(", ")}`);
   } else {
     // المقيم الأول
     if (report.membershipNumber || report.valuerName) {
