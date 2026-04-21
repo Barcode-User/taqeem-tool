@@ -444,13 +444,18 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     await page.waitForTimeout(800);
     await screenshot(page, `p3_after_${reportId}`);
 
-    // ── ضغط زر "حفظ واستمرار" أولاً ثم "continue" كاحتياط ───────────────
+    // ── ضغط زر "حفظ وإغلاق" (الصفحة 3 تستخدم هذا الزر لا "حفظ واستمرار") ──
     const urlBeforeSaveP3 = page.url();
-    await clickSaveAndContinue(session);
+    await clickSaveAndClose(session);
     await page.waitForTimeout(1000);
-    // إذا لم يتغير URL → جرب clickContinueButton أيضاً
+    // إذا لم يتغير URL → جرب "حفظ واستمرار" ثم "continue" كاحتياط
     if (page.url() === urlBeforeSaveP3) {
-      addLog(session, "ℹ️ URL لم يتغير بعد حفظ واستمرار — أجرب زر المتابعة");
+      addLog(session, "ℹ️ URL لم يتغير بعد حفظ وإغلاق — أجرب حفظ واستمرار");
+      await clickSaveAndContinue(session);
+      await page.waitForTimeout(800);
+    }
+    if (page.url() === urlBeforeSaveP3) {
+      addLog(session, "ℹ️ URL لم يتغير — أجرب زر المتابعة");
       await clickContinueButton(session);
     }
     await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
@@ -1109,6 +1114,56 @@ async function clickSaveAndContinue(session: AutomationSession): Promise<void> {
   } catch { /* تجاهل */ }
 
   addLog(session, "⚠️ لم يُعثر على زر «حفظ واستمرار»");
+}
+
+// ── زر "حفظ وإغلاق" (الصفحة 3) ──────────────────────────────────────────────
+async function clickSaveAndClose(session: AutomationSession): Promise<void> {
+  const { page } = session;
+  addLog(session, "🖱️ ضغط «حفظ وإغلاق»...");
+
+  // محاولة 1: بحث بالنص المحدد
+  const textPatterns = ["حفظ وإغلاق", "حفظ و إغلاق", "Save & Close", "Save and Close", "حفظ وخروج"];
+  for (const txt of textPatterns) {
+    try {
+      const loc = page.locator(`button:has-text("${txt}"), input[value*="${txt}"]`).first();
+      if (await loc.count().catch(() => 0) > 0) {
+        await loc.scrollIntoViewIfNeeded().catch(() => {});
+        await loc.click({ force: true, timeout: 4000 });
+        await page.waitForTimeout(500);
+        addLog(session, `✅ تم الضغط: "${txt}"`);
+        return;
+      }
+    } catch { /* تابع */ }
+  }
+
+  // محاولة 2: evaluate — إزالة disabled وإجبار النقر
+  try {
+    const result = await page.evaluate(() => {
+      const keywords = ["إغلاق", "close", "وإغلاق"];
+      const btns = Array.from(document.querySelectorAll<HTMLButtonElement | HTMLInputElement>(
+        "button, input[type='submit'], input[type='button']"
+      ));
+      const target = btns.find(b => {
+        const t = (b.textContent ?? (b as HTMLInputElement).value ?? "").trim();
+        return keywords.some(k => t.includes(k));
+      });
+      if (!target) return null;
+      target.removeAttribute("disabled");
+      (target as HTMLButtonElement).disabled = false;
+      const mat = target.closest("[mat-button],[mat-raised-button],[mat-flat-button]");
+      if (mat) (mat as HTMLElement).removeAttribute("disabled");
+      target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      target.click();
+      return target.textContent?.trim().slice(0, 30) ?? (target as HTMLInputElement).value ?? "?";
+    });
+    if (result) {
+      await page.waitForTimeout(500);
+      addLog(session, `✅ تم الضغط (إجبار): "${result}"`);
+      return;
+    }
+  } catch { /* تابع */ }
+
+  addLog(session, "⚠️ لم يُعثر على زر «حفظ وإغلاق» — سيُجرب «حفظ واستمرار» كبديل");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3017,164 +3072,308 @@ async function fillPage3(session: AutomationSession, report: any, els: any[], pd
   if (floorsEl) await fillAngular(session, buildSelector(floorsEl), report.permittedFloorsCount ?? report.floorsCount, "عدد الأدوار");
 
   // ── حالة البناء ───────────────────────────────────────────────────────────
-  const buildStatusEl = findEl(selects,
-    /building.?status|buildingstatus|construction.?status|حالة.*بناء|حالة.*إنشاء/i,
-  );
-  if (buildStatusEl) await selectAngular(session, buildSelector(buildStatusEl), report.buildingStatus, "حالة البناء", buildStatusEl.isMat);
-  else addLog(session, `⚠️ لم يُعثر على حقل «حالة البناء»`);
+  await selectDropdownByPageLabel(session, /حالة.*بناء|building.?status/i, report.buildingStatus, "حالة البناء");
 
   // ── نوع العقار الفرعي ────────────────────────────────────────────────────
-  const subTypeEl = findEl(selects,
-    /sub.?type|subtype|property.?subtype|asset.?sub|نوع.*فرعي|نوع.*صبي|فرعي/i,
-  );
-  if (subTypeEl) await selectAngular(session, buildSelector(subTypeEl), report.propertySubType, "نوع العقار الفرعي", subTypeEl.isMat);
+  {
+    const subTypeEl = findEl(selects, /sub.?type|subtype|property.?subtype|asset.?sub|نوع.*فرعي|فرعي/i);
+    if (subTypeEl) await selectAngular(session, buildSelector(subTypeEl), report.propertySubType, "نوع العقار الفرعي", subTypeEl.isMat);
+  }
 
-  // ── عمر الأصل ─────────────────────────────────────────────────────────────
-  const ageEl = findEl(inputs,
-    /^age$|building.?age|buildingage|construction.?year|عمر.*أصل|عمر.*مبنى|سنة.*بناء/i,
-  );
-  if (ageEl) await fillAngular(session, buildSelector(ageEl), report.buildingAge, "عمر الأصل");
+  // ── عمر الأصل محل التقييم ─────────────────────────────────────────────────
+  await fillInputByPageLabel(session, /عمر.*أصل|عمر.*مبنى|building.?age|^age$/i, report.buildingAge, "عمر الأصل");
 
   // ── عرض الشارع ───────────────────────────────────────────────────────────
-  const swEl = findEl(inputs,
-    /street.?width|streetwidth|road.?width|عرض.*شارع|عرض.*طريق/i,
-  );
-  if (swEl) await fillAngular(session, buildSelector(swEl), report.streetWidth, "عرض الشارع");
+  await fillInputByPageLabel(session, /عرض.*شارع|عرض.*طريق|street.?width/i, report.streetWidth, "عرض الشارع");
 
   // ── عدد الواجهات ─────────────────────────────────────────────────────────
-  // محسوب تلقائياً من جدول الحدود والأطوال (عدد الحدود التي وصفها "شارع")
   if (report.facadesCount != null) {
-    const facCntEl = findEl(inputs,
-      /facades?.?count|facadescount|frontages?.?count|number.?of.?facades|عدد.*واجهات|واجهات.*عدد/i,
-    ) ?? findEl(selects,
-      /facades?.?count|facadescount|frontages?.?count|number.?of.?facades|عدد.*واجهات|واجهات.*عدد/i,
-    );
+    const facCntEl = findEl(inputs, /عدد.*واجهات|facades?.?count/i) ?? findEl(selects, /عدد.*واجهات|facades?.?count/i);
     if (facCntEl) {
-      if (facCntEl.tag === "MAT-SELECT" || facCntEl.tag === "SELECT" || facCntEl.isMat) {
+      if (facCntEl.tag === "MAT-SELECT" || facCntEl.tag === "SELECT" || facCntEl.isMat)
         await selectAngular(session, buildSelector(facCntEl), String(report.facadesCount), "عدد الواجهات", facCntEl.isMat);
-      } else {
-        await fillAngular(session, buildSelector(facCntEl), report.facadesCount, "عدد الواجهات");
-      }
-    } else addLog(session, `ℹ️ لم يُعثر على حقل «عدد الواجهات» (facadesCount=${report.facadesCount})`);
+      else await fillAngular(session, buildSelector(facCntEl), report.facadesCount, "عدد الواجهات");
+    }
   }
 
   // ── نوع المبنى ────────────────────────────────────────────────────────────
-  if (report.buildingType) {
-    const bldTypeEl = findEl(selects,
-      /building.?type|buildingtype|asset.?type|property.?type|نوع.*مبنى|نوع.*أصل|نوع.*عقار/i,
-    );
-    if (bldTypeEl) await selectAngular(session, buildSelector(bldTypeEl), report.buildingType, "نوع المبنى", bldTypeEl.isMat);
-    else addLog(session, `ℹ️ لم يُعثر على حقل «نوع المبنى»`);
-  }
+  await selectDropdownByPageLabel(session, /نوع.*مبنى|building.?type/i, report.buildingType, "نوع المبنى");
 
   // ── حالة التشطيب ─────────────────────────────────────────────────────────
-  if (report.finishingStatus) {
-    const finEl = findEl(selects,
-      /finishing.?status|finish.?status|finishingstatus|حالة.*تشطيب|تشطيب/i,
-    );
-    if (finEl) await selectAngular(session, buildSelector(finEl), report.finishingStatus, "حالة التشطيب", finEl.isMat);
-    else addLog(session, `ℹ️ لم يُعثر على حقل «حالة التشطيب»`);
-  }
+  await selectDropdownByPageLabel(session, /حالة.*تشطيب|تشطيب|finishing.?status/i, report.finishingStatus, "حالة التشطيب");
 
   // ── حالة التأثيث ─────────────────────────────────────────────────────────
-  if (report.furnitureStatus) {
-    const furEl = findEl(selects,
-      /furniture.?status|furnishing|furnished|حالة.*تأثيث|تأثيث|مؤثث/i,
-    );
-    if (furEl) await selectAngular(session, buildSelector(furEl), report.furnitureStatus, "حالة التأثيث", furEl.isMat);
-    else addLog(session, `ℹ️ لم يُعثر على حقل «حالة التأثيث»`);
-  }
+  await selectDropdownByPageLabel(session, /حالة.*تأثيث|تأثيث|furniture.?status/i, report.furnitureStatus, "حالة التأثيث");
 
   // ── نوع التكييف ───────────────────────────────────────────────────────────
-  if (report.airConditioningType) {
-    const acEl = findEl(selects,
-      /air.?condition|aircondition|cooling|تكييف|تبريد/i,
-    );
-    if (acEl) await selectAngular(session, buildSelector(acEl), report.airConditioningType, "التكييف", acEl.isMat);
-    else addLog(session, `ℹ️ لم يُعثر على حقل «التكييف»`);
-  }
+  await selectDropdownByPageLabel(session, /التكييف|تكييف|air.?condition/i, report.airConditioningType, "التكييف");
 
-  // ── الأرض مستأجرة ────────────────────────────────────────────────────────
-  if (report.isLandRented) {
-    const rentedYes = report.isLandRented.trim() === "نعم";
-    try {
-      const rentedRadios = await page.$$('input[type="radio"]');
-      for (const radio of rentedRadios) {
-        const val = await radio.getAttribute("value");
-        const lbl = await radio.evaluate((el: Element) => {
-          const label = el.closest("label") || document.querySelector(`label[for="${(el as HTMLInputElement).id}"]`);
-          return label ? label.textContent?.trim() : "";
-        });
-        const isLandLabel = /land.?rent|أرض.*مستأجر|مستأجر.*أرض/i.test(lbl || "");
-        if (isLandLabel) {
-          if ((rentedYes && (val === "true" || val === "1")) || (!rentedYes && (val === "false" || val === "0"))) {
-            await radio.check();
-            addLog(session, `✅ الأرض مستأجرة: ${report.isLandRented}`);
-            break;
-          }
-        }
-      }
-    } catch {
-      addLog(session, `⚠️ فشل تحديد حقل «الأرض مستأجرة»`);
-    }
-  }
+  // ── الأرض تحت المبنى مستأجرة ────────────────────────────────────────────
+  await clickRadioByGroupLabel(session, /مستأجرة|land.?rent/i, report.isLandRented ?? "لا", "الأرض مستأجرة");
 
   // ── الميزات الإضافية ─────────────────────────────────────────────────────
   if (report.additionalFeatures) {
-    const features = report.additionalFeatures.split(/،|,/).map((f: string) => f.trim()).filter(Boolean);
+    const features = String(report.additionalFeatures).split(/،|,/).map((f: string) => f.trim()).filter(Boolean);
     for (const feat of features) {
-      try {
-        const checkboxes = await page.$$('input[type="checkbox"]');
-        for (const cb of checkboxes) {
-          const lbl = await cb.evaluate((el: Element) => {
-            const label = el.closest("label") || document.querySelector(`label[for="${(el as HTMLInputElement).id}"]`);
-            return label ? label.textContent?.trim() : (el as HTMLInputElement).value || "";
-          });
-          if (lbl && lbl.includes(feat)) {
-            const isChecked = await cb.isChecked();
-            if (!isChecked) await cb.check();
-            addLog(session, `✅ ميزة إضافية: ${feat}`);
-            break;
+      const clicked = await page.evaluate((keyword: string) => {
+        const all = Array.from(document.querySelectorAll<HTMLInputElement>("input[type='checkbox']"));
+        for (const cb of all) {
+          const lbl =
+            cb.labels?.[0]?.textContent?.trim() ??
+            cb.closest("label")?.textContent?.trim() ??
+            cb.nextElementSibling?.textContent?.trim() ??
+            cb.parentElement?.textContent?.trim() ?? "";
+          if (lbl.includes(keyword)) {
+            if (!cb.checked) { cb.click(); cb.dispatchEvent(new MouseEvent("change", { bubbles: true })); }
+            return lbl;
           }
         }
-      } catch {
-        addLog(session, `⚠️ فشل تفعيل ميزة: ${feat}`);
-      }
+        return null;
+      }, feat).catch(() => null);
+      addLog(session, clicked ? `✅ ميزة إضافية: ${feat} ("${clicked}")` : `ℹ️ ميزة "${feat}" غير موجودة`);
     }
   }
 
-  // ── أفضل استخدام ──────────────────────────────────────────────────────────
-  const isBestUse = !report.isBestUse || report.isBestUse.trim() === "نعم";
-  try {
-    const allRadios = await page.$$('input[type="radio"]');
-    for (const radio of allRadios) {
-      const val = await radio.getAttribute("value");
-      const lbl = await radio.evaluate((el: Element) => {
-        const label = el.closest("label") || document.querySelector(`label[for="${(el as HTMLInputElement).id}"]`);
-        return label ? label.textContent?.trim() : "";
-      });
-      const isBestUseField = /best.?use|أفضل.*استخدام|استخدام.*أفضل/i.test(lbl || "");
-      if (isBestUseField) {
-        if ((isBestUse && (val === "true" || val === "1")) || (!isBestUse && (val === "false" || val === "0"))) {
-          await radio.check();
-          addLog(session, `✅ أفضل استخدام: ${isBestUse ? "نعم" : "لا"}`);
-          break;
-        }
-      }
-    }
-    if (!allRadios.length) {
-      const bestUseYes = await page.$('input[type="radio"][value="true"], input[type="radio"][value="1"]');
-      if (bestUseYes) {
-        await bestUseYes.check();
-        addLog(session, `✅ أفضل استخدام (fallback): نعم`);
-      }
-    }
-  } catch {
-    addLog(session, `⚠️ لم يُحدَّد خيار أفضل استخدام`);
-  }
+  // ── يعتبر الاستخدام الحالي أفضل استخدام (دائماً = نعم) ──────────────────
+  await clickRadioByGroupLabel(session, /أفضل.*استخدام|best.?use/i, "نعم", "أفضل استخدام");
 
   // محاولة رفع PDF في الصفحة 3 إن لم يرفع سابقاً
   await uploadPdf(session, report, pdfState);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// دوال مساعدة: بحث بـ label الصفحة للحقول التي لا يُعثر عليها بـ scanElements
+// ─────────────────────────────────────────────────────────────────────────────
+
+// اختيار قيمة في dropdown (mat-select أو native select) عبر label الصفحة
+async function selectDropdownByPageLabel(
+  session: AutomationSession,
+  labelRx: RegExp,
+  value: string | null | undefined,
+  fieldName: string,
+): Promise<void> {
+  if (!value) { addLog(session, `ℹ️ لا توجد قيمة لـ «${fieldName}» — تجاوز`); return; }
+  const { page } = session;
+
+  // ── محاولة 1: mat-select — ابحث عن العنصر الأقرب للـ label ──────────────
+  try {
+    const matSel = page.locator("mat-select").filter({ hasText: new RegExp("") });
+    // الطريقة الأفضل: ابحث عن mat-form-field تحتوي label بالنص المطلوب
+    const formField = page
+      .locator("mat-form-field, .form-group, .field-container, div")
+      .filter({ hasText: labelRx })
+      .first();
+    const ffCount = await formField.count().catch(() => 0);
+    if (ffCount > 0) {
+      const innerSel = formField.locator("mat-select, select").first();
+      const innerCount = await innerSel.count().catch(() => 0);
+      if (innerCount > 0) {
+        const selectorStr = await innerSel.evaluate(el => {
+          if (el.id) return `#${el.id}`;
+          const name = el.getAttribute("name");
+          if (name) return `[name="${name}"]`;
+          return el.tagName.toLowerCase();
+        }).catch(() => "");
+        if (selectorStr) {
+          const isMatSel = (await innerSel.evaluate(el => el.tagName.toLowerCase())) === "mat-select";
+          await selectAngular(session, selectorStr, value, fieldName, isMatSel);
+          return;
+        }
+      }
+    }
+  } catch { /* تابع */ }
+
+  // ── محاولة 2: evaluate — ابحث في DOM بنص الـ label ──────────────────────
+  const result = await page.evaluate((rxSrc: string, targetVal: string) => {
+    const rx = new RegExp(rxSrc, "i");
+    // ابحث عن أي عنصر يحتوي النص المطلوب
+    const allNodes = Array.from(document.querySelectorAll("label, span, div, td, th, p, legend, mat-label"));
+    for (const node of allNodes) {
+      const nodeText = node.textContent?.replace(/\s+/g, " ").trim() ?? "";
+      if (!rx.test(nodeText) || nodeText.length > 60) continue; // تجاهل النصوص الطويلة جداً
+      // ابحث عن select بالقرب من هذا العنصر
+      const container = node.closest("mat-form-field, .form-group, .field, tr, td")
+        ?? node.parentElement?.parentElement;
+      if (!container) continue;
+      const sel = container.querySelector<HTMLSelectElement>("select");
+      if (sel) {
+        // حاول المطابقة بالنص أو القيمة
+        for (const opt of Array.from(sel.options)) {
+          if (opt.text.trim() === targetVal || opt.value === targetVal) {
+            sel.value = opt.value;
+            sel.dispatchEvent(new Event("change", { bubbles: true }));
+            return `native-select: "${opt.text}"`;
+          }
+        }
+        // مطابقة جزئية
+        for (const opt of Array.from(sel.options)) {
+          if (opt.text.trim().includes(targetVal) || targetVal.includes(opt.text.trim())) {
+            sel.value = opt.value;
+            sel.dispatchEvent(new Event("change", { bubbles: true }));
+            return `native-select-partial: "${opt.text}"`;
+          }
+        }
+      }
+    }
+    return null;
+  }, labelRx.source, value).catch(() => null);
+
+  if (result) {
+    addLog(session, `✅ ${fieldName}: "${value}" (${result})`);
+  } else {
+    // ── محاولة 3: فتح mat-select بالضغط واختيار الخيار ────────────────────
+    try {
+      // ابحث عن جميع mat-select في الصفحة واطبع خياراتها للتشخيص
+      const allMatSels = page.locator("mat-select");
+      const cnt = await allMatSels.count().catch(() => 0);
+      for (let i = 0; i < cnt; i++) {
+        const ms = allMatSels.nth(i);
+        const parentText = await ms.evaluate(el =>
+          el.closest("mat-form-field, .form-group, div")?.textContent?.replace(/\s+/g, " ").trim().slice(0, 60) ?? ""
+        ).catch(() => "");
+        if (!labelRx.test(parentText)) continue;
+        // افتح الـ dropdown
+        await ms.click({ force: true });
+        await page.waitForTimeout(400);
+        // ابحث عن الخيار المطلوب
+        const opt = page.locator("mat-option").filter({ hasText: new RegExp(value, "i") }).first();
+        const optCnt = await opt.count().catch(() => 0);
+        if (optCnt > 0) {
+          await opt.click({ force: true });
+          addLog(session, `✅ ${fieldName}: "${value}" (mat-select click)`);
+          return;
+        }
+        // أغلق الـ dropdown
+        await page.keyboard.press("Escape").catch(() => {});
+        break;
+      }
+      addLog(session, `⚠️ لم يُعثر على حقل «${fieldName}» بالـ label (قيمة: "${value}")`);
+    } catch (e: any) {
+      addLog(session, `⚠️ «${fieldName}»: ${e.message.slice(0, 60)}`);
+    }
+  }
+}
+
+// ملء input عبر label الصفحة
+async function fillInputByPageLabel(
+  session: AutomationSession,
+  labelRx: RegExp,
+  value: string | number | null | undefined,
+  fieldName: string,
+): Promise<void> {
+  if (value == null || value === "") { addLog(session, `ℹ️ لا توجد قيمة لـ «${fieldName}»`); return; }
+  const { page } = session;
+  const strVal = String(value);
+
+  // محاولة 1: getByLabel
+  try {
+    const lbl = page.getByLabel(labelRx).first();
+    if (await lbl.count().catch(() => 0) > 0) {
+      await lbl.fill(strVal);
+      addLog(session, `✅ ${fieldName}: "${strVal}" (getByLabel)`);
+      return;
+    }
+  } catch { /* تابع */ }
+
+  // محاولة 2: evaluate DOM
+  const ok = await page.evaluate((rxSrc: string, val: string) => {
+    const rx = new RegExp(rxSrc, "i");
+    const labels = Array.from(document.querySelectorAll("label, span, div, td, mat-label"));
+    for (const lbl of labels) {
+      const txt = lbl.textContent?.replace(/\s+/g, " ").trim() ?? "";
+      if (!rx.test(txt) || txt.length > 60) continue;
+      const container = lbl.closest("mat-form-field, .form-group, div, td") ?? lbl.parentElement;
+      const inp = container?.querySelector<HTMLInputElement>("input:not([type='hidden']):not([type='radio']):not([type='checkbox'])");
+      if (inp) {
+        inp.value = val;
+        inp.dispatchEvent(new Event("input", { bubbles: true }));
+        inp.dispatchEvent(new Event("change", { bubbles: true }));
+        return true;
+      }
+    }
+    return false;
+  }, labelRx.source, strVal).catch(() => false);
+
+  addLog(session, ok ? `✅ ${fieldName}: "${strVal}" (DOM label)` : `⚠️ لم يُعثر على حقل «${fieldName}»`);
+}
+
+// تحديد radio button من خلال label مجموعة الراديو (وليس label الزر الفردي)
+async function clickRadioByGroupLabel(
+  session: AutomationSession,
+  groupLabelRx: RegExp,
+  value: string,   // "نعم" أو "لا"
+  fieldName: string,
+): Promise<void> {
+  const { page } = session;
+  const wantYes = value.trim() === "نعم";
+
+  const result = await page.evaluate((rxSrc: string, yes: boolean) => {
+    const rx = new RegExp(rxSrc, "i");
+
+    // ── أسلوب 1: ابحث عن عنصر يحتوي label المجموعة ثم ابحث عن radios بداخل container أبيه ──
+    const allTextEls = Array.from(document.querySelectorAll("label, span, div, td, p, mat-label, legend"));
+    for (const el of allTextEls) {
+      const txt = (el as HTMLElement).innerText?.replace(/\s+/g, " ").trim()
+        ?? el.textContent?.replace(/\s+/g, " ").trim() ?? "";
+      if (!rx.test(txt) || txt.length > 80) continue;
+
+      // ابحث عن container يحتوي أزرار الراديو
+      let container: Element | null = el;
+      for (let i = 0; i < 5; i++) {
+        const radios = container?.querySelectorAll<HTMLInputElement>("input[type='radio']");
+        if (radios && radios.length >= 2) {
+          // وجدنا مجموعة radio
+          for (const r of Array.from(radios)) {
+            const v = r.value?.toLowerCase();
+            const lbl = (r.labels?.[0]?.textContent ?? r.nextElementSibling?.textContent ?? r.parentElement?.textContent ?? "").trim();
+            const isYes = v === "true" || v === "1" || lbl.includes("نعم");
+            const isNo  = v === "false" || v === "0" || lbl.includes("لا");
+            if ((yes && isYes) || (!yes && isNo)) {
+              r.click();
+              r.dispatchEvent(new MouseEvent("change", { bubbles: true }));
+              return `radio value="${r.value}" label="${lbl}"`;
+            }
+          }
+        }
+        // ابحث عن mat-radio-button
+        const matRadios = container?.querySelectorAll("mat-radio-button");
+        if (matRadios && matRadios.length >= 2) {
+          for (const mr of Array.from(matRadios)) {
+            const lbl = mr.textContent?.trim() ?? "";
+            const inp = mr.querySelector<HTMLInputElement>("input[type='radio']");
+            if ((yes && lbl.includes("نعم")) || (!yes && lbl.includes("لا"))) {
+              inp?.click();
+              mr.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+              return `mat-radio label="${lbl}"`;
+            }
+          }
+        }
+        container = container?.parentElement ?? null;
+      }
+    }
+
+    // ── أسلوب 2: ابحث عن جميع radio groups (mat-radio-group) ─────────────
+    const groups = Array.from(document.querySelectorAll("mat-radio-group"));
+    for (const grp of groups) {
+      const grpText = grp.closest("div, td, mat-form-field")?.textContent?.replace(/\s+/g, " ").trim() ?? "";
+      if (!rx.test(grpText)) continue;
+      const buttons = grp.querySelectorAll("mat-radio-button");
+      for (const btn of Array.from(buttons)) {
+        const lbl = btn.textContent?.trim() ?? "";
+        if ((yes && lbl.includes("نعم")) || (!yes && lbl.includes("لا"))) {
+          btn.querySelector<HTMLInputElement>("input")?.click();
+          return `mat-radio-group: "${lbl}"`;
+        }
+      }
+    }
+    return null;
+  }, groupLabelRx.source, wantYes).catch(() => null);
+
+  if (result) {
+    addLog(session, `✅ ${fieldName}: "${value}" (${result})`);
+  } else {
+    addLog(session, `⚠️ لم يُعثر على حقل «${fieldName}» في الصفحة`);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
