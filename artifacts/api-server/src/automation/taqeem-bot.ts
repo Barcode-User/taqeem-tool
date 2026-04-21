@@ -1912,14 +1912,30 @@ async function fillAssetPage(
       : selectNativeByName(session, countryEl.name || "", "المملكة العربية السعودية", "الدولة"));
   }
 
-  // ── المنطقة ───────────────────────────────────────────────────────────────
+  // ── المنطقة (مع retry) ────────────────────────────────────────────────────
   const regionEl = byName("region_id") ?? byLabel(/region|province|منطقة|محافظة/i);
-  if (regionEl) {
-    await (regionEl.isMat
-      ? selectAngular(session, buildSelector(regionEl), report.region, "المنطقة", true)
-      : selectNativeByName(session, regionEl.name || "", report.region, "المنطقة"));
-    await session.page.waitForTimeout(1000); // انتظر تحميل المدن
-  } else addLog(session, "⚠️ لم يُعثر على «المنطقة»");
+  if (regionEl && report.region) {
+    // جرب حتى 3 مرات — Angular قد يُعيد ضبط الـ dropdown بعد التحديث
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      await session.page.waitForTimeout(600 * attempt); // انتظار تصاعدي
+      await (regionEl.isMat
+        ? selectAngular(session, buildSelector(regionEl), report.region, "المنطقة", true)
+        : selectNativeByName(session, regionEl.name || "", report.region, "المنطقة"));
+      // تحقق من أن القيمة اختيرت فعلاً
+      const currentVal = await session.page.evaluate((sel: string) => {
+        const el = document.querySelector(sel) as HTMLSelectElement | null;
+        return el?.value ?? el?.textContent?.trim() ?? "";
+      }, buildSelector(regionEl)).catch(() => "");
+      if (currentVal && currentVal !== "" && currentVal !== "null") {
+        addLog(session, `✅ المنطقة محددة (محاولة ${attempt}): "${currentVal}"`);
+        break;
+      }
+      if (attempt < 3) addLog(session, `⏳ إعادة محاولة اختيار المنطقة (${attempt}/3)...`);
+    }
+    await session.page.waitForTimeout(1200); // انتظر تحميل المدن
+  } else if (!regionEl) {
+    addLog(session, "⚠️ لم يُعثر على «المنطقة»");
+  }
 
   // ── المدينة ───────────────────────────────────────────────────────────────
   const cityEl = byName("city_id") ?? byLabel(/city|مدينة/i);
@@ -2500,15 +2516,17 @@ async function fillAttributePage(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // تعبئة checkboxes "المرافق المتاحة" — تحقق مباشرة من النص المستخرج
-// إذا كان اسم checkbox يطابق أي كلمة في report.utilities → ضع check
-// كما تفحص DOM مباشرة لالتقاط mat-checkbox التي لم تُكتشف بـ scanElements
+// يدعم: mat-checkbox (Angular Material) + input[type=checkbox] عادي + label
 // ─────────────────────────────────────────────────────────────────────────────
 async function fillUtilitiesCheckboxes(
   session: AutomationSession,
   els: any[],
   report: any,
 ): Promise<void> {
-  if (!report.utilities) return;
+  if (!report.utilities) {
+    addLog(session, "ℹ️ لا يوجد مرافق في التقرير — تجاوز");
+    return;
+  }
 
   // ── تطبيع عربي: أإآ→ا، ة→ه، ى→ي، حذف التشكيل ─────────────────────────
   const normalizeAr = (s: string) =>
@@ -2520,32 +2538,65 @@ async function fillUtilitiesCheckboxes(
       .toLowerCase();
 
   const utilsNorm = normalizeAr(String(report.utilities));
-  addLog(session, `🔧 تعبئة المرافق — نص أصلي: "${report.utilities}" | مُطبَّع: "${utilsNorm}"`);
+  addLog(session, `🔧 المرافق — نص أصلي: "${String(report.utilities).slice(0, 120)}" | مُطبَّع: "${utilsNorm.slice(0, 120)}"`);
 
-  // ── مسح جميع mat-checkbox الموجودة في الصفحة مع نصها ─────────────────
-  // هذا المسح لأغراض التشخيص فقط — الاختيار يُنفَّذ لاحقاً بـ Playwright locator
-  const allCbs = await session.page.evaluate(() =>
-    Array.from(document.querySelectorAll("mat-checkbox"))
-      .map((el, i) => ({
-        idx: i,
+  // ── مسح جميع checkboxes في الصفحة (mat + عادي) للتشخيص ──────────────────
+  const allCbsInfo = await session.page.evaluate(() => {
+    const items: { selector: string; text: string; checked: boolean }[] = [];
+    // mat-checkbox
+    document.querySelectorAll("mat-checkbox").forEach((el, i) => {
+      items.push({
+        selector: `mat-checkbox:nth-of-type(${i + 1})`,
         text: el.textContent?.replace(/\s+/g, " ").trim() ?? "",
         checked: (el.querySelector("input[type='checkbox']") as HTMLInputElement)?.checked ?? false,
-      }))
-  ).catch(() => [] as { idx: number; text: string; checked: boolean }[]);
+      });
+    });
+    // plain checkboxes with labels
+    document.querySelectorAll("input[type='checkbox']").forEach((el, i) => {
+      const input = el as HTMLInputElement;
+      const lbl =
+        input.labels?.[0]?.textContent?.replace(/\s+/g, " ").trim() ??
+        input.closest("label")?.textContent?.replace(/\s+/g, " ").trim() ??
+        input.nextElementSibling?.textContent?.replace(/\s+/g, " ").trim() ??
+        input.previousElementSibling?.textContent?.replace(/\s+/g, " ").trim() ??
+        "";
+      if (lbl && !items.some(x => x.text === lbl)) {
+        items.push({ selector: `input[type='checkbox']:nth-of-type(${i + 1})`, text: lbl, checked: input.checked });
+      }
+    });
+    return items;
+  }).catch(() => [] as { selector: string; text: string; checked: boolean }[]);
 
-  addLog(session, `🔍 checkboxes في الصفحة: ${allCbs.map(c => `"${c.text}"(${c.checked ? "✓" : "○"})`).join(" | ")}`);
+  addLog(session, `🔍 checkboxes في الصفحة [${allCbsInfo.length}]: ${allCbsInfo.map(c => `"${c.text}"(${c.checked ? "✓" : "○"})`).join(" | ")}`);
 
   // ── خريطة المرافق: [كلمات مفتاحية من PDF] → [نص الـ checkbox في TAQEEM] ──
-  // الأسماء الكاملة في TAQEEM: "كهرباء حكومية" | "مياه شرب" | "صرف صحي" | "غاز طبيعي" | "طرق رئيسية"
+  // الأسماء في TAQEEM (من الصورة): كهرباء حكومية | مياه شرب | صرف صحي | غاز طبيعي | طرق رئيسية
   const utilMap: Array<{ keywords: RegExp; cbTextRx: RegExp; label: string }> = [
-    { keywords: /كهرباء|electricity|electric|power/i,        cbTextRx: /كهرباء/i,             label: "كهرباء حكومية" },
-    { keywords: /مياه|مياة|ماء|water|drinking/i,             cbTextRx: /مياه/i,               label: "مياه شرب"      },
-    { keywords: /صرف|sewage|sewer|drainage/i,                 cbTextRx: /صرف/i,                label: "صرف صحي"       },
-    { keywords: /غاز|gas/i,                                   cbTextRx: /غاز/i,                label: "غاز طبيعي"     },
-    { keywords: /طرق|رئيسي|road|street|access/i,              cbTextRx: /طرق/i,                label: "طرق رئيسية"    },
-    { keywords: /هاتف|اتصالات|telephone|telecom/i,            cbTextRx: /هاتف|اتصالات/i,      label: "اتصالات"       },
-    { keywords: /إنترنت|انترنت|internet/i,                    cbTextRx: /إنترنت|انترنت/i,     label: "إنترنت"        },
-    { keywords: /إضاءة|اضاءه|اضاءة|lighting/i,               cbTextRx: /إضاءة|اضاء/i,        label: "إضاءة"         },
+    {
+      keywords: /كهرباء|electricity|electric|power|إنارة|انارة|الإنارة|الانارة|إضاءة|اضاءة|lighting/i,
+      cbTextRx: /كهرباء/i,
+      label: "كهرباء حكومية",
+    },
+    {
+      keywords: /مياه|مياة|ماء|water|drinking/i,
+      cbTextRx: /مياه/i,
+      label: "مياه شرب",
+    },
+    {
+      keywords: /صرف\s*صحي|sewage|sewer/i,
+      cbTextRx: /صرف/i,
+      label: "صرف صحي",
+    },
+    {
+      keywords: /غاز|gas/i,
+      cbTextRx: /غاز/i,
+      label: "غاز طبيعي",
+    },
+    {
+      keywords: /طرق|رئيسي|road|street|access|سفلت|اسفلت|رصف|تعبيد|asphalt|pavement/i,
+      cbTextRx: /طرق/i,
+      label: "طرق رئيسية",
+    },
   ];
 
   for (const util of utilMap) {
@@ -2553,45 +2604,66 @@ async function fillUtilitiesCheckboxes(
     addLog(session, `  ↪ "${util.label}": ${shouldCheck ? "يجب تفعيله" : "لا حاجة"}`);
     if (!shouldCheck) continue;
 
-    // ── البحث عبر Playwright locator بالنص — الأكثر موثوقية مع Angular Material ──
-    // نجرب عدة صيغ للحصول على العنصر الصحيح
-    const matCbLocator = session.page
-      .locator("mat-checkbox")
-      .filter({ hasText: util.cbTextRx });
-
-    const count = await matCbLocator.count().catch(() => 0);
-
-    if (count > 0) {
+    // ── طريقة 1: mat-checkbox (Angular Material) ───────────────────────────
+    let done = false;
+    const matCbLocator = session.page.locator("mat-checkbox").filter({ hasText: util.cbTextRx });
+    const matCount = await matCbLocator.count().catch(() => 0);
+    if (matCount > 0) {
       try {
-        // انقر على input الداخلي — Playwright يتحقق تلقائياً من حالة checked
         const inputLoc = matCbLocator.first().locator("input[type='checkbox']");
         const isChecked = await inputLoc.isChecked().catch(() => false);
-        if (!isChecked) {
-          // نقرة على mat-checkbox نفسه (ليس input) لتفعيل Angular change detection
-          await matCbLocator.first().click({ force: true });
-          await session.page.waitForTimeout(150);
-        }
+        if (!isChecked) await matCbLocator.first().click({ force: true });
+        await session.page.waitForTimeout(200);
         const nowChecked = await inputLoc.isChecked().catch(() => false);
-        addLog(session, nowChecked
-          ? `✅ مرفق: ${util.label} — تم التفعيل`
-          : `⚠️ مرفق: ${util.label} — النقر لم يُفعّل الـ checkbox`);
-      } catch (e) {
-        addLog(session, `⚠️ مرفق: ${util.label} — استثناء: ${String(e).slice(0, 60)}`);
-      }
-      continue;
+        addLog(session, nowChecked ? `✅ مرفق (mat): ${util.label}` : `⚠️ mat click لم يُفعّل: ${util.label}`);
+        done = nowChecked;
+      } catch { /* تابع للطريقة التالية */ }
     }
+    if (done) continue;
 
-    // ── fallback: input[type=checkbox] بحث بـ aria-label أو name ────────────
-    const cbByIdx = allCbs.find(c => util.cbTextRx.test(c.text));
-    if (cbByIdx != null) {
-      try {
-        await session.page.locator("mat-checkbox").nth(cbByIdx.idx).click({ force: true });
-        addLog(session, `✅ مرفق (بـ index): ${util.label}`);
-      } catch {
-        addLog(session, `⚠️ مرفق: ${util.label} — فشل النقر بالفهرس`);
+    // ── طريقة 2: label عادي — البحث في DOM بالنص ───────────────────────────
+    const clicked = await session.page.evaluate((rx: string) => {
+      const pattern = new RegExp(rx, "i");
+      // بحث في كل العناصر التي تحتوي النص المطلوب
+      const containers = Array.from(document.querySelectorAll("label, span, div, td, li"));
+      for (const el of containers) {
+        const txt = el.textContent?.replace(/\s+/g, " ").trim() ?? "";
+        if (!pattern.test(txt)) continue;
+        // ابحث عن checkbox بداخله أو مجاوراً له
+        const cb =
+          el.querySelector<HTMLInputElement>("input[type='checkbox']") ??
+          (el.previousElementSibling as HTMLInputElement | null) ??
+          (el.nextElementSibling as HTMLInputElement | null);
+        if (cb && cb.type === "checkbox" && !cb.checked) {
+          cb.click();
+          cb.dispatchEvent(new MouseEvent("change", { bubbles: true }));
+          return `clicked: "${txt.slice(0, 40)}"`;
+        }
+        if (cb && cb.type === "checkbox") return `already_checked: "${txt.slice(0, 40)}"`;
       }
+      // بحث عكسي: من input → label
+      for (const inp of Array.from(document.querySelectorAll<HTMLInputElement>("input[type='checkbox']"))) {
+        const lbl =
+          inp.labels?.[0]?.textContent ??
+          inp.closest("label")?.textContent ??
+          inp.nextElementSibling?.textContent ??
+          "";
+        if (pattern.test(lbl.replace(/\s+/g, " ").trim())) {
+          if (!inp.checked) {
+            inp.click();
+            inp.dispatchEvent(new MouseEvent("change", { bubbles: true }));
+          }
+          return `clicked_reverse: "${lbl.trim().slice(0, 40)}"`;
+        }
+      }
+      return null;
+    }, util.cbTextRx.source).catch(() => null);
+
+    if (clicked) {
+      await session.page.waitForTimeout(200);
+      addLog(session, `✅ مرفق (DOM): ${util.label} — ${clicked}`);
     } else {
-      addLog(session, `ℹ️ مرفق "${util.label}" غير موجود في الصفحة`);
+      addLog(session, `ℹ️ مرفق "${util.label}" غير موجود في الصفحة (أو لا يوجد checkbox مطابق)`);
     }
   }
 }
@@ -2823,12 +2895,26 @@ async function fillPage2(session: AutomationSession, report: any, els: any[], pd
   );
   if (countryEl) await selectAngular(session, buildSelector(countryEl), "المملكة العربية السعودية", "الدولة", countryEl.isMat);
 
-  // ── المنطقة ───────────────────────────────────────────────────────────────
-  const regionEl = findEl(selects,
-    /region|province|regionid|emirate|منطقة|محافظة|إمارة/i,
-  );
-  if (regionEl) await selectAngular(session, buildSelector(regionEl), report.region, "المنطقة", regionEl.isMat);
-  else addLog(session, `⚠️ لم يُعثر على حقل «المنطقة»`);
+  // ── المنطقة (مع retry) ────────────────────────────────────────────────────
+  const regionEl = findEl(selects, /region|province|regionid|emirate|منطقة|محافظة|إمارة/i);
+  if (regionEl && report.region) {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      await session.page.waitForTimeout(600 * attempt);
+      await selectAngular(session, buildSelector(regionEl), report.region, "المنطقة", regionEl.isMat);
+      const val = await session.page.evaluate((sel: string) => {
+        const el = document.querySelector(sel) as HTMLSelectElement | null;
+        return el?.value ?? el?.textContent?.trim() ?? "";
+      }, buildSelector(regionEl)).catch(() => "");
+      if (val && val !== "" && val !== "null") {
+        addLog(session, `✅ المنطقة محددة (محاولة ${attempt}): "${val}"`);
+        break;
+      }
+      if (attempt < 3) addLog(session, `⏳ إعادة محاولة اختيار المنطقة (${attempt}/3)...`);
+    }
+    await session.page.waitForTimeout(1200);
+  } else if (!regionEl) {
+    addLog(session, `⚠️ لم يُعثر على حقل «المنطقة»`);
+  }
 
   // ── المدينة ───────────────────────────────────────────────────────────────
   const cityEl = findEl(selects, /city|cityid|مدينة|بلدية/) ??
