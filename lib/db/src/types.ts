@@ -49,6 +49,7 @@ export interface Report {
   buildingPermitNumber: string | null;
   buildingStatus: string | null;
   buildingAge: string | null;
+  buildingCompletionPercentage: string | null;
   buildingType: string | null;
   finishingStatus: string | null;
   furnitureStatus: string | null;

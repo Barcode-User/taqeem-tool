@@ -250,6 +250,13 @@ function getDb(): DatabaseSync {
   addDsIfMissing("ReportCode",                    "TEXT");
   addDsIfMissing("ValuersInput",                  "TEXT");
   addDsIfMissing("BuildingCompletionPercentage",  "TEXT");
+  addDsIfMissing("BuildingType",                  "TEXT");
+  addDsIfMissing("FinishingStatus",               "TEXT");
+  addDsIfMissing("FurnitureStatus",               "TEXT");
+  addDsIfMissing("AirConditioningType",           "TEXT");
+  addDsIfMissing("IsLandRented",                  "TEXT");
+  addDsIfMissing("AdditionalFeatures",            "TEXT");
+  addDsIfMissing("IsBestUse",                     "TEXT");
 
   console.log(`[DB] SQLite: ${DB_PATH}`);
   return _db;
@@ -562,6 +569,13 @@ export interface DataSystemRecord {
   buildingStatus: string | null;
   buildingAge: string | null;
   buildingCompletionPercentage: string | null;
+  buildingType: string | null;
+  finishingStatus: string | null;
+  furnitureStatus: string | null;
+  airConditioningType: string | null;
+  isLandRented: string | null;
+  additionalFeatures: string | null;
+  isBestUse: string | null;
   landArea: number | null;
   buildingArea: number | null;
   basementArea: number | null;
@@ -688,7 +702,8 @@ export async function sqliteInsertDataSystem(data: Omit<DataSystemRecord, "id" |
       ValuationHypothesis, ValuationBasis, PropertyType, PropertySubType, Region, City,
       District, Street, BlockNumber, PlotNumber, PlanNumber, PropertyUse, DeedNumber,
       DeedDate, OwnerName, OwnershipType, BuildingPermitNumber, BuildingStatus, BuildingAge,
-      BuildingCompletionPercentage,
+      BuildingCompletionPercentage, BuildingType, FinishingStatus, FurnitureStatus,
+      AirConditioningType, IsLandRented, AdditionalFeatures, IsBestUse,
       LandArea, BuildingArea, BasementArea, AnnexArea, FloorsCount, PermittedFloorsCount,
       PermittedBuildingRatio, StreetWidth, StreetFacades, Utilities, Coordinates,
       ValuationMethod, MarketValue, IncomeValue, CostValue,
@@ -696,7 +711,7 @@ export async function sqliteInsertDataSystem(data: Omit<DataSystemRecord, "id" |
       FinalValue, PricePerMeter,
       CompanyName, CommercialRegNumber, Notes, LinkedReportId, CreatedAt
     ) VALUES (
-      ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+      ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
     )
   `).run(
     data.reportCode ?? null,
@@ -719,6 +734,9 @@ export async function sqliteInsertDataSystem(data: Omit<DataSystemRecord, "id" |
     data.ownerName ?? null, data.ownershipType ?? null,
     data.buildingPermitNumber ?? null, data.buildingStatus ?? null, data.buildingAge ?? null,
     data.buildingCompletionPercentage ?? null,
+    data.buildingType ?? null, data.finishingStatus ?? null, data.furnitureStatus ?? null,
+    data.airConditioningType ?? null, data.isLandRented ?? null,
+    data.additionalFeatures ?? null, data.isBestUse ?? null,
     data.landArea ?? null, data.buildingArea ?? null,
     data.basementArea ?? null, data.annexArea ?? null,
     data.floorsCount ?? null, data.permittedFloorsCount ?? null,

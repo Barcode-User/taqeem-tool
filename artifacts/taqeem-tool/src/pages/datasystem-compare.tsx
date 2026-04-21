@@ -100,6 +100,7 @@ const FIELD_GROUPS = [
       { key: "permittedBuildingRatio", label: "نسبة البناء المصرح بها %", type: "number" },
       { key: "streetWidth", label: "عرض الشارع م", type: "number" },
       { key: "streetFacades", label: "الواجهات" },
+      { key: "facadesCount", label: "عدد الواجهات", type: "number" },
       { key: "utilities", label: "المرافق" },
     ],
   },
@@ -115,6 +116,13 @@ const FIELD_GROUPS = [
       { key: "costApproachPercentage",   label: "نسبة أسلوب التكلفة (%)",  type: "number" },
       { key: "finalValue",               label: "القيمة النهائية",    type: "number" },
       { key: "pricePerMeter", label: "سعر المتر", type: "number" },
+    ],
+  },
+  {
+    title: "معلومات أخرى",
+    fields: [
+      { key: "taqeemReportNumber", label: "رقم تقييم الحكومي" },
+      { key: "notes", label: "ملاحظات", type: "textarea" },
     ],
   },
 ];
