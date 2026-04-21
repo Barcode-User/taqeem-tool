@@ -147,7 +147,17 @@ function parseAIResponse(content: string): any {
     .replace(/^```(?:json)?\s*/i, "")
     .replace(/\s*```\s*$/, "")
     .trim();
-  return JSON.parse(cleaned);
+  console.log(`[AI-RESPONSE] أول 600 حرف من رد OpenAI:\n${cleaned.slice(0, 600)}`);
+  try {
+    const parsed = JSON.parse(cleaned);
+    const nonNull = Object.values(parsed).filter(v => v !== null && v !== "").length;
+    console.log(`[AI-RESPONSE] حقول غير فارغة: ${nonNull} من ${Object.keys(parsed).length}`);
+    return parsed;
+  } catch (e: any) {
+    console.error(`[AI-RESPONSE] ❌ فشل JSON.parse: ${e.message}`);
+    console.error(`[AI-RESPONSE] النص الكامل:\n${cleaned}`);
+    return {};
+  }
 }
 
 // ─── حساب نسبة تطابق الحقول ─────────────────────────────────────────────────
