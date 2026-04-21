@@ -400,55 +400,75 @@ router.post("/datasystem/upload", (req, res, next) => {
 
     // ── 2: استخراج نص PDF وإرساله لـ OpenAI ───────────────────────────────
     let extracted: Record<string, any> = {};
+    const _debug: Record<string, any> = { filePath, fileSizeBytes: 0, pdfMode: "", pdfTextLength: 0, aiRawResponse: "", aiError: null };
+
     try {
-      const pdfResult = await extractPdf(filePath);
-      if (pdfResult.mode === "text") {
-        console.log(`[datasystem] نص PDF: ${pdfResult.text.length} حرف — يُرسل أول 60,000 لـ OpenAI`);
+      // ── تحقق من أن الملف PDF حقيقي (magic bytes) ─────────────────────────
+      const fileStat = fs.statSync(filePath);
+      _debug.fileSizeBytes = fileStat.size;
+      const magic = fs.readFileSync(filePath).slice(0, 4).toString("ascii");
+      _debug.pdfMagic = magic;
+      if (magic !== "%PDF") {
+        _debug.aiError = `الملف ليس PDF صحيحاً — أول 4 bytes: "${magic}"`;
+        console.error("[datasystem]", _debug.aiError);
       } else {
-        console.log(`[datasystem] وضع الصور: ${pdfResult.images.length} صفحة`);
-      }
-      const model = getAIModel();
+        const pdfResult = await extractPdf(filePath);
+        _debug.pdfMode = pdfResult.mode;
+        if (pdfResult.mode === "text") {
+          _debug.pdfTextLength = pdfResult.text.length;
+          _debug.pdfTextPreview = pdfResult.text.slice(0, 200);
+          console.log(`[datasystem] نص PDF: ${pdfResult.text.length} حرف`);
+        } else {
+          _debug.pdfImagesCount = pdfResult.images.length;
+          console.log(`[datasystem] وضع الصور: ${pdfResult.images.length} صفحة`);
+        }
 
-      let aiResponse: string;
-      if (pdfResult.mode === "text") {
-        const completion = await openai.chat.completions.create({
-          model,
-          messages: [
-            { role: "system", content: SYSTEM_PROMPT },
-            {
-              role: "user",
-              content: `استخرج هذه الحقول من التقرير التالي:\n${FIELDS_SCHEMA}\n\nنص التقرير:\n${pdfResult.text.slice(0, 60000)}`,
-            },
-          ],
-          max_tokens: 4000,
-          temperature: 0,
-        });
-        aiResponse = completion.choices[0]?.message?.content ?? "{}";
-      } else {
-        const completion = await openai.chat.completions.create({
-          model,
-          messages: [
-            { role: "system", content: SYSTEM_PROMPT },
-            {
-              role: "user",
-              content: [
-                { type: "text", text: `استخرج هذه الحقول من الصور:\n${FIELDS_SCHEMA}` },
-                ...pdfResult.images.map((img) => ({
-                  type: "image_url" as const,
-                  image_url: { url: `data:image/jpeg;base64,${img}`, detail: "high" as const },
-                })),
-              ],
-            },
-          ],
-          max_tokens: 4000,
-          temperature: 0,
-        });
-        aiResponse = completion.choices[0]?.message?.content ?? "{}";
-      }
+        const model = getAIModel();
+        let aiResponse: string;
 
-      extracted = parseAIResponse(aiResponse);
+        if (pdfResult.mode === "text") {
+          const completion = await openai.chat.completions.create({
+            model,
+            messages: [
+              { role: "system", content: SYSTEM_PROMPT },
+              {
+                role: "user",
+                content: `استخرج هذه الحقول من التقرير التالي:\n${FIELDS_SCHEMA}\n\nنص التقرير:\n${pdfResult.text.slice(0, 60000)}`,
+              },
+            ],
+            max_tokens: 4000,
+            temperature: 0,
+          });
+          aiResponse = completion.choices[0]?.message?.content ?? "{}";
+        } else {
+          const completion = await openai.chat.completions.create({
+            model,
+            messages: [
+              { role: "system", content: SYSTEM_PROMPT },
+              {
+                role: "user",
+                content: [
+                  { type: "text", text: `استخرج هذه الحقول من الصور:\n${FIELDS_SCHEMA}` },
+                  ...pdfResult.images.map((img) => ({
+                    type: "image_url" as const,
+                    image_url: { url: `data:image/jpeg;base64,${img}`, detail: "high" as const },
+                  })),
+                ],
+              },
+            ],
+            max_tokens: 4000,
+            temperature: 0,
+          });
+          aiResponse = completion.choices[0]?.message?.content ?? "{}";
+        }
+
+        _debug.aiRawResponse = aiResponse.slice(0, 500);
+        extracted = parseAIResponse(aiResponse);
+        _debug.extractedFieldsCount = Object.values(extracted).filter(v => v !== null).length;
+      }
     } catch (aiErr: any) {
-      console.error("[datasystem] خطأ في OpenAI:", aiErr.message);
+      _debug.aiError = aiErr.message;
+      console.error("[datasystem] خطأ:", aiErr.message);
       extracted = {};
     }
 
@@ -483,6 +503,7 @@ router.post("/datasystem/upload", (req, res, next) => {
       report: reportRecord,
       comparison,
       averageScore: avgScore,
+      _debug,
     });
   } catch (err: any) {
     console.error("[datasystem] خطأ:", err);
