@@ -353,18 +353,35 @@ router.post("/datasystem/upload", (req, res, next) => {
 
     if (ct.includes("application/json")) {
       // ── وضع JSON: الملف في body.fileBytes (base64) ─────────────────────
-      // يقبل أي من: fileBytes أو File أو file أو pdfBytes
-      const rawBytes = body.fileBytes ?? body.File ?? body.file ?? body.pdfBytes;
+      const rawBytes =
+        body.fileBytes ?? body.FileBytes ??
+        body.File     ?? body.file      ??
+        body.pdfBytes ?? body.PdfBytes  ??
+        body.pdf      ?? body.Pdf;
       if (!rawBytes) {
         res.status(400).json({ error: "مطلوب حقل الملف: fileBytes أو File أو file (base64)" });
         return;
       }
-      const fileBytes = rawBytes;
+
+      // ── تنظيف base64: إزالة بادئة data URI إن وجدت ───────────────────
+      let base64Str: string = typeof rawBytes === "string" ? rawBytes : String(rawBytes);
+      if (base64Str.includes("base64,")) {
+        base64Str = base64Str.split("base64,")[1];
+      }
+      base64Str = base64Str.replace(/\s+/g, ""); // إزالة أسطر جديدة ومسافات
+
       const fileName = body.fileName ?? body.FileName ?? body.filename ?? null;
       originalName = fileName ?? "report.pdf";
       const unique = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
       filePath = path.join(UPLOADS_DIR, `ds_${unique}_${originalName}`);
-      fs.writeFileSync(filePath, Buffer.from(fileBytes, "base64"));
+
+      const pdfBuffer = Buffer.from(base64Str, "base64");
+      console.log(`[datasystem] JSON upload — حجم الملف: ${pdfBuffer.length} bytes`);
+      if (pdfBuffer.length < 100) {
+        res.status(400).json({ error: `الملف المُرسل صغير جداً أو تالف (${pdfBuffer.length} bytes). تأكد من إرساله كـ base64 صحيح` });
+        return;
+      }
+      fs.writeFileSync(filePath, pdfBuffer);
     } else {
       // ── وضع multipart: الملف في req.file ───────────────────────────────
       const file = (req as any).file as Express.Multer.File | undefined;
@@ -385,6 +402,11 @@ router.post("/datasystem/upload", (req, res, next) => {
     let extracted: Record<string, any> = {};
     try {
       const pdfResult = await extractPdf(filePath);
+      if (pdfResult.mode === "text") {
+        console.log(`[datasystem] نص PDF: ${pdfResult.text.length} حرف — يُرسل أول 60,000 لـ OpenAI`);
+      } else {
+        console.log(`[datasystem] وضع الصور: ${pdfResult.images.length} صفحة`);
+      }
       const model = getAIModel();
 
       let aiResponse: string;
