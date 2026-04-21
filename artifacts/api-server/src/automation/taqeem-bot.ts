@@ -3331,7 +3331,48 @@ async function submitAndDownloadCertificate(
   await page.waitForLoadState("networkidle", { timeout: 30000 }).catch(() => {});
   await page.waitForTimeout(3000);
   await screenshot(page, `submitted_${reportId}`);
-  addLog(session, `📄 صفحة ما بعد الإرسال: ${page.url()}`);
+  const afterSubmitUrl = page.url();
+  addLog(session, `📄 صفحة ما بعد الإرسال: ${afterSubmitUrl}`);
+
+  // ── تحقق من نجاح الإرسال أو وجود أخطاء ────────────────────────────────
+  const pageTextAfterSubmit = await page.evaluate(() => document.body.innerText ?? "").catch(() => "");
+  addLog(session, `📝 محتوى الصفحة (أول 400 حرف):\n${pageTextAfterSubmit.slice(0, 400)}`);
+
+  // هل يوجد رسائل خطأ في الصفحة؟
+  const hasError = /خطأ|error|فشل|غير صحيح|مطلوب|required/i.test(pageTextAfterSubmit);
+  const hasSuccess = /تم|نجح|success|مكتمل|بنجاح|شكراً|شهادة/i.test(pageTextAfterSubmit);
+  if (hasError && !hasSuccess) {
+    addLog(session, `⚠️ يوجد رسائل خطأ في صفحة التأكيد — قد يكون الإرسال فشل`);
+    addLog(session, `   نص الخطأ: ${pageTextAfterSubmit.slice(0, 200)}`);
+  } else if (hasSuccess) {
+    addLog(session, `✅ تأكيد النجاح: الصفحة تحتوي على رسالة نجاح`);
+  } else {
+    addLog(session, `ℹ️ لم يتغير URL ولم يُكتشف نجاح أو خطأ واضح`);
+  }
+
+  // ── استخراج رقم التقرير الفعلي من صفحة التأكيد ─────────────────────────
+  // 1. بحث في URL بعد الإرسال (قد يتغير لشيء مثل /report/1234567/view)
+  const urlReportMatch = afterSubmitUrl.match(/\/report\/(\d{5,})/);
+  // 2. بحث في نص الصفحة عن "رقم التقرير" أو "Report Number"
+  const textReportMatch = pageTextAfterSubmit.match(
+    /(?:رقم التقرير|رقم الطلب|رقم القيمة|report\s*(?:number|no|#))[:\s]*([A-Za-z0-9\-\/]+)/i
+  );
+  // 3. بحث عن تسلسل أرقام طويل بجوار كلمة عربية (مثل "التقرير 1694177")
+  const nearbyNumMatch = pageTextAfterSubmit.match(/(?:التقرير|الطلب|رقم)[:\s]*(\d{5,})/);
+
+  const finalTaqeemReportNum =
+    textReportMatch?.[1]?.trim() ||
+    nearbyNumMatch?.[1]?.trim() ||
+    urlReportMatch?.[1]?.trim() ||
+    taqeemReportId; // احتياط: رقم URL من صفحة 2
+
+  if (finalTaqeemReportNum !== taqeemReportId) {
+    addLog(session, `🆔 رقم التقرير النهائي من TAQEEM: ${finalTaqeemReportNum} (كان: ${taqeemReportId})`);
+    await updateReport(reportId, { taqeemReportNumber: finalTaqeemReportNum });
+    taqeemReportId = finalTaqeemReportNum; // تحديث المتغير للاستخدام لاحقاً
+  } else {
+    addLog(session, `ℹ️ رقم التقرير المستخدم: ${taqeemReportId} (من URL الصفحة 2)`);
+  }
 
   // ── 5. التقاط QR Code ────────────────────────────────────────────────────
   addLog(session, "▶ الخطوة 4: التقاط QR Code");
