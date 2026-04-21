@@ -395,10 +395,10 @@ router.post("/datasystem/upload", (req, res, next) => {
             { role: "system", content: SYSTEM_PROMPT },
             {
               role: "user",
-              content: `استخرج هذه الحقول من التقرير التالي:\n${FIELDS_SCHEMA}\n\nنص التقرير:\n${pdfResult.text.slice(0, 12000)}`,
+              content: `استخرج هذه الحقول من التقرير التالي:\n${FIELDS_SCHEMA}\n\nنص التقرير:\n${pdfResult.text.slice(0, 60000)}`,
             },
           ],
-          max_tokens: 2000,
+          max_tokens: 4000,
           temperature: 0,
         });
         aiResponse = completion.choices[0]?.message?.content ?? "{}";
@@ -418,7 +418,7 @@ router.post("/datasystem/upload", (req, res, next) => {
               ],
             },
           ],
-          max_tokens: 2000,
+          max_tokens: 4000,
           temperature: 0,
         });
         aiResponse = completion.choices[0]?.message?.content ?? "{}";
