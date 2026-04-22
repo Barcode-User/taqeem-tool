@@ -272,6 +272,9 @@ const COMPARE_GROUPS = [
     title: "القيمة",
     fields: [
       { key: "valuationMethod", label: "أسلوب التقييم" },
+      { key: "marketWay",   label: "طريقة أسلوب السوق" },
+      { key: "incomeWay",   label: "طريقة أسلوب الدخل" },
+      { key: "costWay",     label: "طريقة أسلوب التكلفة" },
       { key: "marketValue",              label: "القيمة السوقية" },
       { key: "incomeValue",              label: "قيمة الدخل" },
       { key: "costValue",                label: "قيمة التكلفة" },
