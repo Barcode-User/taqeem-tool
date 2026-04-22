@@ -137,6 +137,9 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
       utilities:                    dsRecord.utilities                    ?? report.utilities,
       coordinates:                  dsRecord.coordinates                  ?? report.coordinates,
       valuationMethod:              dsRecord.valuationMethod              ?? report.valuationMethod,
+      marketWay:                    dsRecord.marketWay                    ?? report.marketWay,
+      incomeWay:                    dsRecord.incomeWay                    ?? report.incomeWay,
+      costWay:                      dsRecord.costWay                      ?? report.costWay,
       marketValue:                  dsRecord.marketValue                  ?? report.marketValue,
       incomeValue:                  dsRecord.incomeValue                  ?? report.incomeValue,
       costValue:                    dsRecord.costValue                    ?? report.costValue,
@@ -2985,6 +2988,11 @@ async function fillPage2(session: AutomationSession, report: any, els: any[], pd
   );
   if (costEl) await selectAngular(session, buildSelector(costEl), "مساعد لتقدير القيمة", "أسلوب التكلفة", costEl.isMat);
 
+  // ── قيمة الطريقة المحددة لكل أسلوب (marketWay / incomeWay / costWay) ──────
+  await fillValueByMethodLabel(session, report.marketWay, report.marketValue, "قيمة طريقة السوق");
+  await fillValueByMethodLabel(session, report.incomeWay, report.incomeValue, "قيمة طريقة الدخل");
+  await fillValueByMethodLabel(session, report.costWay,   report.costValue,   "قيمة طريقة التكلفة");
+
   // ── الدولة (ثابت: المملكة العربية السعودية) ──────────────────────────────
   const countryEl = findEl(selects,
     /country|countryid|دولة|بلد/i,
@@ -3336,6 +3344,56 @@ async function fillInputByPageLabel(
   }, labelRx.source, strVal).catch(() => false);
 
   addLog(session, ok ? `✅ ${fieldName}: "${strVal}" (DOM label)` : `⚠️ لم يُعثر على حقل «${fieldName}»`);
+}
+
+// ملء حقل القيمة لطريقة تقييم محددة (يبحث بالنص ثم يملأ input المجاور)
+async function fillValueByMethodLabel(
+  session: AutomationSession,
+  methodLabel: string | null | undefined,
+  value: number | string | null | undefined,
+  fieldName: string,
+): Promise<void> {
+  if (!methodLabel || value == null || value === "") {
+    addLog(session, `ℹ️ لا توجد قيمة لـ «${fieldName}»`);
+    return;
+  }
+  const { page } = session;
+  const strVal = String(value);
+  const prefix  = methodLabel.substring(0, Math.min(6, methodLabel.length));
+
+  const ok = await page.evaluate((label: string, prefix: string, val: string) => {
+    const allEls = Array.from(
+      document.querySelectorAll("td, th, label, span, div, p, mat-label, li"),
+    );
+    for (const el of allEls) {
+      const txt = ((el as HTMLElement).innerText ?? el.textContent ?? "")
+        .replace(/\s+/g, " ").trim();
+      if (!txt.includes(prefix)) continue;
+      if (txt.length > 120) continue;
+
+      // ابحث عن input في نفس الصف (tr) أو في العنصر الأب
+      const row = el.closest("tr") ?? el.closest(".method-row, .row, .field-row") ?? el.parentElement;
+      const inp = row?.querySelector<HTMLInputElement>(
+        "input[type='text'], input:not([type='radio']):not([type='checkbox']):not([type='hidden'])",
+      );
+      if (inp) {
+        inp.focus();
+        inp.value = val;
+        inp.dispatchEvent(new Event("input",  { bubbles: true }));
+        inp.dispatchEvent(new Event("change", { bubbles: true }));
+        inp.dispatchEvent(new Event("blur",   { bubbles: true }));
+        return true;
+      }
+    }
+    return false;
+  }, methodLabel, prefix, strVal).catch(() => false);
+
+  addLog(
+    session,
+    ok
+      ? `✅ ${fieldName}: "${strVal}" (طريقة: "${methodLabel}")`
+      : `⚠️ لم يُعثر على حقل «${fieldName}» (${methodLabel})`,
+  );
 }
 
 // تحديد radio button من خلال label مجموعة الراديو (وليس label الزر الفردي)

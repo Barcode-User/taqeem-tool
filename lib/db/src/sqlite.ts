@@ -94,6 +94,9 @@ function getDb(): DatabaseSync {
       Latitude                  REAL,
       Longitude                 REAL,
       ValuationMethod           TEXT,
+      MarketWay                 TEXT,
+      IncomeWay                 TEXT,
+      CostWay                   TEXT,
       MarketValue               REAL,
       IncomeValue               REAL,
       CostValue                 REAL,
@@ -141,6 +144,9 @@ function getDb(): DatabaseSync {
   addIfMissing("IsLandRented",              "TEXT");
   addIfMissing("AdditionalFeatures",        "TEXT");
   addIfMissing("IsBestUse",                 "TEXT");
+  addIfMissing("MarketWay",                 "TEXT");
+  addIfMissing("IncomeWay",                 "TEXT");
+  addIfMissing("CostWay",                   "TEXT");
 
   // ─── جدول datasystem ──────────────────────────────────────────────────────
   _db.exec(`
@@ -209,6 +215,9 @@ function getDb(): DatabaseSync {
       Utilities                 TEXT,
       Coordinates               TEXT,
       ValuationMethod           TEXT,
+      MarketWay                 TEXT,
+      IncomeWay                 TEXT,
+      CostWay                   TEXT,
       MarketValue               REAL,
       IncomeValue               REAL,
       CostValue                 REAL,
@@ -257,6 +266,9 @@ function getDb(): DatabaseSync {
   addDsIfMissing("IsLandRented",                  "TEXT");
   addDsIfMissing("AdditionalFeatures",            "TEXT");
   addDsIfMissing("IsBestUse",                     "TEXT");
+  addDsIfMissing("MarketWay",                     "TEXT");
+  addDsIfMissing("IncomeWay",                     "TEXT");
+  addDsIfMissing("CostWay",                       "TEXT");
 
   console.log(`[DB] SQLite: ${DB_PATH}`);
   return _db;
@@ -335,6 +347,9 @@ function rowToReport(row: any): Report {
     latitude: num(row.Latitude),
     longitude: num(row.Longitude),
     valuationMethod: str(row.ValuationMethod),
+    marketWay: str(row.MarketWay),
+    incomeWay: str(row.IncomeWay),
+    costWay: str(row.CostWay),
     marketValue: num(row.MarketValue),
     incomeValue: num(row.IncomeValue),
     costValue: num(row.CostValue),
@@ -403,14 +418,16 @@ export async function sqliteInsertReport(data: InsertReport): Promise<Report> {
       BasementArea, AnnexArea, FloorsCount, PermittedFloorsCount,
       PermittedBuildingRatio, StreetWidth, StreetFacades, FacadesCount, Utilities, Coordinates,
       Latitude, Longitude,
-      ValuationMethod, MarketValue, IncomeValue, CostValue,
+      ValuationMethod, MarketWay, IncomeWay, CostWay,
+      MarketValue, IncomeValue, CostValue,
       MarketApproachPercentage, IncomeApproachPercentage, CostApproachPercentage,
       FinalValue, PricePerMeter, CompanyName, CommercialRegNumber, PdfFileName, PdfFilePath,
       Notes, AutomationStatus, CreatedAt, UpdatedAt
     ) VALUES (
       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+      ?, ?, ?
     )
   `).run(
     data.reportNumber ?? null, data.reportDate ?? null, data.valuationDate ?? null,
@@ -437,7 +454,9 @@ export async function sqliteInsertReport(data: InsertReport): Promise<Report> {
     data.permittedBuildingRatio ?? null, data.streetWidth ?? null,
     data.streetFacades ?? null, data.facadesCount ?? null, data.utilities ?? null, data.coordinates ?? null,
     data.latitude ?? null, data.longitude ?? null,
-    data.valuationMethod ?? null, data.marketValue ?? null, data.incomeValue ?? null,
+    data.valuationMethod ?? null,
+    data.marketWay ?? null, data.incomeWay ?? null, data.costWay ?? null,
+    data.marketValue ?? null, data.incomeValue ?? null,
     data.costValue ?? null,
     data.marketApproachPercentage ?? null, data.incomeApproachPercentage ?? null, data.costApproachPercentage ?? null,
     data.finalValue ?? null, data.pricePerMeter ?? null,
@@ -488,8 +507,9 @@ export async function sqliteUpdateReport(id: number, data: Partial<InsertReport>
     permittedBuildingRatio: "PermittedBuildingRatio", streetWidth: "StreetWidth",
     streetFacades: "StreetFacades", facadesCount: "FacadesCount", utilities: "Utilities", coordinates: "Coordinates",
     latitude: "Latitude", longitude: "Longitude",
-    valuationMethod: "ValuationMethod", marketValue: "MarketValue",
-    incomeValue: "IncomeValue", costValue: "CostValue",
+    valuationMethod: "ValuationMethod",
+    marketWay: "MarketWay", incomeWay: "IncomeWay", costWay: "CostWay",
+    marketValue: "MarketValue", incomeValue: "IncomeValue", costValue: "CostValue",
     marketApproachPercentage: "MarketApproachPercentage",
     incomeApproachPercentage: "IncomeApproachPercentage",
     costApproachPercentage: "CostApproachPercentage",
@@ -588,6 +608,9 @@ export interface DataSystemRecord {
   utilities: string | null;
   coordinates: string | null;
   valuationMethod: string | null;
+  marketWay: string | null;
+  incomeWay: string | null;
+  costWay: string | null;
   marketValue: number | null;
   incomeValue: number | null;
   costValue: number | null;
@@ -673,6 +696,9 @@ function rowToDataSystem(row: any): DataSystemRecord {
     utilities: str(row.Utilities),
     coordinates: str(row.Coordinates),
     valuationMethod: str(row.ValuationMethod),
+    marketWay: str(row.MarketWay),
+    incomeWay: str(row.IncomeWay),
+    costWay: str(row.CostWay),
     marketValue: num(row.MarketValue),
     incomeValue: num(row.IncomeValue),
     costValue: num(row.CostValue),
@@ -706,12 +732,13 @@ export async function sqliteInsertDataSystem(data: Omit<DataSystemRecord, "id" |
       AirConditioningType, IsLandRented, AdditionalFeatures, IsBestUse,
       LandArea, BuildingArea, BasementArea, AnnexArea, FloorsCount, PermittedFloorsCount,
       PermittedBuildingRatio, StreetWidth, StreetFacades, Utilities, Coordinates,
-      ValuationMethod, MarketValue, IncomeValue, CostValue,
+      ValuationMethod, MarketWay, IncomeWay, CostWay,
+      MarketValue, IncomeValue, CostValue,
       MarketApproachPercentage, IncomeApproachPercentage, CostApproachPercentage,
       FinalValue, PricePerMeter,
       CompanyName, CommercialRegNumber, Notes, LinkedReportId, CreatedAt
     ) VALUES (
-      ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+      ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
     )
   `).run(
     data.reportCode ?? null,
@@ -742,7 +769,9 @@ export async function sqliteInsertDataSystem(data: Omit<DataSystemRecord, "id" |
     data.floorsCount ?? null, data.permittedFloorsCount ?? null,
     data.permittedBuildingRatio ?? null, data.streetWidth ?? null,
     data.streetFacades ?? null, data.utilities ?? null, data.coordinates ?? null,
-    data.valuationMethod ?? null, data.marketValue ?? null, data.incomeValue ?? null,
+    data.valuationMethod ?? null,
+    data.marketWay ?? null, data.incomeWay ?? null, data.costWay ?? null,
+    data.marketValue ?? null, data.incomeValue ?? null,
     data.costValue ?? null,
     data.marketApproachPercentage ?? null, data.incomeApproachPercentage ?? null, data.costApproachPercentage ?? null,
     data.finalValue ?? null, data.pricePerMeter ?? null,

@@ -86,6 +86,9 @@ async function ensureTable(): Promise<void> {
       latitude NUMERIC(12,8),
       longitude NUMERIC(12,8),
       valuation_method VARCHAR(255),
+      market_way VARCHAR(500),
+      income_way VARCHAR(500),
+      cost_way VARCHAR(500),
       market_value NUMERIC(18,2),
       income_value NUMERIC(18,2),
       cost_value NUMERIC(18,2),
@@ -106,6 +109,13 @@ async function ensureTable(): Promise<void> {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+  // ── migration: أعمدة جديدة للقواعد الموجودة ──────────────────────────────
+  const newCols = [
+    "ALTER TABLE reports ADD COLUMN IF NOT EXISTS market_way VARCHAR(500)",
+    "ALTER TABLE reports ADD COLUMN IF NOT EXISTS income_way VARCHAR(500)",
+    "ALTER TABLE reports ADD COLUMN IF NOT EXISTS cost_way VARCHAR(500)",
+  ];
+  for (const sql of newCols) await pool.query(sql).catch(() => {});
 }
 
 let _tableReady = false;
@@ -189,6 +199,9 @@ function rowToReport(row: any): Report {
     latitude: num(row.latitude),
     longitude: num(row.longitude),
     valuationMethod: str(row.valuation_method),
+    marketWay: str(row.market_way),
+    incomeWay: str(row.income_way),
+    costWay: str(row.cost_way),
     marketValue: num(row.market_value),
     incomeValue: num(row.income_value),
     costValue: num(row.cost_value),
@@ -239,8 +252,10 @@ const FIELD_MAP_PG: Record<string, string> = {
   permittedBuildingRatio: "permitted_building_ratio", streetWidth: "street_width",
   streetFacades: "street_facades", utilities: "utilities", coordinates: "coordinates",
   latitude: "latitude", longitude: "longitude",
-  valuationMethod: "valuation_method", marketValue: "market_value",
-  incomeValue: "income_value", costValue: "cost_value", finalValue: "final_value",
+  valuationMethod: "valuation_method",
+  marketWay: "market_way", incomeWay: "income_way", costWay: "cost_way",
+  marketValue: "market_value", incomeValue: "income_value", costValue: "cost_value",
+  finalValue: "final_value",
   pricePerMeter: "price_per_meter", companyName: "company_name",
   commercialRegNumber: "commercial_reg_number", pdfFileName: "pdf_file_name",
   pdfFilePath: "pdf_file_path", notes: "notes", automationStatus: "automation_status",

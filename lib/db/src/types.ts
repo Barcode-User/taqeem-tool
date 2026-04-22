@@ -72,6 +72,9 @@ export interface Report {
   latitude: number | null;
   longitude: number | null;
   valuationMethod: string | null;
+  marketWay: string | null;
+  incomeWay: string | null;
+  costWay: string | null;
   marketValue: number | null;
   incomeValue: number | null;
   costValue: number | null;

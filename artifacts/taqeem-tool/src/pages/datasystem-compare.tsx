@@ -108,6 +108,9 @@ const FIELD_GROUPS = [
     title: "القيمة",
     fields: [
       { key: "valuationMethod", label: "أسلوب التقييم" },
+      { key: "marketWay",   label: "طريقة أسلوب السوق" },
+      { key: "incomeWay",   label: "طريقة أسلوب الدخل" },
+      { key: "costWay",     label: "طريقة أسلوب التكلفة" },
       { key: "marketValue",              label: "القيمة السوقية",     type: "number" },
       { key: "incomeValue",              label: "قيمة الدخل",         type: "number" },
       { key: "costValue",                label: "قيمة التكلفة",       type: "number" },
