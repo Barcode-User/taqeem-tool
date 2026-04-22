@@ -1349,7 +1349,7 @@ async function fillFormPage(
   await fillByName("title", report.reportNumber, "عنوان التقرير");
 
   // ── الغرض من التقييم ─────────────────────────────────────────────────────
-  await selectByName("purpose_id", report.valuationPurpose, "الغرض من التقييم");
+  await selectByName("purpose_id", report.valuationPurpose, "الغرض من التقييم", "أخرى");
 
   // ── فرضية القيمة ─────────────────────────────────────────────────────────
   await selectByName("value_premise_id", report.valuationHypothesis, "فرضية القيمة");
@@ -2764,7 +2764,7 @@ async function fillPage1(session: AutomationSession, report: any, els: any[], pd
   const purposeEl = findEl(selects,
     /purpose|غرض|valuation.?purpose|purposeid|valPurpose|valuationpurpose/i,
   );
-  if (purposeEl) await selectAngular(session, buildSelector(purposeEl), report.valuationPurpose, "الغرض من التقييم", purposeEl.isMat);
+  if (purposeEl) await selectAngular(session, buildSelector(purposeEl), report.valuationPurpose, "الغرض من التقييم", purposeEl.isMat, "أخرى");
   else addLog(session, `⚠️ لم يُعثر على حقل «الغرض من التقييم»`);
 
   // ── فرضية القيمة ─────────────────────────────────────────────────────────
