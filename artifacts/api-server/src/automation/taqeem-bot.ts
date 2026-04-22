@@ -980,20 +980,43 @@ async function selectAngular(
     );
     await page.waitForTimeout(200);
 
-    // ابحث بمطابقة مرنة مع تطبيع شامل (داخل المتصفح)
+    // ابحث بمطابقة مرنة مع تطبيع شامل (داخل المتصفح) + fallback متعدد المستويات
     const optionText = await page.evaluate(
       new Function("nv", "fb", `
         ${EVAL_NORM_FN}
         var opts = Array.from(document.querySelectorAll('mat-option,.mat-option,.mat-mdc-option'));
-        var t = opts.find(function(o){ return _matches(o.textContent||'', nv); });
-        if(t) return {found:(t.textContent||'').trim(), usedFallback:false};
+        var getText = function(o){ return (o.textContent||'').trim(); };
+
+        // 1) القيمة الأصلية
+        var t = opts.find(function(o){ return _matches(getText(o), nv); });
+        if(t) return {found:getText(t), usedFallback:false, fallbackReason:'', available:[]};
+
+        // 2) fallback المحدد
         if(fb){
-          var ft = opts.find(function(o){ return _matches(o.textContent||'', fb); });
-          if(ft) return {found:(ft.textContent||'').trim(), usedFallback:true};
+          var ft = opts.find(function(o){ return _matches(getText(o), fb); });
+          if(ft) return {found:getText(ft), usedFallback:true, fallbackReason:fb, available:[]};
         }
-        return {found:null, usedFallback:false,
-          available:opts.map(function(o){return (o.textContent||'').trim();}).filter(Boolean)};
-      `) as (nv: string, fb: string) => {found:string|null, usedFallback:boolean, available?:string[]},
+
+        // 3) أشكال "أخرى" البديلة
+        var otherVariants = ['اخري','اخرى','أخري','أخرى','غير ذلك','آخر','أخر','other'];
+        for(var i=0;i<otherVariants.length;i++){
+          var ot = opts.find(function(o){ return _matches(getText(o), otherVariants[i]); });
+          if(ot) return {found:getText(ot), usedFallback:true, fallbackReason:'أخرى (نطق بديل)', available:[]};
+        }
+
+        // 4) آخر خيار غير placeholder — الملاذ الأخير (فقط إذا طُلب fallback)
+        if(fb){
+          var nonBlank = opts.filter(function(o){
+            var txt = getText(o);
+            return txt && !/^(تحديد|اختر|select|--)/i.test(txt);
+          });
+          var last = nonBlank[nonBlank.length-1];
+          if(last) return {found:getText(last), usedFallback:true, fallbackReason:'آخر خيار متاح', available:[]};
+        }
+
+        var available = opts.map(getText).filter(Boolean);
+        return {found:null, usedFallback:false, fallbackReason:'', available:available};
+      `) as (nv: string, fb: string) => {found:string|null, usedFallback:boolean, fallbackReason:string, available:string[]},
       normVal, fallback ? normalizeAr(fallback) : "",
     );
 
@@ -1003,7 +1026,7 @@ async function selectAngular(
       await optLoc.first().click({ timeout: 2000 });
       await page.waitForTimeout(300);
       if (optionText.usedFallback) {
-        addLog(session, `⚠️ "${label}": "${value}" غير موجود — تم اختيار "${optionText.found}" كبديل`);
+        addLog(session, `⚠️ "${label}": "${value}" غير موجود — تم اختيار "${optionText.found}" (${optionText.fallbackReason})`);
       } else {
         addLog(session, `✅ ${label}: ${optionText.found}`);
       }
@@ -1342,8 +1365,8 @@ async function fillFormPage(
   const fillByName = (name: string, value: any, label: string) =>
     fillAngular(session, `[name="${name}"]`, value, label);
 
-  const selectByName = (name: string, value: any, label: string) =>
-    selectNativeByName(session, name, value, label);
+  const selectByName = (name: string, value: any, label: string, fallback?: string) =>
+    selectNativeByName(session, name, value, label, fallback);
 
   // ── عنوان التقرير ────────────────────────────────────────────────────────
   await fillByName("title", report.reportNumber, "عنوان التقرير");
@@ -1560,37 +1583,55 @@ async function selectNativeByName(
       return;
     }
 
-    // محاولة 2: مطابقة مرنة شاملة + fallback
+    // محاولة 2: مطابقة مرنة شاملة + fallback متعدد المستويات
     const result = await session.page.evaluate(
       new Function("args", `
         ${EVAL_NORM_FN}
         var el = document.querySelector(args.sel);
-        if(!el) return {matched:null, usedFallback:false, available:[]};
+        if(!el) return {matched:null, usedFallback:false, fallbackReason:'', available:[]};
         var opts = Array.from(el.options);
         var available = opts.map(function(o){return o.text.trim();}).filter(Boolean);
 
-        var opt = opts.find(function(o){ return _matches(o.text, args.nv); });
-        if(!opt && args.fb){
-          opt = opts.find(function(o){ return _matches(o.text, args.fb); });
-          if(opt){
-            el.value = opt.value;
-            el.dispatchEvent(new Event('change',{bubbles:true}));
-            return {matched:opt.text, usedFallback:true, available:available};
-          }
-        }
-        if(opt){
-          el.value = opt.value;
+        function applyOpt(o, reason){
+          el.value = o.value;
           el.dispatchEvent(new Event('change',{bubbles:true}));
-          return {matched:opt.text, usedFallback:false, available:available};
+          return {matched:o.text.trim(), usedFallback:reason!=='', fallbackReason:reason, available:available};
         }
-        return {matched:null, usedFallback:false, available:available};
-      `) as (args: {sel:string; nv:string; fb:string}) => {matched:string|null; usedFallback:boolean; available:string[]},
+
+        // 1) البحث عن القيمة الأصلية
+        var opt = opts.find(function(o){ return _matches(o.text, args.nv); });
+        if(opt) return applyOpt(opt, '');
+
+        // 2) البحث عن fallback المحدد (مثل "أخرى")
+        if(args.fb){
+          opt = opts.find(function(o){ return _matches(o.text, args.fb); });
+          if(opt) return applyOpt(opt, args.fb);
+        }
+
+        // 3) جرب أشكال "أخرى" البديلة (تكتب بطرق مختلفة في TAQEEM)
+        var otherVariants = ['اخري','اخرى','أخري','أخرى','غير ذلك','آخر','أخر','other'];
+        for(var i=0;i<otherVariants.length;i++){
+          opt = opts.find(function(o){ return _matches(o.text, otherVariants[i]); });
+          if(opt) return applyOpt(opt, 'أخرى (نطق بديل)');
+        }
+
+        // 4) آخر خيار غير فارغ وغير placeholder (تحديد/اختر) — الملاذ الأخير
+        if(args.fb){
+          var placeholder = /^(تحديد|اختر|select|--)/i;
+          var lastOpt = opts.slice().reverse().find(function(o){
+            return o.value && o.value!=='' && o.value!=='0' && !placeholder.test(o.text.trim());
+          });
+          if(lastOpt) return applyOpt(lastOpt, 'آخر خيار متاح');
+        }
+
+        return {matched:null, usedFallback:false, fallbackReason:'', available:available};
+      `) as (args: {sel:string; nv:string; fb:string}) => {matched:string|null; usedFallback:boolean; fallbackReason:string; available:string[]},
       { sel, nv: normVal, fb: normFb },
     );
 
     if (result.matched) {
       if (result.usedFallback) {
-        addLog(session, `⚠️ "${label}": "${value}" غير موجود — تم اختيار "${result.matched}" كبديل`);
+        addLog(session, `⚠️ "${label}": "${value}" غير موجود — تم اختيار "${result.matched}" (${result.fallbackReason})`);
       } else {
         addLog(session, `✅ ${label}: ${result.matched} (من "${value}")`);
       }
