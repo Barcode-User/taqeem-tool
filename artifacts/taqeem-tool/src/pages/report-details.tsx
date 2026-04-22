@@ -142,6 +142,9 @@ const reportFormSchema = z.object({
   longitude:   numberOrNull,
   
   valuationMethod: stringOrNull,
+  marketWay: stringOrNull,
+  incomeWay: stringOrNull,
+  costWay: stringOrNull,
   marketValue: numberOrNull,
   incomeValue: numberOrNull,
   costValue: numberOrNull,
@@ -851,10 +854,13 @@ export default function ReportDetails() {
                   />
                 </div>
                 <CopyField label="سعر المتر (ريال)" value={report.pricePerMeter ? report.pricePerMeter.toLocaleString("ar-SA") : null} />
+                <CopyField label="طريقة أسلوب السوق" value={report.marketWay} />
                 <CopyField label="قيمة أسلوب السوق" value={report.marketValue ? report.marketValue.toLocaleString("ar-SA") : null} />
                 <CopyField label="نسبة أسلوب السوق (%)" value={report.marketApproachPercentage != null ? String(report.marketApproachPercentage) : null} />
+                <CopyField label="طريقة أسلوب الدخل" value={report.incomeWay} />
                 <CopyField label="قيمة أسلوب الدخل" value={report.incomeValue ? report.incomeValue.toLocaleString("ar-SA") : null} />
                 <CopyField label="نسبة أسلوب الدخل (%)" value={report.incomeApproachPercentage != null ? String(report.incomeApproachPercentage) : null} />
+                <CopyField label="طريقة أسلوب التكلفة" value={report.costWay} />
                 <CopyField label="قيمة أسلوب التكلفة" value={report.costValue ? report.costValue.toLocaleString("ar-SA") : null} />
                 <CopyField label="نسبة أسلوب التكلفة (%)" value={report.costApproachPercentage != null ? String(report.costApproachPercentage) : null} />
               </CardContent>
@@ -1249,11 +1255,20 @@ export default function ReportDetails() {
                 <FormField control={form.control} name="valuationMethod" render={({ field }) => (
                   <FormItem className="sm:col-span-2 md:col-span-3"><FormLabel className="flex items-center gap-1.5">أسلوب وطريقة التقييم المتبعة<ScoreBadge score={dsFieldScores?.valuationMethod} /></FormLabel><FormControl><Input {...field} value={field.value || ""} disabled={!isEditable} className="font-bold" /></FormControl></FormItem>
                 )} />
+                <FormField control={form.control} name="marketWay" render={({ field }) => (
+                  <FormItem><FormLabel className="flex items-center gap-1.5">طريقة أسلوب السوق<ScoreBadge score={dsFieldScores?.marketWay} /></FormLabel><FormControl><Input {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
+                )} />
                 <FormField control={form.control} name="marketValue" render={({ field }) => (
                   <FormItem><FormLabel className="flex items-center gap-1.5">قيمة السوق<ScoreBadge score={dsFieldScores?.marketValue} /></FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
+                <FormField control={form.control} name="incomeWay" render={({ field }) => (
+                  <FormItem><FormLabel className="flex items-center gap-1.5">طريقة أسلوب الدخل<ScoreBadge score={dsFieldScores?.incomeWay} /></FormLabel><FormControl><Input {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
+                )} />
                 <FormField control={form.control} name="incomeValue" render={({ field }) => (
                   <FormItem><FormLabel className="flex items-center gap-1.5">قيمة الدخل<ScoreBadge score={dsFieldScores?.incomeValue} /></FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
+                )} />
+                <FormField control={form.control} name="costWay" render={({ field }) => (
+                  <FormItem><FormLabel className="flex items-center gap-1.5">طريقة أسلوب التكلفة<ScoreBadge score={dsFieldScores?.costWay} /></FormLabel><FormControl><Input {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
                 )} />
                 <FormField control={form.control} name="costValue" render={({ field }) => (
                   <FormItem><FormLabel className="flex items-center gap-1.5">قيمة التكلفة<ScoreBadge score={dsFieldScores?.costValue} /></FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ""} disabled={!isEditable} /></FormControl></FormItem>
