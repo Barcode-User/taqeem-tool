@@ -3203,10 +3203,14 @@ async function fillPage3(session: AutomationSession, report: any, els: any[], pd
   }
 
   // ── عمر الأصل محل التقييم ─────────────────────────────────────────────────
-  await fillInputByPageLabel(session, /عمر.*أصل|عمر.*مبنى|building.?age|^age$/i, report.buildingAge, "عمر الأصل");
+  await fillInputByPageLabel(session,
+    /عمر.*أصل|عمر.*مبنى|عمر.*عقار|عمر.*تقييم|عمر.*الاصل|building.?age|^age$/i,
+    report.buildingAge, "عمر الأصل محل التقييم");
 
   // ── عرض الشارع ───────────────────────────────────────────────────────────
-  await fillInputByPageLabel(session, /عرض.*شارع|عرض.*طريق|street.?width/i, report.streetWidth, "عرض الشارع");
+  await fillInputByPageLabel(session,
+    /عرض.*شارع|عرض.*طريق|شارع.*عرض|street.?width|road.?width/i,
+    report.streetWidth, "عرض الشارع");
 
   // ── عدد الواجهات ─────────────────────────────────────────────────────────
   if (report.facadesCount != null) {
@@ -3233,26 +3237,94 @@ async function fillPage3(session: AutomationSession, report: any, els: any[], pd
   // ── الأرض تحت المبنى مستأجرة ────────────────────────────────────────────
   await clickRadioByGroupLabel(session, /مستأجرة|land.?rent/i, report.isLandRented ?? "لا", "الأرض مستأجرة");
 
-  // ── الميزات الإضافية ─────────────────────────────────────────────────────
-  if (report.additionalFeatures) {
-    const features = String(report.additionalFeatures).split(/،|,/).map((f: string) => f.trim()).filter(Boolean);
-    for (const feat of features) {
-      const clicked = await page.evaluate((keyword: string) => {
-        const all = Array.from(document.querySelectorAll<HTMLInputElement>("input[type='checkbox']"));
-        for (const cb of all) {
+  // ── الميزات الإضافية — مصدر: نص المرافق + additionalFeatures ────────────
+  {
+    // نجمع نص المصادر: المرافق + ميزات إضافية
+    const srcText = [report.utilities, report.additionalFeatures]
+      .filter(Boolean).join("، ");
+
+    if (srcText.trim()) {
+      // تطبيع عربي لمقارنة أفضل
+      const normalizeAr = (s: string) =>
+        s.replace(/[\u064B-\u065F\u0670]/g, "")
+         .replace(/[أإآ]/g, "ا")
+         .replace(/ة/g, "ه")
+         .replace(/ى/g, "ي")
+         .replace(/\s+/g, " ").trim().toLowerCase();
+
+      const srcNorm = normalizeAr(srcText);
+      addLog(session, `🔧 [ميزات إضافية] نص المصدر: "${srcText.slice(0, 150)}"`);
+
+      // اجلب جميع checkboxes من الصفحة مع نصوصها
+      const cbs = await page.evaluate(() => {
+        const results: { index: number; text: string; checked: boolean }[] = [];
+        // mat-checkbox
+        document.querySelectorAll("mat-checkbox").forEach((el, i) => {
+          const txt = el.textContent?.replace(/\s+/g, " ").trim() ?? "";
+          if (txt) results.push({ index: i, text: txt, checked: (el.querySelector("input") as HTMLInputElement)?.checked ?? false });
+        });
+        // plain checkboxes with labels not already captured
+        document.querySelectorAll<HTMLInputElement>("input[type='checkbox']").forEach((inp, i) => {
           const lbl =
-            cb.labels?.[0]?.textContent?.trim() ??
-            cb.closest("label")?.textContent?.trim() ??
-            cb.nextElementSibling?.textContent?.trim() ??
-            cb.parentElement?.textContent?.trim() ?? "";
-          if (lbl.includes(keyword)) {
-            if (!cb.checked) { cb.click(); cb.dispatchEvent(new MouseEvent("change", { bubbles: true })); }
-            return lbl;
-          }
+            inp.labels?.[0]?.textContent?.replace(/\s+/g, " ").trim() ??
+            inp.closest("label")?.textContent?.replace(/\s+/g, " ").trim() ??
+            inp.nextElementSibling?.textContent?.replace(/\s+/g, " ").trim() ??
+            inp.parentElement?.textContent?.replace(/\s+/g, " ").trim() ?? "";
+          if (lbl && !results.some(r => r.text === lbl))
+            results.push({ index: i, text: lbl, checked: inp.checked });
+        });
+        return results;
+      }).catch(() => [] as { index: number; text: string; checked: boolean }[]);
+
+      if (cbs.length > 0) {
+        addLog(session, `🔍 [ميزات إضافية] checkboxes المتاحة: ${cbs.map(c => `"${c.text}"`).join(" | ")}`);
+      }
+
+      // لكل checkbox — إذا كان نصه يتضمن كلمة موجودة في نص المصدر → اضغطه
+      for (const cb of cbs) {
+        const cbNorm = normalizeAr(cb.text);
+        // 1) تطابق كامل (نص الـ checkbox موجود بالكامل في نص المصدر)
+        let matched = srcNorm.includes(cbNorm);
+        // 2) تطابق كلمة: كلمة ≥ 4 أحرف من نص الـ checkbox موجودة في نص المصدر
+        if (!matched) {
+          const words = cbNorm.split(/[\s،,\/\-]+/).filter(w => w.length >= 4);
+          matched = words.some(w => srcNorm.includes(w));
         }
-        return null;
-      }, feat).catch(() => null);
-      addLog(session, clicked ? `✅ ميزة إضافية: ${feat} ("${clicked}")` : `ℹ️ ميزة "${feat}" غير موجودة`);
+        if (!matched) continue;
+
+        const clicked = await page.evaluate((cbText: string) => {
+          // mat-checkbox
+          const matCbs = Array.from(document.querySelectorAll("mat-checkbox"));
+          for (const el of matCbs) {
+            if ((el.textContent?.replace(/\s+/g, " ").trim() ?? "") === cbText) {
+              const inp = el.querySelector<HTMLInputElement>("input");
+              if (inp && !inp.checked) { inp.click(); return true; }
+              if (inp && inp.checked) return true; // already checked
+            }
+          }
+          // plain checkbox
+          const all = Array.from(document.querySelectorAll<HTMLInputElement>("input[type='checkbox']"));
+          for (const inp of all) {
+            const lbl =
+              inp.labels?.[0]?.textContent?.replace(/\s+/g, " ").trim() ??
+              inp.closest("label")?.textContent?.replace(/\s+/g, " ").trim() ??
+              inp.nextElementSibling?.textContent?.replace(/\s+/g, " ").trim() ??
+              inp.parentElement?.textContent?.replace(/\s+/g, " ").trim() ?? "";
+            if (lbl === cbText) {
+              if (!inp.checked) { inp.click(); inp.dispatchEvent(new MouseEvent("change", { bubbles: true })); }
+              return true;
+            }
+          }
+          return false;
+        }, cb.text).catch(() => false);
+
+        addLog(session, clicked
+          ? `✅ [ميزة إضافية] "${cb.text}" — تم التحديد`
+          : `⚠️ [ميزة إضافية] "${cb.text}" — فشل الضغط`);
+        await page.waitForTimeout(200);
+      }
+    } else {
+      addLog(session, "ℹ️ لا يوجد نص مرافق أو ميزات إضافية — تجاوز");
     }
   }
 
@@ -3318,6 +3390,22 @@ async function selectDropdownByPageLabel(
           await opts.nth(oi).click({ force: true });
           await page.waitForTimeout(300);
           addLog(session, `⚠️ ${fieldName}: مطابقة regex "${txt}" بدلاً من "${value}"`);
+          return true;
+        }
+      }
+      // 4) مطابقة بعد تطبيع عربي (أ/إ/ا، ة/ه، ى/ي، حذف تشكيل)
+      const normAr = (s: string) =>
+        s.replace(/[\u064B-\u065F\u0670]/g, "")
+         .replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي")
+         .replace(/\s+/g, " ").trim().toLowerCase();
+      const normVal = normAr(value);
+      for (let oi = 0; oi < cnt; oi++) {
+        const txt = (await opts.nth(oi).textContent().catch(() => ""))?.trim() ?? "";
+        const normTxt = normAr(txt);
+        if (normTxt === normVal || normTxt.includes(normVal) || normVal.includes(normTxt)) {
+          await opts.nth(oi).click({ force: true });
+          await page.waitForTimeout(300);
+          addLog(session, `⚠️ ${fieldName}: مطابقة مُطبَّعة "${txt}" بدلاً من "${value}"`);
           return true;
         }
       }
