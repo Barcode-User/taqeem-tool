@@ -16,9 +16,12 @@ import {
   sqliteUpdateDataSystemLinkedReport,
   insertReport,
   getReportById,
+  updateReport,
 } from "@workspace/db";
 import { openai, getAIModel } from "@workspace/integrations-openai-ai-server";
 import { extractPdf } from "../lib/pdf-extractor.js";
+import { getAuthenticatedContext } from "../automation/taqeem-session-store.js";
+import { processQueue } from "../automation/queue-processor.js";
 
 const UPLOADS_DIR = path.join(process.cwd(), "uploads");
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -515,11 +518,36 @@ router.post("/datasystem/upload", (req, res, next) => {
       comparison.reduce((s, c) => s + c.score, 0) / comparison.length
     );
 
+    // ── 6: إذا كانت جلسة تقييم مُصادَق عليها موجودة → ابدأ الأتمتة تلقائياً ──
+    let automationStarted = false;
+    let automationMessage = "التقرير معلق — يجب بدء الأتمتة يدوياً";
+    try {
+      const authCtx = await getAuthenticatedContext();
+      if (authCtx) {
+        // الجلسة نشطة — ضع التقرير في طابور التنفيذ وابدأ المعالجة
+        await updateReport(reportRecord.id, { automationStatus: "queued" });
+        console.log(`[datasystem] ✅ جلسة نشطة — تقرير #${reportRecord.id} أُضيف للطابور تلقائياً`);
+        // شغّل معالج الطابور في الخلفية (بدون انتظار)
+        processQueue().catch(err =>
+          console.error("[datasystem] خطأ في بدء الأتمتة التلقائية:", err)
+        );
+        automationStarted = true;
+        automationMessage = `✅ جلسة تقييم نشطة — بدأت الأتمتة تلقائياً للتقرير #${reportRecord.id}`;
+      } else {
+        console.log(`[datasystem] ℹ️ لا توجد جلسة نشطة — تقرير #${reportRecord.id} بحالة pending`);
+        automationMessage = "لا توجد جلسة تقييم نشطة — يجب تسجيل الدخول وبدء الأتمتة يدوياً";
+      }
+    } catch (autoErr: any) {
+      console.error("[datasystem] خطأ في التحقق من الجلسة:", autoErr.message);
+    }
+
     res.json({
       datasystemId: dsRecord.id,
       reportId: reportRecord.id,
+      automationStarted,
+      automationMessage,
       datasystem: { ...dsRecord, linkedReportId: reportRecord.id },
-      report: reportRecord,
+      report: { ...reportRecord, automationStatus: automationStarted ? "queued" : "pending" },
       comparison,
       averageScore: avgScore,
       _debug,
