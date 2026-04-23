@@ -3065,6 +3065,79 @@ async function fillPage3(session: AutomationSession, report: any, els: any[], pd
   const checkboxes = els.filter(e => e.type === "checkbox");
   const { page } = session;
 
+  // ── تشخيص: عرض قيم التقرير وخيارات الـ dropdowns في الصفحة 3 ─────────────
+  addLog(session, "🔍 [تشخيص] قيم بيانات المبنى المُستخرجة:");
+  addLog(session, `  buildingType    = "${report.buildingType ?? "NULL"}"`);
+  addLog(session, `  finishingStatus = "${report.finishingStatus ?? "NULL"}"`);
+  addLog(session, `  furnitureStatus = "${report.furnitureStatus ?? "NULL"}"`);
+  addLog(session, `  airCond         = "${report.airConditioningType ?? "NULL"}"`);
+  addLog(session, `  buildingAge     = "${report.buildingAge ?? "NULL"}"`);
+  addLog(session, `  streetWidth     = "${report.streetWidth ?? "NULL"}"`);
+  addLog(session, `  isLandRented    = "${report.isLandRented ?? "NULL"}"`);
+  addLog(session, `  buildingStatus  = "${report.buildingStatus ?? "NULL"}"`);
+
+  // ── تشخيص: عرض جميع mat-select في الصفحة 3 مع labels وخياراتها ──────────
+  try {
+    const matSelScan = await page.evaluate(() => {
+      const results: { label: string; options: string[] }[] = [];
+      const formFields = Array.from(document.querySelectorAll("mat-form-field"));
+      for (const ff of formFields) {
+        const labelEl = ff.querySelector("mat-label, label");
+        const labelTxt = labelEl?.textContent?.replace(/\s+/g, " ").trim() ?? "؟";
+        const matSel = ff.querySelector("mat-select");
+        if (!matSel) continue;
+        // خيارات الـ mat-select الموجودة حالياً
+        const panelId = matSel.getAttribute("aria-owns") ?? matSel.getAttribute("aria-controls") ?? "";
+        const panel = panelId ? document.getElementById(panelId) : null;
+        const optEls = panel
+          ? Array.from(panel.querySelectorAll("mat-option"))
+          : [];
+        const options = optEls.map(o => o.textContent?.replace(/\s+/g, " ").trim() ?? "").filter(Boolean);
+        results.push({ label: labelTxt, options });
+      }
+      return results;
+    }).catch(() => []);
+
+    if (matSelScan.length > 0) {
+      addLog(session, `🔍 [تشخيص] mat-select elements في الصفحة (${matSelScan.length}):`);
+      for (const item of matSelScan) {
+        addLog(session, `  [${item.label}] → خيارات مكشوفة: ${item.options.length > 0 ? item.options.join(" | ") : "(مخفية — سيتم كشفها عند الفتح)"}`);
+      }
+    }
+  } catch { /* تابع */ }
+
+  // ── تشخيص: افتح كل mat-select وسجّل خياراته الفعلية ───────────────────
+  const buildingFieldLabels = [
+    /حالة.*تشطيب|تشطيب/,
+    /حالة.*تأثيث|تأثيث/,
+    /نوع.*مبنى/,
+    /التكييف|تكييف/,
+    /حالة.*بناء/,
+  ];
+  for (const rx of buildingFieldLabels) {
+    try {
+      const allFFs = page.locator("mat-form-field");
+      const ffCnt = await allFFs.count().catch(() => 0);
+      for (let fi = 0; fi < ffCnt; fi++) {
+        const ff = allFFs.nth(fi);
+        const lbl = (await ff.locator("mat-label, label").first().textContent().catch(() => ""))?.trim() ?? "";
+        if (!rx.test(lbl)) continue;
+        const ms = ff.locator("mat-select").first();
+        if (await ms.count().catch(() => 0) === 0) continue;
+        await ms.scrollIntoViewIfNeeded().catch(() => {});
+        await ms.click({ force: true, timeout: 2000 }).catch(() => {});
+        await page.waitForTimeout(600);
+        const opts = await page.locator("mat-option, .mat-option, .mat-mdc-option").allTextContents().catch(() => [] as string[]);
+        const cleanOpts = opts.map(o => o.replace(/\s+/g, " ").trim()).filter(Boolean);
+        addLog(session, `🔍 [${lbl}] خياراته: [${cleanOpts.join(" | ")}]`);
+        await page.keyboard.press("Escape").catch(() => {});
+        await page.waitForTimeout(300);
+        break;
+      }
+    } catch { /* تابع */ }
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
   // ── رقم الصك / سند الملكية ───────────────────────────────────────────────
   const deedEl = findEl(inputs,
     /deed|deednum|deed.?number|titlenum|title.?number|صك|سند|رقم.*صك|رقم.*سند/i,
