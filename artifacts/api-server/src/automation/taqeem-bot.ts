@@ -3204,62 +3204,139 @@ async function selectDropdownByPageLabel(
   if (!value) { addLog(session, `ℹ️ لا توجد قيمة لـ «${fieldName}» — تجاوز`); return; }
   const { page } = session;
 
-  // ── محاولة 1: mat-select — ابحث عن العنصر الأقرب للـ label ──────────────
+  // ── المساعد: فتح mat-select والاختيار ──────────────────────────────────
+  const tryMatSelect = async (ms: import("@playwright/test").Locator): Promise<boolean> => {
+    try {
+      await ms.scrollIntoViewIfNeeded().catch(() => {});
+      await ms.click({ force: true, timeout: 3000 });
+      await page.waitForTimeout(500);
+      // انتظر ظهور الخيارات
+      await page.waitForSelector("mat-option, .mat-option, .mat-mdc-option", { timeout: 3000 }).catch(() => {});
+
+      // ابحث بمطابقة جزئية
+      const escapedVal = value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const opts = page.locator("mat-option, .mat-option, .mat-mdc-option");
+      const cnt = await opts.count().catch(() => 0);
+
+      // 1) مطابقة تامة
+      for (let oi = 0; oi < cnt; oi++) {
+        const txt = (await opts.nth(oi).textContent().catch(() => ""))?.trim() ?? "";
+        if (txt === value) {
+          await opts.nth(oi).click({ force: true });
+          await page.waitForTimeout(300);
+          return true;
+        }
+      }
+      // 2) مطابقة جزئية (القيمة موجودة في نص الخيار أو العكس)
+      for (let oi = 0; oi < cnt; oi++) {
+        const txt = (await opts.nth(oi).textContent().catch(() => ""))?.trim() ?? "";
+        if (txt.includes(value) || value.includes(txt)) {
+          await opts.nth(oi).click({ force: true });
+          await page.waitForTimeout(300);
+          addLog(session, `⚠️ ${fieldName}: مطابقة جزئية "${txt}" بدلاً من "${value}"`);
+          return true;
+        }
+      }
+      // 3) مطابقة regex (تطبيع عربي)
+      const rxOpt = new RegExp(escapedVal, "i");
+      for (let oi = 0; oi < cnt; oi++) {
+        const txt = (await opts.nth(oi).textContent().catch(() => ""))?.trim() ?? "";
+        if (rxOpt.test(txt)) {
+          await opts.nth(oi).click({ force: true });
+          await page.waitForTimeout(300);
+          addLog(session, `⚠️ ${fieldName}: مطابقة regex "${txt}" بدلاً من "${value}"`);
+          return true;
+        }
+      }
+      // سجّل الخيارات المتاحة وأغلق
+      const available = [];
+      for (let oi = 0; oi < Math.min(cnt, 10); oi++) {
+        available.push((await opts.nth(oi).textContent().catch(() => ""))?.trim() ?? "");
+      }
+      addLog(session, `⚠️ ${fieldName}: لم يُعثر على "${value}" — المتاح: [${available.join(", ")}]`);
+      await page.keyboard.press("Escape").catch(() => {});
+    } catch { await page.keyboard.press("Escape").catch(() => {}); }
+    return false;
+  };
+
+  // ── أسلوب 1 (Playwright): mat-form-field تحتوي mat-label يطابق labelRx ──
   try {
-    const matSel = page.locator("mat-select").filter({ hasText: new RegExp("") });
-    // الطريقة الأفضل: ابحث عن mat-form-field تحتوي label بالنص المطلوب
-    const formField = page
-      .locator("mat-form-field, .form-group, .field-container, div")
-      .filter({ hasText: labelRx })
-      .first();
-    const ffCount = await formField.count().catch(() => 0);
-    if (ffCount > 0) {
-      const innerSel = formField.locator("mat-select, select").first();
-      const innerCount = await innerSel.count().catch(() => 0);
-      if (innerCount > 0) {
-        const selectorStr = await innerSel.evaluate(el => {
-          if (el.id) return `#${el.id}`;
-          const name = el.getAttribute("name");
-          if (name) return `[name="${name}"]`;
-          return el.tagName.toLowerCase();
-        }).catch(() => "");
-        if (selectorStr) {
-          const isMatSel = (await innerSel.evaluate(el => el.tagName.toLowerCase())) === "mat-select";
-          await selectAngular(session, selectorStr, value, fieldName, isMatSel);
+    const allFormFields = page.locator("mat-form-field");
+    const ffCnt = await allFormFields.count().catch(() => 0);
+    for (let fi = 0; fi < ffCnt; fi++) {
+      const ff = allFormFields.nth(fi);
+      // ابحث عن mat-label أو label بداخل الـ form-field
+      const labelEl = ff.locator("mat-label, label").first();
+      const labelTxt = (await labelEl.textContent().catch(() => ""))?.replace(/\s+/g, " ").trim() ?? "";
+      if (!labelRx.test(labelTxt)) continue;
+
+      // وجدنا الـ form-field الصحيح — ابحث عن mat-select أو select
+      const matSel = ff.locator("mat-select").first();
+      if (await matSel.count().catch(() => 0) > 0) {
+        const ok = await tryMatSelect(matSel);
+        if (ok) { addLog(session, `✅ ${fieldName}: "${value}" (mat-form-field + mat-label)`); return; }
+        break;
+      }
+      const nativeSel = ff.locator("select").first();
+      if (await nativeSel.count().catch(() => 0) > 0) {
+        const chosen = await nativeSel.selectOption({ label: value }).catch(() =>
+          nativeSel.selectOption({ value }).catch(() => [])
+        );
+        if (Array.isArray(chosen) && chosen.length > 0) {
+          addLog(session, `✅ ${fieldName}: "${value}" (native select in mat-form-field)`);
           return;
         }
       }
     }
   } catch { /* تابع */ }
 
-  // ── محاولة 2: evaluate — ابحث في DOM بنص الـ label ──────────────────────
+  // ── أسلوب 2 (Playwright): ابحث عن label بنص ثم أقرب mat-select ──────────
+  try {
+    const allMatSels = page.locator("mat-select");
+    const cnt = await allMatSels.count().catch(() => 0);
+    for (let i = 0; i < cnt; i++) {
+      const ms = allMatSels.nth(i);
+      // ابحث في النص الكامل للأب والأجداد (حتى 6 مستويات)
+      const nearText = await ms.evaluate((el, rxSrc) => {
+        const rx = new RegExp(rxSrc, "i");
+        let cur: Element | null = el.parentElement;
+        for (let d = 0; d < 8; d++) {
+          if (!cur) break;
+          // ابحث عن mat-label أو label داخل هذا الـ container
+          const labels = Array.from(cur.querySelectorAll("mat-label, label, span.label, .field-label"));
+          for (const lbl of labels) {
+            const t = lbl.textContent?.replace(/\s+/g, " ").trim() ?? "";
+            if (rx.test(t) && t.length < 80) return t;
+          }
+          cur = cur.parentElement;
+        }
+        return "";
+      }, labelRx.source).catch(() => "");
+      if (!labelRx.test(nearText)) continue;
+      const ok = await tryMatSelect(ms);
+      if (ok) { addLog(session, `✅ ${fieldName}: "${value}" (mat-select parent-walk)`); return; }
+      break;
+    }
+  } catch { /* تابع */ }
+
+  // ── أسلوب 3 (DOM evaluate): native select ─────────────────────────────────
   const result = await page.evaluate((rxSrc: string, targetVal: string) => {
     const rx = new RegExp(rxSrc, "i");
-    // ابحث عن أي عنصر يحتوي النص المطلوب
-    const allNodes = Array.from(document.querySelectorAll("label, span, div, td, th, p, legend, mat-label"));
+    const allNodes = Array.from(document.querySelectorAll("mat-label, label, span, th, td, legend"));
     for (const node of allNodes) {
       const nodeText = node.textContent?.replace(/\s+/g, " ").trim() ?? "";
-      if (!rx.test(nodeText) || nodeText.length > 60) continue; // تجاهل النصوص الطويلة جداً
-      // ابحث عن select بالقرب من هذا العنصر
+      if (!rx.test(nodeText) || nodeText.length > 80) continue;
       const container = node.closest("mat-form-field, .form-group, .field, tr, td")
         ?? node.parentElement?.parentElement;
       if (!container) continue;
       const sel = container.querySelector<HTMLSelectElement>("select");
       if (sel) {
-        // حاول المطابقة بالنص أو القيمة
         for (const opt of Array.from(sel.options)) {
-          if (opt.text.trim() === targetVal || opt.value === targetVal) {
+          if (opt.text.trim() === targetVal || opt.value === targetVal
+            || opt.text.trim().includes(targetVal) || targetVal.includes(opt.text.trim())) {
             sel.value = opt.value;
             sel.dispatchEvent(new Event("change", { bubbles: true }));
             return `native-select: "${opt.text}"`;
-          }
-        }
-        // مطابقة جزئية
-        for (const opt of Array.from(sel.options)) {
-          if (opt.text.trim().includes(targetVal) || targetVal.includes(opt.text.trim())) {
-            sel.value = opt.value;
-            sel.dispatchEvent(new Event("change", { bubbles: true }));
-            return `native-select-partial: "${opt.text}"`;
           }
         }
       }
@@ -3267,40 +3344,8 @@ async function selectDropdownByPageLabel(
     return null;
   }, labelRx.source, value).catch(() => null);
 
-  if (result) {
-    addLog(session, `✅ ${fieldName}: "${value}" (${result})`);
-  } else {
-    // ── محاولة 3: فتح mat-select بالضغط واختيار الخيار ────────────────────
-    try {
-      // ابحث عن جميع mat-select في الصفحة واطبع خياراتها للتشخيص
-      const allMatSels = page.locator("mat-select");
-      const cnt = await allMatSels.count().catch(() => 0);
-      for (let i = 0; i < cnt; i++) {
-        const ms = allMatSels.nth(i);
-        const parentText = await ms.evaluate(el =>
-          el.closest("mat-form-field, .form-group, div")?.textContent?.replace(/\s+/g, " ").trim().slice(0, 60) ?? ""
-        ).catch(() => "");
-        if (!labelRx.test(parentText)) continue;
-        // افتح الـ dropdown
-        await ms.click({ force: true });
-        await page.waitForTimeout(400);
-        // ابحث عن الخيار المطلوب
-        const opt = page.locator("mat-option").filter({ hasText: new RegExp(value, "i") }).first();
-        const optCnt = await opt.count().catch(() => 0);
-        if (optCnt > 0) {
-          await opt.click({ force: true });
-          addLog(session, `✅ ${fieldName}: "${value}" (mat-select click)`);
-          return;
-        }
-        // أغلق الـ dropdown
-        await page.keyboard.press("Escape").catch(() => {});
-        break;
-      }
-      addLog(session, `⚠️ لم يُعثر على حقل «${fieldName}» بالـ label (قيمة: "${value}")`);
-    } catch (e: any) {
-      addLog(session, `⚠️ «${fieldName}»: ${e.message.slice(0, 60)}`);
-    }
-  }
+  if (result) addLog(session, `✅ ${fieldName}: "${value}" (${result})`);
+  else addLog(session, `⚠️ لم يُعثر على حقل «${fieldName}» بالـ label (قيمة: "${value}")`);
 }
 
 // ملء input عبر label الصفحة
