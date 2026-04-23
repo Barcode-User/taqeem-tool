@@ -3405,70 +3405,141 @@ async function clickRadioByGroupLabel(
 ): Promise<void> {
   const { page } = session;
   const wantYes = value.trim() === "نعم";
+  const yesKeywords = ["نعم", "yes", "true", "1"];
+  const noKeywords  = ["لا", "no", "false", "0"];
 
-  const result = await page.evaluate((rxSrc: string, yes: boolean) => {
+  // ── أسلوب 1 (Playwright مباشر): ابحث عن mat-radio-button بجانب label ──
+  try {
+    // ابحث عن جميع mat-radio-groups
+    const allGroups = page.locator("mat-radio-group");
+    const groupCount = await allGroups.count().catch(() => 0);
+    for (let gi = 0; gi < groupCount; gi++) {
+      const grp = allGroups.nth(gi);
+      // جرب أن يكون النص القريب من المجموعة يطابق الـ label
+      const nearText = await grp.evaluate(el => {
+        // ابحث في الأب وأعلاه حتى نجد نص المجموعة
+        let cur: Element | null = el.parentElement;
+        for (let i = 0; i < 6; i++) {
+          if (!cur) break;
+          const t = (cur as HTMLElement).innerText?.replace(/\s+/g, " ").trim() ?? "";
+          if (t.length > 10 && t.length < 300) return t;
+          cur = cur.parentElement;
+        }
+        return "";
+      }).catch(() => "");
+      if (!groupLabelRx.test(nearText)) continue;
+
+      // وجدنا المجموعة — اضغط على mat-radio-button المطلوب
+      const buttons = grp.locator("mat-radio-button");
+      const btnCount = await buttons.count().catch(() => 0);
+      for (let bi = 0; bi < btnCount; bi++) {
+        const btn = buttons.nth(bi);
+        const btnText = (await btn.textContent().catch(() => ""))?.trim() ?? "";
+        const btnVal  = (await btn.getAttribute("value").catch(() => ""))?.toLowerCase() ?? "";
+        const isYes = yesKeywords.some(k => btnText.includes(k) || btnVal === k);
+        const isNo  = noKeywords.some(k => btnText.includes(k) || btnVal === k);
+        if ((wantYes && isYes) || (!wantYes && isNo)) {
+          await btn.click({ force: true });
+          await page.waitForTimeout(300);
+          addLog(session, `✅ ${fieldName}: "${value}" (mat-radio-group Playwright "${btnText}")`);
+          return;
+        }
+      }
+    }
+  } catch { /* تابع */ }
+
+  // ── أسلوب 2 (evaluate DOM): ابحث بنص label ─────────────────────────────
+  const result = await page.evaluate((rxSrc: string, yes: boolean, yesKws: string[], noKws: string[]) => {
     const rx = new RegExp(rxSrc, "i");
 
-    // ── أسلوب 1: ابحث عن عنصر يحتوي label المجموعة ثم ابحث عن radios بداخل container أبيه ──
-    const allTextEls = Array.from(document.querySelectorAll("label, span, div, td, p, mat-label, legend"));
+    // أ) ابحث عن عنصر نصي يطابق label ثم اعثر على radios بداخل container أبيه
+    const allTextEls = Array.from(document.querySelectorAll("label, span, div, td, p, mat-label, legend, h4, h5"));
     for (const el of allTextEls) {
       const txt = (el as HTMLElement).innerText?.replace(/\s+/g, " ").trim()
         ?? el.textContent?.replace(/\s+/g, " ").trim() ?? "";
-      if (!rx.test(txt) || txt.length > 80) continue;
+      if (!rx.test(txt) || txt.length > 100) continue;
 
-      // ابحث عن container يحتوي أزرار الراديو
-      let container: Element | null = el;
-      for (let i = 0; i < 5; i++) {
-        const radios = container?.querySelectorAll<HTMLInputElement>("input[type='radio']");
-        if (radios && radios.length >= 2) {
-          // وجدنا مجموعة radio
-          for (const r of Array.from(radios)) {
+      // ابحث عن container يحتوي أزرار الراديو (ابحث في العنصر وأعلاه وإخوته)
+      const containers: (Element | null)[] = [el];
+      for (let i = 0; i < 6; i++) {
+        const p = containers[containers.length - 1]?.parentElement;
+        if (p) containers.push(p);
+      }
+      // أضف الإخوة
+      const parent = el.parentElement;
+      if (parent) Array.from(parent.children).forEach(c => { if (c !== el) containers.push(c); });
+
+      for (const container of containers) {
+        if (!container) continue;
+        // native radio inputs
+        const radios = Array.from(container.querySelectorAll<HTMLInputElement>("input[type='radio']"));
+        if (radios.length >= 1) {
+          for (const r of radios) {
             const v = r.value?.toLowerCase();
-            const lbl = (r.labels?.[0]?.textContent ?? r.nextElementSibling?.textContent ?? r.parentElement?.textContent ?? "").trim();
-            const isYes = v === "true" || v === "1" || lbl.includes("نعم");
-            const isNo  = v === "false" || v === "0" || lbl.includes("لا");
+            const lbl = (
+              r.labels?.[0]?.textContent ??
+              r.nextElementSibling?.textContent ??
+              r.closest("mat-radio-button, label")?.textContent ??
+              r.parentElement?.textContent ?? ""
+            ).replace(/\s+/g, " ").trim();
+            const isYes = yesKws.some(k => v === k || lbl.includes(k));
+            const isNo  = noKws.some(k => v === k || lbl.includes(k));
             if ((yes && isYes) || (!yes && isNo)) {
               r.click();
               r.dispatchEvent(new MouseEvent("change", { bubbles: true }));
-              return `radio value="${r.value}" label="${lbl}"`;
+              return `native-radio val="${r.value}" lbl="${lbl}"`;
             }
           }
         }
-        // ابحث عن mat-radio-button
-        const matRadios = container?.querySelectorAll("mat-radio-button");
-        if (matRadios && matRadios.length >= 2) {
-          for (const mr of Array.from(matRadios)) {
-            const lbl = mr.textContent?.trim() ?? "";
+        // mat-radio-button
+        const matBtns = Array.from(container.querySelectorAll("mat-radio-button"));
+        if (matBtns.length >= 1) {
+          for (const mr of matBtns) {
+            const lbl = ((mr as HTMLElement).innerText ?? mr.textContent ?? "").replace(/\s+/g, " ").trim();
             const inp = mr.querySelector<HTMLInputElement>("input[type='radio']");
-            if ((yes && lbl.includes("نعم")) || (!yes && lbl.includes("لا"))) {
+            const isYes = yesKws.some(k => lbl.includes(k));
+            const isNo  = noKws.some(k => lbl.includes(k));
+            if ((yes && isYes) || (!yes && isNo)) {
               inp?.click();
+              (mr as HTMLElement).click();
               mr.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-              return `mat-radio label="${lbl}"`;
+              return `mat-radio-dom lbl="${lbl}"`;
             }
           }
         }
-        container = container?.parentElement ?? null;
       }
     }
 
-    // ── أسلوب 2: ابحث عن جميع radio groups (mat-radio-group) ─────────────
+    // ب) ابحث عن جميع mat-radio-group وابحث في نص الأب
     const groups = Array.from(document.querySelectorAll("mat-radio-group"));
     for (const grp of groups) {
-      const grpText = grp.closest("div, td, mat-form-field")?.textContent?.replace(/\s+/g, " ").trim() ?? "";
-      if (!rx.test(grpText)) continue;
-      const buttons = grp.querySelectorAll("mat-radio-button");
-      for (const btn of Array.from(buttons)) {
-        const lbl = btn.textContent?.trim() ?? "";
-        if ((yes && lbl.includes("نعم")) || (!yes && lbl.includes("لا"))) {
-          btn.querySelector<HTMLInputElement>("input")?.click();
-          return `mat-radio-group: "${lbl}"`;
+      let cur: Element | null = grp.parentElement;
+      let matched = false;
+      for (let i = 0; i < 6; i++) {
+        if (!cur) break;
+        const t = (cur as HTMLElement).innerText?.replace(/\s+/g, " ").trim() ?? "";
+        if (rx.test(t)) { matched = true; break; }
+        cur = cur.parentElement;
+      }
+      if (!matched) continue;
+      const buttons = Array.from(grp.querySelectorAll("mat-radio-button"));
+      for (const btn of buttons) {
+        const lbl = ((btn as HTMLElement).innerText ?? btn.textContent ?? "").replace(/\s+/g, " ").trim();
+        const inp = btn.querySelector<HTMLInputElement>("input[type='radio']");
+        const isYes = yesKws.some(k => lbl.includes(k));
+        const isNo  = noKws.some(k => lbl.includes(k));
+        if ((yes && isYes) || (!yes && isNo)) {
+          inp?.click();
+          (btn as HTMLElement).click();
+          return `mat-radio-group-up lbl="${lbl}"`;
         }
       }
     }
     return null;
-  }, groupLabelRx.source, wantYes).catch(() => null);
+  }, groupLabelRx.source, wantYes, yesKeywords, noKeywords).catch(() => null);
 
   if (result) {
+    await page.waitForTimeout(300);
     addLog(session, `✅ ${fieldName}: "${value}" (${result})`);
   } else {
     addLog(session, `⚠️ لم يُعثر على حقل «${fieldName}» في الصفحة`);
