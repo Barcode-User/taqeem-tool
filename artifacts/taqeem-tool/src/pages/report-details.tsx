@@ -449,7 +449,7 @@ export default function ReportDetails() {
       if (resp.ok) {
         const data = await resp.json();
         setAutomationData(data);
-        if (data.automationStatus === "completed" || data.automationStatus === "failed") {
+        if (data.automationStatus === "completed" || data.automationStatus === "submitted_taqeem" || data.automationStatus === "failed") {
           if (automationPollRef.current) clearInterval(automationPollRef.current);
           setAutomationLoading(false);
         }
@@ -953,6 +953,7 @@ export default function ReportDetails() {
               {/* Automation Status Banner */}
               {automationData && automationData.automationStatus !== "idle" && (
                 <div className={`rounded-lg p-4 flex items-center gap-3 ${
+                  automationData.automationStatus === "submitted_taqeem" ? "bg-emerald-50 border border-emerald-300 text-emerald-900" :
                   automationData.automationStatus === "completed" ? "bg-green-50 border border-green-200 text-green-800" :
                   automationData.automationStatus === "failed" ? "bg-red-50 border border-red-200 text-red-800" :
                   automationData.isStale ? "bg-yellow-50 border border-yellow-300 text-yellow-800" :
@@ -961,12 +962,13 @@ export default function ReportDetails() {
                 }`}>
                   {automationData.isStale && <AlertCircle className="h-5 w-5 shrink-0" />}
                   {!automationData.isStale && (automationData.automationStatus === "running" || automationLoading) && <Loader2 className="h-5 w-5 animate-spin shrink-0" />}
-                  {automationData.automationStatus === "completed" && <Check className="h-5 w-5 shrink-0" />}
+                  {(automationData.automationStatus === "completed" || automationData.automationStatus === "submitted_taqeem") && <Check className="h-5 w-5 shrink-0" />}
                   {automationData.automationStatus === "failed" && !automationData.isStale && <AlertCircle className="h-5 w-5 shrink-0" />}
                   <div>
                     <p className="font-semibold text-sm">
                       {automationData.isStale && "⚠️ توقفت عملية الرفع (أُعيد تشغيل الخادم) — اضغط «ابدأ الرفع» مجدداً"}
                       {!automationData.isStale && automationData.automationStatus === "running" && "جارٍ الرفع الآلي..."}
+                      {automationData.automationStatus === "submitted_taqeem" && `🏆 تم الرفع لتقييم — رقم التقرير: ${automationData.taqeemReportNumber ?? "—"}`}
                       {automationData.automationStatus === "completed" && "✅ اكتملت العملية بنجاح!"}
                       {!automationData.isStale && automationData.automationStatus === "failed" && "❌ فشلت العملية"}
                     </p>
@@ -996,7 +998,7 @@ export default function ReportDetails() {
                   {automationLoading
                     ? <Loader2 className="h-4 w-4 animate-spin" />
                     : <Bot className="h-4 w-4" />}
-                  {automationData?.automationStatus === "completed" ? "إعادة الرفع" : "ابدأ الرفع الآلي"}
+                  {(automationData?.automationStatus === "completed" || automationData?.automationStatus === "submitted_taqeem") ? "إعادة الرفع" : "ابدأ الرفع الآلي"}
                 </Button>
 
                 {automationData?.automationStatus === "failed" && (

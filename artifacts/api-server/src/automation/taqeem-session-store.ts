@@ -4,6 +4,28 @@ import { randomUUID } from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import { execSync } from "child_process";
+import { getReportsByAutomationStatus, updateReport } from "@workspace/db";
+
+/**
+ * تُحوّل جميع تقارير "pending" إلى "queued" ثم تُشغّل معالج الطابور.
+ * تُستدعى تلقائياً بعد كل تسجيل دخول ناجح.
+ */
+async function queuePendingAndProcess(): Promise<void> {
+  try {
+    const { processQueue } = await import("./queue-processor.js");
+    const pendingReports = await getReportsByAutomationStatus("pending");
+    if (pendingReports.length > 0) {
+      console.log(`[TaqeemLogin] 🔄 وجدت ${pendingReports.length} تقرير pending — سيُضاف للطابور`);
+      for (const r of pendingReports) {
+        await updateReport(r.id, { automationStatus: "queued" });
+        console.log(`[TaqeemLogin] ✅ تقرير #${r.id} أُضيف للطابور`);
+      }
+    }
+    processQueue().catch(err => console.error("[TaqeemLogin] خطأ في معالج الطابور:", err));
+  } catch (err: any) {
+    console.error("[TaqeemLogin] خطأ في queuePendingAndProcess:", err.message);
+  }
+}
 
 function getChromiumExecutable(): string | undefined {
   if (process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH) {
@@ -378,9 +400,7 @@ async function runLoginFlow(flow: ActiveLoginFlow, username: string, password: s
       await flow.context.storageState({ path: STORAGE_STATE_FILE });
       saveMeta(username);
       setSharedContext(flow.browser, flow.context);
-      import("./queue-processor").then(({ processQueue }) => {
-        processQueue().catch((err) => console.error("[TaqeemLogin] خطأ في معالج الطابور:", err));
-      });
+      queuePendingAndProcess();
       return;
     }
 
@@ -422,12 +442,7 @@ async function runLoginFlow(flow: ActiveLoginFlow, username: string, password: s
     setSharedContext(flow.browser, flow.context);
 
     addFlowLog("✅ الجلسة محفوظة — يمكنك الآن رفع أي عدد من التقارير بدون إعادة تسجيل الدخول.");
-
-    import("./queue-processor").then(({ processQueue }) => {
-      processQueue().catch((err) =>
-        console.error("[TaqeemLogin] خطأ في معالج الطابور:", err)
-      );
-    });
+    queuePendingAndProcess();
   } catch (err: any) {
     try { await page.close(); } catch {}
     throw err;

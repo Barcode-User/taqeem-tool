@@ -4098,11 +4098,18 @@ async function submitAndDownloadCertificate(
   // ── 7. حفظ في قاعدة البيانات ─────────────────────────────────────────────
   addLog(session, "▶ الخطوة 6: حفظ QR والشهادة في قاعدة البيانات");
   const submittedAt = new Date().toISOString();
+  // إذا صدر رقم من نظام تقييم → الحالة "submitted_taqeem" وإلا "completed"
+  const hasNumber = !!finalTaqeemReportNum;
+  const finalAutomationStatus = hasNumber ? "submitted_taqeem" : "completed";
+  if (hasNumber) {
+    addLog(session, `🏆 رقم تقييم صدر: ${finalTaqeemReportNum} → الحالة: تم الرفع لتقييم`);
+  }
   const updateData: Record<string, any> = {
     status: "submitted",
-    automationStatus: "completed",
+    automationStatus: finalAutomationStatus,
     automationError: null,
     taqeemSubmittedAt: submittedAt,
+    taqeemReportNumber: finalTaqeemReportNum,
   };
   if (qrBase64) updateData.qrCodeBase64 = qrBase64;
   if (certificatePath) updateData.certificatePath = certificatePath;
