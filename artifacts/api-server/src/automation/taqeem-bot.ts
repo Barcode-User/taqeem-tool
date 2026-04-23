@@ -975,13 +975,13 @@ async function selectAngular(
 
   // ── محاولة 2: Angular Material mat-select — Playwright native click ────────
   try {
-    await page.waitForSelector(selector, { timeout: 800 });
+    await page.waitForSelector(selector, { timeout: 500 });
     await page.click(selector);
     await page.waitForSelector(
       "mat-option, .mat-option, .mat-mdc-option",
-      { timeout: 3000 },
+      { timeout: 1500 },
     );
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(150);
 
     // ابحث بمطابقة مرنة مع تطبيع شامل (داخل المتصفح) + fallback متعدد المستويات
     const optionText = await page.evaluate(
@@ -3106,36 +3106,6 @@ async function fillPage3(session: AutomationSession, report: any, els: any[], pd
     }
   } catch { /* تابع */ }
 
-  // ── تشخيص: افتح كل mat-select وسجّل خياراته الفعلية ───────────────────
-  const buildingFieldLabels = [
-    /حالة.*تشطيب|تشطيب/,
-    /حالة.*تأثيث|تأثيث/,
-    /نوع.*مبنى/,
-    /التكييف|تكييف/,
-    /حالة.*بناء/,
-  ];
-  for (const rx of buildingFieldLabels) {
-    try {
-      const allFFs = page.locator("mat-form-field");
-      const ffCnt = await allFFs.count().catch(() => 0);
-      for (let fi = 0; fi < ffCnt; fi++) {
-        const ff = allFFs.nth(fi);
-        const lbl = (await ff.locator("mat-label, label").first().textContent().catch(() => ""))?.trim() ?? "";
-        if (!rx.test(lbl)) continue;
-        const ms = ff.locator("mat-select").first();
-        if (await ms.count().catch(() => 0) === 0) continue;
-        await ms.scrollIntoViewIfNeeded().catch(() => {});
-        await ms.click({ force: true, timeout: 2000 }).catch(() => {});
-        await page.waitForTimeout(600);
-        const opts = await page.locator("mat-option, .mat-option, .mat-mdc-option").allTextContents().catch(() => [] as string[]);
-        const cleanOpts = opts.map(o => o.replace(/\s+/g, " ").trim()).filter(Boolean);
-        addLog(session, `🔍 [${lbl}] خياراته: [${cleanOpts.join(" | ")}]`);
-        await page.keyboard.press("Escape").catch(() => {});
-        await page.waitForTimeout(300);
-        break;
-      }
-    } catch { /* تابع */ }
-  }
   // ─────────────────────────────────────────────────────────────────────────
 
   // ── رقم الصك / سند الملكية ───────────────────────────────────────────────
@@ -3321,7 +3291,6 @@ async function fillPage3(session: AutomationSession, report: any, els: any[], pd
         addLog(session, clicked
           ? `✅ [ميزة إضافية] "${cb.text}" — تم التحديد`
           : `⚠️ [ميزة إضافية] "${cb.text}" — فشل الضغط`);
-        await page.waitForTimeout(200);
       }
     } else {
       addLog(session, "ℹ️ لا يوجد نص مرافق أو ميزات إضافية — تجاوز");
@@ -3353,10 +3322,10 @@ async function selectDropdownByPageLabel(
   const tryMatSelect = async (ms: import("@playwright/test").Locator): Promise<boolean> => {
     try {
       await ms.scrollIntoViewIfNeeded().catch(() => {});
-      await ms.click({ force: true, timeout: 3000 });
-      await page.waitForTimeout(500);
-      // انتظر ظهور الخيارات
-      await page.waitForSelector("mat-option, .mat-option, .mat-mdc-option", { timeout: 3000 }).catch(() => {});
+      await ms.click({ force: true, timeout: 2000 });
+      await page.waitForTimeout(300);
+      // انتظر ظهور الخيارات (max 1.5s)
+      await page.waitForSelector("mat-option, .mat-option, .mat-mdc-option", { timeout: 1500 }).catch(() => {});
 
       // ابحث بمطابقة جزئية
       const escapedVal = value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -3520,36 +3489,60 @@ async function fillInputByPageLabel(
   const { page } = session;
   const strVal = String(value);
 
-  // محاولة 1: getByLabel
+  // محاولة 1: mat-form-field → mat-label مطابق → input.fill() (Playwright — الأفضل مع Angular)
+  try {
+    const allFFs = page.locator("mat-form-field");
+    const ffCnt = await allFFs.count().catch(() => 0);
+    for (let fi = 0; fi < ffCnt; fi++) {
+      const ff = allFFs.nth(fi);
+      const lblTxt = (await ff.locator("mat-label, label").first().textContent().catch(() => ""))
+        ?.replace(/\s+/g, " ").replace(/\*/g, "").trim() ?? "";
+      if (!labelRx.test(lblTxt)) continue;
+      const inp = ff.locator("input").first();
+      if (await inp.count().catch(() => 0) === 0) continue;
+      await inp.scrollIntoViewIfNeeded().catch(() => {});
+      await inp.click({ timeout: 1000 }).catch(() => {});
+      await inp.fill(strVal);
+      await inp.dispatchEvent("input");
+      await inp.press("Tab").catch(() => {});
+      addLog(session, `✅ ${fieldName}: "${strVal}" (mat-form-field → input.fill)`);
+      return;
+    }
+  } catch { /* تابع */ }
+
+  // محاولة 2: getByLabel (Playwright aria)
   try {
     const lbl = page.getByLabel(labelRx).first();
     if (await lbl.count().catch(() => 0) > 0) {
       await lbl.fill(strVal);
+      await lbl.press("Tab").catch(() => {});
       addLog(session, `✅ ${fieldName}: "${strVal}" (getByLabel)`);
       return;
     }
   } catch { /* تابع */ }
 
-  // محاولة 2: evaluate DOM
+  // محاولة 3: evaluate DOM (fallback — يبحث في labels ويحدد قيمة الـ input)
   const ok = await page.evaluate((rxSrc: string, val: string) => {
     const rx = new RegExp(rxSrc, "i");
     const labels = Array.from(document.querySelectorAll("label, span, div, td, mat-label"));
     for (const lbl of labels) {
-      const txt = lbl.textContent?.replace(/\s+/g, " ").trim() ?? "";
-      if (!rx.test(txt) || txt.length > 60) continue;
+      const txt = lbl.textContent?.replace(/\s+/g, " ").replace(/\*/g, "").trim() ?? "";
+      if (!rx.test(txt) || txt.length > 80) continue;
       const container = lbl.closest("mat-form-field, .form-group, div, td") ?? lbl.parentElement;
       const inp = container?.querySelector<HTMLInputElement>("input:not([type='hidden']):not([type='radio']):not([type='checkbox'])");
       if (inp) {
+        inp.focus();
         inp.value = val;
-        inp.dispatchEvent(new Event("input", { bubbles: true }));
+        inp.dispatchEvent(new Event("input",  { bubbles: true }));
         inp.dispatchEvent(new Event("change", { bubbles: true }));
+        inp.blur();
         return true;
       }
     }
     return false;
   }, labelRx.source, strVal).catch(() => false);
 
-  addLog(session, ok ? `✅ ${fieldName}: "${strVal}" (DOM label)` : `⚠️ لم يُعثر على حقل «${fieldName}»`);
+  addLog(session, ok ? `✅ ${fieldName}: "${strVal}" (DOM fallback)` : `⚠️ لم يُعثر على حقل «${fieldName}»`);
 }
 
 // ملء حقل القيمة لطريقة تقييم محددة (يبحث بالنص ثم يملأ input المجاور)
