@@ -434,6 +434,15 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
       addLog(session, `⚠️ خطأ أثناء تعبئة الصفحة 3 (نتابع): ${fillErr.message}`);
     }
 
+    // ── تعبئة الحقول الإضافية: حالة التشطيب، التأثيث، التكييف، نوع المبنى... ──
+    // fillPage3 كانت معرَّفة لكنها لم تُستدعَ — هذا هو سبب تخطي هذه الحقول
+    try {
+      addLog(session, "▶ تعبئة حقول المبنى الإضافية (حالة التشطيب، التأثيث، التكييف، إلخ)");
+      await fillPage3(session, mergedReport, elsPage3, pdfState);
+    } catch (fillErr3: any) {
+      addLog(session, `⚠️ خطأ أثناء تعبئة حقول المبنى الإضافية (نتابع): ${fillErr3.message}`);
+    }
+
     // تحقق من أن الصفحة لم تنتقل أثناء التعبئة
     const urlAfterFillP3 = page.url();
     if (urlAfterFillP3 !== urlAtStartP3 && !urlAfterFillP3.includes("/report/attribute/create/")) {
