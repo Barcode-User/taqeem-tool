@@ -3385,282 +3385,87 @@ async function selectDropdownByPageLabel(
   if (!value) { addLog(session, `ℹ️ لا توجد قيمة لـ «${fieldName}» — تجاوز`); return; }
   const { page } = session;
 
-  // ── المساعد: فتح mat-select/combobox والاختيار ─────────────────────────
+  // ── المساعد: فتح mat-select والاختيار بالنص مباشرةً ────────────────────
   const tryMatSelect = async (ms: import("@playwright/test").Locator): Promise<boolean> => {
     try {
       await ms.scrollIntoViewIfNeeded().catch(() => {});
 
-      // ── جرّب النقر على mat-select-trigger أولاً (العنصر الداخلي المرئي) ──
+      // فتح القائمة عبر الـ trigger أو المكوّن مباشرةً
       const trigger = ms.locator(".mat-select-trigger, .mat-mdc-select-trigger, mat-select-trigger").first();
-      const hasTrigger = await trigger.count().catch(() => 0) > 0;
-      if (hasTrigger) {
+      if (await trigger.count().catch(() => 0) > 0) {
         await trigger.click({ force: true, timeout: 2000 }).catch(() => {});
       } else {
         await ms.click({ force: true, timeout: 2000 });
       }
 
-      // انتظر ظهور panel الخيارات — Angular يحتاج وقتاً للأنيميشن
-      await page.waitForTimeout(800);
+      // انتظر ظهور الخيارات
+      await page.waitForTimeout(600);
 
-      // ── تشخيص شامل: ماذا يوجد في DOM الآن؟ ─────────────────────────────
-      const diag = await page.evaluate(() => {
-        const cdk = document.querySelector(".cdk-overlay-container");
-        const matOptAll  = document.querySelectorAll("mat-option");
-        const roleOptAll = document.querySelectorAll("[role='option']");
-        const matMdc     = document.querySelectorAll(".mat-mdc-option");
-        const overlayPanels = document.querySelectorAll(
-          ".cdk-overlay-pane, .mat-select-panel, .mat-mdc-select-panel, " +
-          "[class*='select-panel'], [class*='overlay-pane']"
-        );
-        // جمع كل النصوص من الخيارات
-        const collectTexts = (els: NodeListOf<Element>) =>
-          Array.from(els).map(e => e.textContent?.replace(/\s+/g, " ").trim() ?? "").filter(Boolean);
-
-        return {
-          cdkExists:   !!cdk,
-          cdkVisible:  cdk ? window.getComputedStyle(cdk).display !== "none" : false,
-          cdkInnerHTML: cdk?.innerHTML?.slice(0, 1500) ?? "",
-          matOptCount: matOptAll.length,
-          roleOptCount: roleOptAll.length,
-          matMdcCount:  matMdc.length,
-          overlayPaneCount: overlayPanels.length,
-          overlayPaneClasses: Array.from(overlayPanels).map(e => e.className).slice(0, 5),
-          matOptTexts:  collectTexts(matOptAll).slice(0, 15),
-          roleOptTexts: collectTexts(roleOptAll).slice(0, 15),
-          matMdcTexts:  collectTexts(matMdc).slice(0, 15),
-          // كل العناصر open/active في الـ overlay
-          activeOverlayHTML: cdk?.querySelector(
-            ".mat-select-panel, .mat-mdc-select-panel, [class*='select-panel']"
-          )?.outerHTML?.slice(0, 800) ?? "",
-        };
-      }).catch(() => null);
-
-      if (diag) {
-        addLog(session, `🔍 [${fieldName}] cdk=${diag.cdkExists}/${diag.cdkVisible} matOpt=${diag.matOptCount} [role=opt]=${diag.roleOptCount} mdc=${diag.matMdcCount} panes=${diag.overlayPaneCount}`);
-        if (diag.matOptTexts.length)  addLog(session, `🔍 mat-option texts: [${diag.matOptTexts.join(" | ")}]`);
-        if (diag.roleOptTexts.length) addLog(session, `🔍 [role=option] texts: [${diag.roleOptTexts.join(" | ")}]`);
-        if (diag.matMdcTexts.length)  addLog(session, `🔍 mat-mdc-option texts: [${diag.matMdcTexts.join(" | ")}]`);
-        if (diag.overlayPaneClasses.length) addLog(session, `🔍 overlay pane classes: ${diag.overlayPaneClasses.join(", ")}`);
-        if (diag.matOptCount === 0 && diag.roleOptCount === 0 && diag.matMdcCount === 0) {
-          // لا توجد خيارات بعد — ربما تأخرت — أنتظر أكثر
-          addLog(session, `⏳ [${fieldName}] لا خيارات بعد 800ms — أنتظر 1500ms إضافية...`);
-          await page.waitForSelector(
-            "mat-option, [role='option'], .mat-mdc-option, .cdk-overlay-container li",
-            { timeout: 1500 }
-          ).catch(() => {});
-          // تشخيص ثاني بعد الانتظار الإضافي
-          const diag2 = await page.evaluate(() => {
-            const matOpt  = document.querySelectorAll("mat-option");
-            const roleOpt = document.querySelectorAll("[role='option']");
-            const matMdc  = document.querySelectorAll(".mat-mdc-option");
-            const collect = (els: NodeListOf<Element>) =>
-              Array.from(els).map(e => e.textContent?.replace(/\s+/g, " ").trim() ?? "").filter(Boolean);
-            return { matOptCount: matOpt.length, roleOptCount: roleOpt.length, matMdcCount: matMdc.length,
-                     matOptTexts: collect(matOpt).slice(0, 15) };
-          }).catch(() => null);
-          if (diag2) addLog(session, `🔍 [ثانٍ] matOpt=${diag2.matOptCount} roleOpt=${diag2.roleOptCount} mdc=${diag2.matMdcCount} texts:[${diag2.matOptTexts.join("|")}]`);
-        }
-        // سجّل HTML مختصر إن كان فارغاً لتشخيص البنية
-        if (diag.matOptCount === 0 && diag.activeOverlayHTML) {
-          addLog(session, `🔍 activePanel HTML: ${diag.activeOverlayHTML.slice(0, 300)}`);
-        }
-        if (diag.cdkInnerHTML && diag.matOptCount === 0 && diag.cdkVisible) {
-          addLog(session, `🔍 CDK HTML: ${diag.cdkInnerHTML.slice(0, 400)}`);
-        }
-      }
-
-      // تطبيع عربي للمقارنة
+      // ── اختيار بالنص (DOM evaluate) ────────────────────────────────────
       const normAr = (s: string) =>
         s.replace(/[\u064B-\u065F\u0670]/g, "")
          .replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي")
          .replace(/\s+/g, " ").trim().toLowerCase();
       const normVal = normAr(value);
 
-      // ── أسلوب DOM (page.evaluate): يبحث في كل الـ selectors الممكنة ─────
-      const domResult = await page.evaluate(({ targetVal, normTarget }: { targetVal: string; normTarget: string }) => {
-        const normAr2 = (s: string) =>
-          s.replace(/[\u064B-\u065F\u0670]/g, "")
-           .replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي")
-           .replace(/\s+/g, " ").trim().toLowerCase();
+      const domResult = await page.evaluate(
+        ({ targetVal, normTarget }: { targetVal: string; normTarget: string }) => {
+          const norm = (s: string) =>
+            s.replace(/[\u064B-\u065F\u0670]/g, "")
+             .replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي")
+             .replace(/\s+/g, " ").trim().toLowerCase();
 
-        const optionSelectors = [
-          ".cdk-overlay-container mat-option",
-          ".cdk-overlay-container .mat-option",
-          ".cdk-overlay-container .mat-mdc-option",
-          ".cdk-overlay-container [role='option']",
-          ".cdk-overlay-container li",
-          ".mat-select-panel mat-option",
-          ".mat-mdc-select-panel mat-option",
-          ".mat-mdc-select-panel [role='option']",
-          "mat-option",
-          "[role='option']",
-          ".mat-mdc-option",
-        ];
-
-        const allOptions: Element[] = [];
-        for (const sel of optionSelectors) {
-          for (const el of Array.from(document.querySelectorAll(sel))) {
-            if (!allOptions.includes(el)) allOptions.push(el);
-          }
-        }
-
-        const available = allOptions.map(el => el.textContent?.replace(/\s+/g, " ").trim() ?? "");
-
-        const tryClick = (opt: Element, how: string) => {
-          (opt as HTMLElement).click();
-          // dispatch Angular-compatible events
-          opt.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-          return { matched: opt.textContent?.replace(/\s+/g, " ").trim() ?? "", how };
-        };
-
-        for (const opt of allOptions) {
-          const txt = opt.textContent?.replace(/\s+/g, " ").trim() ?? "";
-          if (txt === targetVal) return tryClick(opt, "exact");
-        }
-        for (const opt of allOptions) {
-          const txt = opt.textContent?.replace(/\s+/g, " ").trim() ?? "";
-          if (txt.includes(targetVal) || targetVal.includes(txt)) return tryClick(opt, "partial");
-        }
-        for (const opt of allOptions) {
-          const txt = opt.textContent?.replace(/\s+/g, " ").trim() ?? "";
-          const nt = normAr2(txt);
-          if (nt === normTarget || nt.includes(normTarget) || normTarget.includes(nt)) return tryClick(opt, "norm");
-        }
-        return { matched: null, how: "not-found", available: available.slice(0, 15) };
-      }, { targetVal: value, normTarget: normVal }).catch(() => null);
-
-      if (domResult?.matched) {
-        await page.waitForTimeout(350);
-        const how = domResult.how !== "exact" ? ` (${domResult.how}: "${domResult.matched}")` : "";
-        addLog(session, `✅ ${fieldName}: "${value}"${how} [DOM]`);
-        return true;
-      }
-      if (domResult && !domResult.matched) {
-        const avail = (domResult as { available?: string[] }).available ?? [];
-        addLog(session, avail.length
-          ? `⚠️ ${fieldName} [DOM]: لم يُطابق "${value}" — المتاح: [${avail.join(" | ")}]`
-          : `⚠️ ${fieldName} [DOM]: صفر خيارات في DOM`
-        );
-      }
-
-      // ── أسلوب Playwright locator كاحتياطي ───────────────────────────────
-      await page.waitForSelector(
-        ".cdk-overlay-container mat-option, .cdk-overlay-container [role='option'], mat-option, [role='option'], .mat-mdc-option",
-        { timeout: 2000 }
-      ).catch(() => {});
-
-      const opts = page.locator([
-        ".cdk-overlay-container mat-option",
-        ".cdk-overlay-container .mat-mdc-option",
-        ".cdk-overlay-container [role='option']",
-        "mat-option",
-        ".mat-mdc-option",
-        "[role='option']",
-      ].join(", "));
-      const cnt = await opts.count().catch(() => 0);
-
-      if (cnt > 0) {
-        for (let oi = 0; oi < cnt; oi++) {
-          const txt = (await opts.nth(oi).textContent().catch(() => ""))?.trim() ?? "";
-          if (txt === value || txt.includes(value) || value.includes(txt)) {
-            await opts.nth(oi).click({ force: true });
-            await page.waitForTimeout(300);
-            addLog(session, `✅ ${fieldName}: "${value}" ← "${txt}" [PW]`);
-            return true;
-          }
-        }
-        const normTxt2 = async (oi: number) => normAr((await opts.nth(oi).textContent().catch(() => ""))?.trim() ?? "");
-        for (let oi = 0; oi < cnt; oi++) {
-          const nt = await normTxt2(oi);
-          if (nt === normVal || nt.includes(normVal) || normVal.includes(nt)) {
-            const raw = (await opts.nth(oi).textContent().catch(() => ""))?.trim() ?? "";
-            await opts.nth(oi).click({ force: true });
-            await page.waitForTimeout(300);
-            addLog(session, `✅ ${fieldName}: "${value}" ← "${raw}" (norm) [PW]`);
-            return true;
-          }
-        }
-        const avail2 = [];
-        for (let oi = 0; oi < Math.min(cnt, 10); oi++) avail2.push((await opts.nth(oi).textContent().catch(() => ""))?.trim() ?? "");
-        addLog(session, `⚠️ ${fieldName}: لم يُعثر على "${value}" — المتاح: [${avail2.join(" | ")}] [PW]`);
-      } else {
-        addLog(session, `⚠️ ${fieldName}: صفر خيارات — حتى بعد الانتظار الكامل`);
-      }
-
-      // ── أسلوب لوحة المفاتيح: aria-activedescendant navigation ────────────
-      // هذا الأسلوب يتجاوز كل مشاكل الـ selectors — يعتمد على Angular نفسه
-      try {
-        // تحقق هل الـ dropdown مفتوح (aria-expanded)
-        const isExpanded = await ms.evaluate((el: Element) =>
-          el.getAttribute("aria-expanded") === "true"
-        ).catch(() => false);
-
-        if (!isExpanded) {
-          // أعد الفتح بالـ trigger
-          await trigger.click({ force: true, timeout: 1500 }).catch(() =>
-            ms.click({ force: true, timeout: 1500 }).catch(() => {})
-          );
-          await page.waitForTimeout(700);
-        }
-
-        addLog(session, `⌨️ ${fieldName}: محاولة التنقل بلوحة المفاتيح (ArrowDown × 30)`);
-
-        // اذهب للخيار الأول
-        await page.keyboard.press("Home").catch(() => {});
-        await page.waitForTimeout(150);
-
-        for (let ki = 0; ki < 35; ki++) {
-          // اقرأ العنصر النشط عبر aria-activedescendant
-          const activeId = await ms.evaluate((el: Element) =>
-            el.getAttribute("aria-activedescendant") ?? ""
-          ).catch(() => "");
-
-          let activeTxt = "";
-          if (activeId) {
-            activeTxt = await page.evaluate((id: string) => {
-              const el = document.getElementById(id);
-              return el?.textContent?.replace(/\s+/g, " ").trim() ?? "";
-            }, activeId).catch(() => "");
-          }
-
-          // إذا لم نجد عبر aria-activedescendant، جرّب [aria-selected='true']
-          if (!activeTxt) {
-            activeTxt = await page.evaluate(() => {
-              const active = document.querySelector(
-                "mat-option[aria-selected='true'], [role='option'][aria-selected='true'], " +
-                ".mat-mdc-option.mat-mdc-option-active, mat-option.mat-active, " +
-                ".mat-option.mat-active, [class*='option'][class*='active']"
-              );
-              return active?.textContent?.replace(/\s+/g, " ").trim() ?? "";
-            }).catch(() => "");
-          }
-
-          if (activeTxt) {
-            const normActive = normAr(activeTxt);
-            const match = activeTxt === value
-              || activeTxt.includes(value) || value.includes(activeTxt)
-              || normActive === normVal || normActive.includes(normVal) || normVal.includes(normActive);
-
-            if (match) {
-              await page.keyboard.press("Enter").catch(() => {});
-              await page.waitForTimeout(400);
-              addLog(session, `✅ ${fieldName}: "${value}" ← "${activeTxt}" [keyboard ki=${ki}]`);
-              return true;
+          const seen = new Set<Element>();
+          const all: Element[] = [];
+          for (const sel of [
+            ".cdk-overlay-container mat-option",
+            ".cdk-overlay-container .mat-mdc-option",
+            ".cdk-overlay-container [role='option']",
+            "mat-option", "[role='option']", ".mat-mdc-option",
+          ]) {
+            for (const el of Array.from(document.querySelectorAll(sel))) {
+              if (!seen.has(el)) { seen.add(el); all.push(el); }
             }
           }
 
-          await page.keyboard.press("ArrowDown").catch(() => {});
-          await page.waitForTimeout(80);
-        }
+          const available = all.map(e => e.textContent?.replace(/\s+/g, " ").trim() ?? "");
+          const doClick = (opt: Element, how: string) => {
+            (opt as HTMLElement).click();
+            opt.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+            return { matched: opt.textContent?.replace(/\s+/g, " ").trim() ?? "", how };
+          };
 
-        addLog(session, `⚠️ ${fieldName}: فشل التنقل بلوحة المفاتيح (35 خطوة)`);
-      } catch (ke) {
-        addLog(session, `⚠️ ${fieldName}: خطأ في keyboard nav: ${String(ke).slice(0, 80)}`);
+          for (const opt of all) {
+            const txt = opt.textContent?.replace(/\s+/g, " ").trim() ?? "";
+            if (txt === targetVal) return doClick(opt, "exact");
+          }
+          for (const opt of all) {
+            const txt = opt.textContent?.replace(/\s+/g, " ").trim() ?? "";
+            const nt = norm(txt);
+            if (nt === normTarget || nt.includes(normTarget) || normTarget.includes(nt))
+              return doClick(opt, "norm");
+          }
+          return { matched: null, how: "not-found", available: available.slice(0, 15) };
+        },
+        { targetVal: value, normTarget: normVal }
+      ).catch(() => null);
+
+      if (domResult?.matched) {
+        await page.waitForTimeout(300);
+        const note = domResult.how !== "exact" ? ` (${domResult.how})` : "";
+        addLog(session, `✅ ${fieldName}: "${value}"${note}`);
+        return true;
       }
+
+      const avail = (domResult as { available?: string[] } | null)?.available ?? [];
+      addLog(session, avail.length
+        ? `⚠️ ${fieldName}: لم يُطابق "${value}" — المتاح: [${avail.join(" | ")}]`
+        : `⚠️ ${fieldName}: لا خيارات في القائمة`
+      );
 
       await page.keyboard.press("Escape").catch(() => {});
     } catch (e) {
-      addLog(session, `⚠️ ${fieldName}: استثناء في tryMatSelect: ${String(e).slice(0, 120)}`);
+      addLog(session, `⚠️ ${fieldName}: ${String(e).slice(0, 100)}`);
       await page.keyboard.press("Escape").catch(() => {});
     }
     return false;
