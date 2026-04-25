@@ -3578,6 +3578,77 @@ async function selectDropdownByPageLabel(
         addLog(session, `⚠️ ${fieldName}: صفر خيارات — حتى بعد الانتظار الكامل`);
       }
 
+      // ── أسلوب لوحة المفاتيح: aria-activedescendant navigation ────────────
+      // هذا الأسلوب يتجاوز كل مشاكل الـ selectors — يعتمد على Angular نفسه
+      try {
+        // تحقق هل الـ dropdown مفتوح (aria-expanded)
+        const isExpanded = await ms.evaluate((el: Element) =>
+          el.getAttribute("aria-expanded") === "true"
+        ).catch(() => false);
+
+        if (!isExpanded) {
+          // أعد الفتح بالـ trigger
+          await trigger.click({ force: true, timeout: 1500 }).catch(() =>
+            ms.click({ force: true, timeout: 1500 }).catch(() => {})
+          );
+          await page.waitForTimeout(700);
+        }
+
+        addLog(session, `⌨️ ${fieldName}: محاولة التنقل بلوحة المفاتيح (ArrowDown × 30)`);
+
+        // اذهب للخيار الأول
+        await page.keyboard.press("Home").catch(() => {});
+        await page.waitForTimeout(150);
+
+        for (let ki = 0; ki < 35; ki++) {
+          // اقرأ العنصر النشط عبر aria-activedescendant
+          const activeId = await ms.evaluate((el: Element) =>
+            el.getAttribute("aria-activedescendant") ?? ""
+          ).catch(() => "");
+
+          let activeTxt = "";
+          if (activeId) {
+            activeTxt = await page.evaluate((id: string) => {
+              const el = document.getElementById(id);
+              return el?.textContent?.replace(/\s+/g, " ").trim() ?? "";
+            }, activeId).catch(() => "");
+          }
+
+          // إذا لم نجد عبر aria-activedescendant، جرّب [aria-selected='true']
+          if (!activeTxt) {
+            activeTxt = await page.evaluate(() => {
+              const active = document.querySelector(
+                "mat-option[aria-selected='true'], [role='option'][aria-selected='true'], " +
+                ".mat-mdc-option.mat-mdc-option-active, mat-option.mat-active, " +
+                ".mat-option.mat-active, [class*='option'][class*='active']"
+              );
+              return active?.textContent?.replace(/\s+/g, " ").trim() ?? "";
+            }).catch(() => "");
+          }
+
+          if (activeTxt) {
+            const normActive = normAr(activeTxt);
+            const match = activeTxt === value
+              || activeTxt.includes(value) || value.includes(activeTxt)
+              || normActive === normVal || normActive.includes(normVal) || normVal.includes(normActive);
+
+            if (match) {
+              await page.keyboard.press("Enter").catch(() => {});
+              await page.waitForTimeout(400);
+              addLog(session, `✅ ${fieldName}: "${value}" ← "${activeTxt}" [keyboard ki=${ki}]`);
+              return true;
+            }
+          }
+
+          await page.keyboard.press("ArrowDown").catch(() => {});
+          await page.waitForTimeout(80);
+        }
+
+        addLog(session, `⚠️ ${fieldName}: فشل التنقل بلوحة المفاتيح (35 خطوة)`);
+      } catch (ke) {
+        addLog(session, `⚠️ ${fieldName}: خطأ في keyboard nav: ${String(ke).slice(0, 80)}`);
+      }
+
       await page.keyboard.press("Escape").catch(() => {});
     } catch (e) {
       addLog(session, `⚠️ ${fieldName}: استثناء في tryMatSelect: ${String(e).slice(0, 120)}`);
