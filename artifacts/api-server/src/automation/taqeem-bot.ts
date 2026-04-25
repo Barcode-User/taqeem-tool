@@ -3376,74 +3376,162 @@ async function selectDropdownByPageLabel(
   if (!value) { addLog(session, `ℹ️ لا توجد قيمة لـ «${fieldName}» — تجاوز`); return; }
   const { page } = session;
 
-  // ── المساعد: فتح mat-select والاختيار ──────────────────────────────────
+  // ── المساعد: فتح mat-select/combobox والاختيار ─────────────────────────
   const tryMatSelect = async (ms: import("@playwright/test").Locator): Promise<boolean> => {
     try {
       await ms.scrollIntoViewIfNeeded().catch(() => {});
       await ms.click({ force: true, timeout: 2000 });
-      await page.waitForTimeout(300);
-      // انتظر ظهور الخيارات (max 1.5s)
-      await page.waitForSelector("mat-option, .mat-option, .mat-mdc-option", { timeout: 1500 }).catch(() => {});
 
-      // ابحث بمطابقة جزئية
-      const escapedVal = value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const opts = page.locator("mat-option, .mat-option, .mat-mdc-option");
-      const cnt = await opts.count().catch(() => 0);
+      // انتظر ظهور panel الخيارات في CDK overlay (Angular يضعها في body)
+      await page.waitForTimeout(600);
 
-      // 1) مطابقة تامة
-      for (let oi = 0; oi < cnt; oi++) {
-        const txt = (await opts.nth(oi).textContent().catch(() => ""))?.trim() ?? "";
-        if (txt === value) {
-          await opts.nth(oi).click({ force: true });
-          await page.waitForTimeout(300);
-          return true;
-        }
-      }
-      // 2) مطابقة جزئية (القيمة موجودة في نص الخيار أو العكس)
-      for (let oi = 0; oi < cnt; oi++) {
-        const txt = (await opts.nth(oi).textContent().catch(() => ""))?.trim() ?? "";
-        if (txt.includes(value) || value.includes(txt)) {
-          await opts.nth(oi).click({ force: true });
-          await page.waitForTimeout(300);
-          addLog(session, `⚠️ ${fieldName}: مطابقة جزئية "${txt}" بدلاً من "${value}"`);
-          return true;
-        }
-      }
-      // 3) مطابقة regex (تطبيع عربي)
-      const rxOpt = new RegExp(escapedVal, "i");
-      for (let oi = 0; oi < cnt; oi++) {
-        const txt = (await opts.nth(oi).textContent().catch(() => ""))?.trim() ?? "";
-        if (rxOpt.test(txt)) {
-          await opts.nth(oi).click({ force: true });
-          await page.waitForTimeout(300);
-          addLog(session, `⚠️ ${fieldName}: مطابقة regex "${txt}" بدلاً من "${value}"`);
-          return true;
-        }
-      }
-      // 4) مطابقة بعد تطبيع عربي (أ/إ/ا، ة/ه، ى/ي، حذف تشكيل)
+      // تطبيع عربي للمقارنة
       const normAr = (s: string) =>
         s.replace(/[\u064B-\u065F\u0670]/g, "")
          .replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي")
          .replace(/\s+/g, " ").trim().toLowerCase();
       const normVal = normAr(value);
-      for (let oi = 0; oi < cnt; oi++) {
-        const txt = (await opts.nth(oi).textContent().catch(() => ""))?.trim() ?? "";
-        const normTxt = normAr(txt);
-        if (normTxt === normVal || normTxt.includes(normVal) || normVal.includes(normTxt)) {
-          await opts.nth(oi).click({ force: true });
-          await page.waitForTimeout(300);
-          addLog(session, `⚠️ ${fieldName}: مطابقة مُطبَّعة "${txt}" بدلاً من "${value}"`);
-          return true;
+
+      // ── أولاً: استخدم page.evaluate للبحث المباشر في DOM ──────────────────
+      // هذا الأسلوب أكثر موثوقية لأنه يعمل مباشرة في DOM بدون مشاكل locator
+      const domResult = await page.evaluate(({ targetVal, normTarget }: { targetVal: string; normTarget: string }) => {
+        const normAr2 = (s: string) =>
+          s.replace(/[\u064B-\u065F\u0670]/g, "")
+           .replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي")
+           .replace(/\s+/g, " ").trim().toLowerCase();
+
+        // ابحث في كل الـ selectors المحتملة للخيارات
+        const optionSelectors = [
+          ".cdk-overlay-container mat-option",
+          ".cdk-overlay-container .mat-option",
+          ".cdk-overlay-container .mat-mdc-option",
+          ".cdk-overlay-container [role='option']",
+          ".mat-select-panel mat-option",
+          ".mat-mdc-select-panel mat-option",
+          ".mat-autocomplete-panel mat-option",
+          "mat-option",
+          "[role='option']",
+        ];
+
+        const allOptions: Element[] = [];
+        for (const sel of optionSelectors) {
+          const els = Array.from(document.querySelectorAll(sel));
+          for (const el of els) {
+            if (!allOptions.includes(el)) allOptions.push(el);
+          }
+        }
+
+        const available: string[] = allOptions.map(el => el.textContent?.replace(/\s+/g, " ").trim() ?? "");
+
+        // مطابقة تامة
+        for (const opt of allOptions) {
+          const txt = opt.textContent?.replace(/\s+/g, " ").trim() ?? "";
+          if (txt === targetVal) {
+            (opt as HTMLElement).click();
+            return { matched: txt, how: "exact" };
+          }
+        }
+        // مطابقة جزئية
+        for (const opt of allOptions) {
+          const txt = opt.textContent?.replace(/\s+/g, " ").trim() ?? "";
+          if (txt.includes(targetVal) || targetVal.includes(txt)) {
+            (opt as HTMLElement).click();
+            return { matched: txt, how: "partial" };
+          }
+        }
+        // مطابقة مُطبَّعة
+        for (const opt of allOptions) {
+          const txt = opt.textContent?.replace(/\s+/g, " ").trim() ?? "";
+          const normTxt = normAr2(txt);
+          if (normTxt === normTarget || normTxt.includes(normTarget) || normTarget.includes(normTxt)) {
+            (opt as HTMLElement).click();
+            return { matched: txt, how: "normalized" };
+          }
+        }
+        return { matched: null, how: "not-found", available: available.slice(0, 15) };
+      }, { targetVal: value, normTarget: normVal }).catch(() => null);
+
+      if (domResult?.matched) {
+        await page.waitForTimeout(350);
+        const how = domResult.how !== "exact" ? ` (${domResult.how}: "${domResult.matched}")` : "";
+        addLog(session, `✅ ${fieldName}: "${value}"${how} [DOM-click]`);
+        return true;
+      }
+
+      // سجّل الخيارات المتاحة إذا وجدت أو لا
+      if (domResult && !domResult.matched) {
+        const avail = (domResult as { available?: string[] }).available ?? [];
+        if (avail.length > 0) {
+          addLog(session, `⚠️ ${fieldName} [DOM]: لم يُطابق "${value}" — المتاح: [${avail.join(" | ")}]`);
+        } else {
+          addLog(session, `⚠️ ${fieldName} [DOM]: لم تُوجد خيارات في الـ overlay بعد النقر`);
         }
       }
-      // سجّل الخيارات المتاحة وأغلق
-      const available = [];
-      for (let oi = 0; oi < Math.min(cnt, 10); oi++) {
-        available.push((await opts.nth(oi).textContent().catch(() => ""))?.trim() ?? "");
+
+      // ── ثانياً: Playwright locators كطريقة احتياطية ───────────────────────
+      // انتظر أطول إذا لم نجد شيئاً بعد
+      await page.waitForSelector(
+        ".cdk-overlay-container mat-option, .cdk-overlay-container [role='option'], mat-option, [role='option']",
+        { timeout: 3000 }
+      ).catch(() => {});
+
+      const opts = page.locator([
+        ".cdk-overlay-container mat-option",
+        ".cdk-overlay-container .mat-mdc-option",
+        ".cdk-overlay-container [role='option']",
+        "mat-option",
+        ".mat-mdc-option",
+        "[role='option']",
+        ".mat-select-panel li",
+      ].join(", "));
+      const cnt = await opts.count().catch(() => 0);
+
+      if (cnt > 0) {
+        // 1) مطابقة تامة
+        for (let oi = 0; oi < cnt; oi++) {
+          const txt = (await opts.nth(oi).textContent().catch(() => ""))?.trim() ?? "";
+          if (txt === value) {
+            await opts.nth(oi).click({ force: true });
+            await page.waitForTimeout(300);
+            return true;
+          }
+        }
+        // 2) مطابقة جزئية
+        for (let oi = 0; oi < cnt; oi++) {
+          const txt = (await opts.nth(oi).textContent().catch(() => ""))?.trim() ?? "";
+          if (txt.includes(value) || value.includes(txt)) {
+            await opts.nth(oi).click({ force: true });
+            await page.waitForTimeout(300);
+            addLog(session, `⚠️ ${fieldName}: مطابقة جزئية "${txt}" بدلاً من "${value}" [PW]`);
+            return true;
+          }
+        }
+        // 3) مطابقة مُطبَّعة
+        for (let oi = 0; oi < cnt; oi++) {
+          const txt = (await opts.nth(oi).textContent().catch(() => ""))?.trim() ?? "";
+          const normTxt = normAr(txt);
+          if (normTxt === normVal || normTxt.includes(normVal) || normVal.includes(normTxt)) {
+            await opts.nth(oi).click({ force: true });
+            await page.waitForTimeout(300);
+            addLog(session, `⚠️ ${fieldName}: مطابقة مُطبَّعة "${txt}" بدلاً من "${value}" [PW]`);
+            return true;
+          }
+        }
+        // سجّل المتاح
+        const available = [];
+        for (let oi = 0; oi < Math.min(cnt, 10); oi++) {
+          available.push((await opts.nth(oi).textContent().catch(() => ""))?.trim() ?? "");
+        }
+        addLog(session, `⚠️ ${fieldName}: لم يُعثر على "${value}" — المتاح: [${available.join(" | ")}] [PW]`);
+      } else {
+        addLog(session, `⚠️ ${fieldName}: لم تُوجد خيارات بـ Playwright locators أيضاً`);
       }
-      addLog(session, `⚠️ ${fieldName}: لم يُعثر على "${value}" — المتاح: [${available.join(", ")}]`);
+
       await page.keyboard.press("Escape").catch(() => {});
-    } catch { await page.keyboard.press("Escape").catch(() => {}); }
+    } catch (e) {
+      addLog(session, `⚠️ ${fieldName}: استثناء في tryMatSelect: ${String(e).slice(0, 100)}`);
+      await page.keyboard.press("Escape").catch(() => {});
+    }
     return false;
   };
 
@@ -3532,8 +3620,96 @@ async function selectDropdownByPageLabel(
     return null;
   }, labelRx.source, value).catch(() => null);
 
-  if (result) addLog(session, `✅ ${fieldName}: "${value}" (${result})`);
-  else addLog(session, `⚠️ لم يُعثر على حقل «${fieldName}» بالـ label (قيمة: "${value}")`);
+  if (result) { addLog(session, `✅ ${fieldName}: "${value}" (${result})`); return; }
+
+  // ── أسلوب 4: combobox role — يعثر على mat-select بصلاحية ARIA ──────────
+  try {
+    const combos = page.getByRole("combobox");
+    const comboCnt = await combos.count().catch(() => 0);
+    for (let ci = 0; ci < comboCnt; ci++) {
+      const combo = combos.nth(ci);
+      // ابحث في نص الأب حتى 10 مستويات
+      const nearText = await combo.evaluate((el: Element, rxSrc: string) => {
+        const rx = new RegExp(rxSrc, "i");
+        let cur: Element | null = el.parentElement;
+        for (let d = 0; d < 10; d++) {
+          if (!cur) break;
+          const labels = Array.from(cur.querySelectorAll(
+            "mat-label, label, span, div, p, th, td, legend, .label"
+          ));
+          for (const lbl of labels) {
+            const t = (lbl.textContent ?? "").replace(/\s+/g, " ").replace(/\*/g, "").trim();
+            if (rx.test(t) && t.length < 100 && !lbl.contains(el)) return t;
+          }
+          cur = cur.parentElement;
+        }
+        return "";
+      }, labelRx.source).catch(() => "");
+      if (!labelRx.test(nearText)) continue;
+
+      // وجدنا الـ combobox — جرب كـ native select أولاً
+      try {
+        const tag = await combo.evaluate((el: Element) => el.tagName.toLowerCase()).catch(() => "");
+        if (tag === "select") {
+          const normAr2 = (s: string) =>
+            s.replace(/[\u064B-\u065F\u0670]/g, "")
+             .replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي")
+             .replace(/\s+/g, " ").trim().toLowerCase();
+          const chosen = await combo.evaluate((el: Element, nv: string, tv: string) => {
+            const sel = el as HTMLSelectElement;
+            for (const opt of Array.from(sel.options)) {
+              const t = opt.text.trim();
+              const nOpt = t.replace(/[\u064B-\u065F\u0670]/g, "")
+                .replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي")
+                .replace(/\s+/g, " ").trim().toLowerCase();
+              if (nOpt === nv || nOpt.includes(nv) || nv.includes(nOpt)
+                  || t === tv || t.includes(tv) || tv.includes(t)) {
+                sel.value = opt.value;
+                sel.dispatchEvent(new Event("change", { bubbles: true }));
+                return t;
+              }
+            }
+            return null;
+          }, normAr2(value), value).catch(() => null);
+          if (chosen) {
+            addLog(session, `✅ ${fieldName}: "${value}" ← "${chosen}" (native combobox)`);
+            return;
+          }
+        }
+      } catch { /* تابع */ }
+
+      // جرب كـ mat-select
+      const ok = await tryMatSelect(combo);
+      if (ok) { addLog(session, `✅ ${fieldName}: "${value}" (combobox role + mat-select)`); return; }
+      break;
+    }
+  } catch { /* تابع */ }
+
+  // ── أسلوب 5: بحث شامل — كل mat-select في الصفحة + scan للـ options ──────
+  try {
+    const allMs = page.locator("mat-select, select");
+    const allMsCnt = await allMs.count().catch(() => 0);
+    for (let mi = 0; mi < allMsCnt; mi++) {
+      const ms = allMs.nth(mi);
+      const nearText = await ms.evaluate((el: Element, rxSrc: string) => {
+        const rx = new RegExp(rxSrc, "i");
+        let cur: Element | null = el.parentElement;
+        for (let d = 0; d < 12; d++) {
+          if (!cur) break;
+          const t = (cur.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
+          if (rx.test(t)) return t;
+          cur = cur.parentElement;
+        }
+        return "";
+      }, labelRx.source).catch(() => "");
+      if (!labelRx.test(nearText)) continue;
+      const ok = await tryMatSelect(ms);
+      if (ok) { addLog(session, `✅ ${fieldName}: "${value}" (أسلوب 5 - شامل)`); return; }
+      break;
+    }
+  } catch { /* تابع */ }
+
+  addLog(session, `⚠️ لم يُعثر على حقل «${fieldName}» بأي أسلوب (قيمة: "${value}")`);
 }
 
 // ملء input عبر label الصفحة
