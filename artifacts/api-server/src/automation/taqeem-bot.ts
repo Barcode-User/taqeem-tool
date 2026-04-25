@@ -3064,294 +3064,119 @@ async function fillPage2(session: AutomationSession, report: any, els: any[], pd
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// الصفحة 3 — البيانات الإضافية (Screen 5)
+// الصفحة 3 — الحقول الإضافية فقط (لا تُكرر ما عبّأه fillAttributePage)
+// attribute[15] الأرض مستأجرة | attribute[17-20] تشطيب/تأثيث/تكييف/نوع مبنى
+// attribute[27] أفضل استخدام | attribute[28] عمر الأصل | attribute[31] عرض الشارع
 // ─────────────────────────────────────────────────────────────────────────────
-async function fillPage3(session: AutomationSession, report: any, els: any[], pdfState: { pdfUploaded: boolean }): Promise<void> {
-  logElements(session, els, "الصفحة 3 — البيانات الإضافية");
-
-  const inputs    = els.filter(e => e.tag === "INPUT" && !["file","radio","checkbox"].includes(e.type));
-  const selects   = els.filter(e => e.tag === "SELECT" || e.tag === "MAT-SELECT");
-  const checkboxes = els.filter(e => e.type === "checkbox");
+async function fillPage3(session: AutomationSession, report: any, _els: any[], pdfState: { pdfUploaded: boolean }): Promise<void> {
   const { page } = session;
 
-  // ── تشخيص: عرض قيم التقرير وخيارات الـ dropdowns في الصفحة 3 ─────────────
-  addLog(session, "🔍 [تشخيص] قيم بيانات المبنى المُستخرجة:");
-  addLog(session, `  buildingType    = "${report.buildingType ?? "NULL"}"`);
-  addLog(session, `  finishingStatus = "${report.finishingStatus ?? "NULL"}"`);
-  addLog(session, `  furnitureStatus = "${report.furnitureStatus ?? "NULL"}"`);
-  addLog(session, `  airCond         = "${report.airConditioningType ?? "NULL"}"`);
-  addLog(session, `  buildingAge     = "${report.buildingAge ?? "NULL"}"`);
-  addLog(session, `  streetWidth     = "${report.streetWidth ?? "NULL"}"`);
-  addLog(session, `  isLandRented    = "${report.isLandRented ?? "NULL"}"`);
-  addLog(session, `  buildingStatus  = "${report.buildingStatus ?? "NULL"}"`);
+  addLog(session, "🔍 [حقول إضافية] القيم:");
+  addLog(session, `  حالة التشطيب = "${report.finishingStatus ?? "NULL"}"`);
+  addLog(session, `  حالة التأثيث = "${report.furnitureStatus ?? "NULL"}"`);
+  addLog(session, `  التكييف      = "${report.airConditioningType ?? "NULL"}"`);
+  addLog(session, `  نوع المبنى   = "${report.buildingType ?? "NULL"}"`);
+  addLog(session, `  عمر الأصل   = "${report.buildingAge ?? "NULL"}"`);
+  addLog(session, `  عرض الشارع  = "${report.streetWidth ?? "NULL"}"`);
+  addLog(session, `  الأرض مستأجرة = "${report.isLandRented ?? "لا"}"`);
 
-  // ── تشخيص: عرض جميع mat-select في الصفحة 3 مع labels وخياراتها ──────────
-  try {
-    const matSelScan = await page.evaluate(() => {
-      const results: { label: string; options: string[] }[] = [];
-      const formFields = Array.from(document.querySelectorAll("mat-form-field"));
-      for (const ff of formFields) {
-        const labelEl = ff.querySelector("mat-label, label");
-        const labelTxt = labelEl?.textContent?.replace(/\s+/g, " ").trim() ?? "؟";
-        const matSel = ff.querySelector("mat-select");
-        if (!matSel) continue;
-        // خيارات الـ mat-select الموجودة حالياً
-        const panelId = matSel.getAttribute("aria-owns") ?? matSel.getAttribute("aria-controls") ?? "";
-        const panel = panelId ? document.getElementById(panelId) : null;
-        const optEls = panel
-          ? Array.from(panel.querySelectorAll("mat-option"))
-          : [];
-        const options = optEls.map(o => o.textContent?.replace(/\s+/g, " ").trim() ?? "").filter(Boolean);
-        results.push({ label: labelTxt, options });
-      }
-      return results;
-    }).catch(() => []);
+  // ── حالة التشطيب  (attribute[17]) ────────────────────────────────────────
+  await nativeSelectByName(session, "attribute[17]", report.finishingStatus, "حالة التشطيب");
 
-    if (matSelScan.length > 0) {
-      addLog(session, `🔍 [تشخيص] mat-select elements في الصفحة (${matSelScan.length}):`);
-      for (const item of matSelScan) {
-        addLog(session, `  [${item.label}] → خيارات مكشوفة: ${item.options.length > 0 ? item.options.join(" | ") : "(مخفية — سيتم كشفها عند الفتح)"}`);
-      }
-    }
-  } catch { /* تابع */ }
+  // ── حالة التأثيث  (attribute[18]) ────────────────────────────────────────
+  await nativeSelectByName(session, "attribute[18]", report.furnitureStatus, "حالة التأثيث");
 
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── التكييف       (attribute[19]) ────────────────────────────────────────
+  await nativeSelectByName(session, "attribute[19]", report.airConditioningType, "التكييف");
 
-  // ── رقم الصك / سند الملكية ───────────────────────────────────────────────
-  const deedEl = findEl(inputs,
-    /deed|deednum|deed.?number|titlenum|title.?number|صك|سند|رقم.*صك|رقم.*سند/i,
-  );
-  if (deedEl) await fillAngular(session, buildSelector(deedEl), report.deedNumber, "رقم الصك");
-  else addLog(session, `⚠️ لم يُعثر على حقل «رقم الصك»`);
+  // ── نوع المبنى    (attribute[20]) ────────────────────────────────────────
+  await nativeSelectByName(session, "attribute[20]", report.buildingType, "نوع المبنى");
 
-  // ── نوع الملكية ───────────────────────────────────────────────────────────
-  const ownerTypeEl = findEl(selects,
-    /ownership.?type|ownershiptype|ownership|ملكية|نوع.*ملكية/i,
-  );
-  if (ownerTypeEl) await selectAngular(session, buildSelector(ownerTypeEl), report.ownershipType, "نوع الملكية", ownerTypeEl.isMat);
-  else addLog(session, `⚠️ لم يُعثر على حقل «نوع الملكية»`);
-
-  // ── الاتجاهات المطلة على الشارع ──────────────────────────────────────────
-  const facadeEl = findEl(selects,
-    /facade|direction|frontage|street.?dir|اتجاه|مطلة|واجهة|جهات/i,
-  );
-  if (facadeEl) await selectAngular(session, buildSelector(facadeEl), report.streetFacades, "الاتجاهات المطلة", facadeEl.isMat);
-
-  // المرافق (checkboxes) — نُحدد المرافق الموجودة في `report.utilities`
-  await fillUtilitiesCheckboxes(session, els, report);
-
-  // ── مساحة الأرض (م²) ─────────────────────────────────────────────────────
-  const landEl = findEl(inputs,
-    /land.?area|landarea|plot.?area|plotarea|مساحة.*أرض|مساحة.*قطعة|مساحة.*أرضية/i,
-  );
-  if (landEl) await fillAngular(session, buildSelector(landEl), report.landArea, "مساحة الأرض");
-  else addLog(session, `⚠️ لم يُعثر على حقل «مساحة الأرض»`);
-
-  // ── مساحة مسطحات البناء ───────────────────────────────────────────────────
-  const buildEl = findEl(inputs,
-    /building.?area|buildingarea|floor.?area|floorarea|gross.?area|بناء.*مساحة|مساحة.*بناء|مساحة.*مسطحات/i,
-  );
-  if (buildEl) await fillAngular(session, buildSelector(buildEl), report.buildingArea, "مساحة البناء");
-
-  // ── مساحة البناء المصرح بها (نسبة مئوية) ────────────────────────────────
-  // القاعدة: استخدام/قطاع الأصل = سكني → 60% ، غير ذلك → 80%
-  const ratioEl = findEl(inputs,
-    /مساحة.*بناء.*مصرح|مصرح.*بناء|نسبة.*بناء|نسبة.*مصرح|ratio|buildratio|permitratio|permit.?ratio|building.?ratio/i,
-  );
-  if (ratioEl) {
-    const buildRatio = /سكن/i.test(report.propertyUse ?? "") ? "60" : "80";
-    addLog(session, `ℹ️ مساحة البناء المصرح بها: ${buildRatio}% (استخدام: ${report.propertyUse ?? "غير محدد"})`);
-    await fillAngular(session, buildSelector(ratioEl), buildRatio, "مساحة البناء المصرح بها (نسبة مئوية)");
-  } else {
-    addLog(session, "⚠️ لم يُعثر على حقل «مساحة البناء المصرح بها (نسبة مئوية)»");
-  }
-
-  // ── عدد الأدوار المصرح به ────────────────────────────────────────────────
-  const floorsEl = findEl(inputs,
-    /floor.?count|floorcount|floors|num.?floor|أدوار|عدد.*أدوار|طوابق|عدد.*طوابق/i,
-  );
-  if (floorsEl) await fillAngular(session, buildSelector(floorsEl), report.permittedFloorsCount ?? report.floorsCount, "عدد الأدوار");
-
-  // ── حالة البناء ───────────────────────────────────────────────────────────
-  await selectDropdownByPageLabel(session, /حالة.*بناء|building.?status/i, report.buildingStatus, "حالة البناء");
-
-  // ── نوع العقار الفرعي ────────────────────────────────────────────────────
-  {
-    const subTypeEl = findEl(selects, /sub.?type|subtype|property.?subtype|asset.?sub|نوع.*فرعي|فرعي/i);
-    if (subTypeEl) await selectAngular(session, buildSelector(subTypeEl), report.propertySubType, "نوع العقار الفرعي", subTypeEl.isMat);
-  }
-
-  // ── عمر الأصل محل التقييم ─────────────────────────────────────────────────
-  await scrollToLabelAndFill(session, "عمر الأصل");
-  await fillInputByPageLabel(session,
-    /عمر.*أصل|عمر.*مبنى|عمر.*عقار|عمر.*تقييم|عمر.*الاصل|building.?age|^age$/i,
-    report.buildingAge, "عمر الأصل محل التقييم");
-
-  // ── عرض الشارع ───────────────────────────────────────────────────────────
-  await scrollToLabelAndFill(session, "عرض الشارع");
-  await fillInputByPageLabel(session,
-    /عرض.*شارع|عرض.*طريق|شارع.*عرض|street.?width|road.?width/i,
-    report.streetWidth, "عرض الشارع");
-
-  // ── عدد الواجهات ─────────────────────────────────────────────────────────
-  if (report.facadesCount != null) {
-    const facCntEl = findEl(inputs, /عدد.*واجهات|facades?.?count/i) ?? findEl(selects, /عدد.*واجهات|facades?.?count/i);
-    if (facCntEl) {
-      if (facCntEl.tag === "MAT-SELECT" || facCntEl.tag === "SELECT" || facCntEl.isMat)
-        await selectAngular(session, buildSelector(facCntEl), String(report.facadesCount), "عدد الواجهات", facCntEl.isMat);
-      else await fillAngular(session, buildSelector(facCntEl), report.facadesCount, "عدد الواجهات");
-    }
-  }
-
-  // ── تمرير للأسفل قبل حقول المبنى الخاصة ────────────────────────────────
-  // هذه الحقول تظهر في أسفل صفحة 3 وقد تكون خارج نطاق الرؤية
-  addLog(session, "🔽 تمرير للأسفل للوصول لحقول المبنى...");
-  await page.evaluate(() => window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" }));
-  await page.waitForTimeout(800);
-
-  // ── تشخيص: عرض قيم حقول المبنى الخاصة ─────────────────────────────────
-  addLog(session, "🔍 [حقول المبنى] القيم المُراد إدخالها:");
-  addLog(session, `  buildingType     = "${report.buildingType ?? "NULL (سيُتجاوز)"}"`);
-  addLog(session, `  finishingStatus  = "${report.finishingStatus ?? "NULL (سيُتجاوز)"}"`);
-  addLog(session, `  furnitureStatus  = "${report.furnitureStatus ?? "NULL (سيُتجاوز)"}"`);
-  addLog(session, `  airCond          = "${report.airConditioningType ?? "NULL (سيُتجاوز)"}"`);
-  addLog(session, `  buildingAge      = "${report.buildingAge ?? "NULL"}"`);
-  addLog(session, `  streetWidth      = "${report.streetWidth ?? "NULL"}"`);
-  addLog(session, `  isBestUse        = "${report.isBestUse ?? "NULL"}"`);
-  addLog(session, `  isLandRented     = "${report.isLandRented ?? "NULL"}"`);
-
-  // ── مسح كل mat-form-field مرئي لعرض labels الحقول المكشوفة ─────────────
-  try {
-    const visibleFF = await page.evaluate(() => {
-      const results: string[] = [];
-      for (const ff of Array.from(document.querySelectorAll("mat-form-field"))) {
-        const rect = ff.getBoundingClientRect();
-        if (rect.height === 0) continue; // مخفي
-        const lbl = ff.querySelector("mat-label, label");
-        const ms  = ff.querySelector("mat-select");
-        const inp = ff.querySelector("input");
-        const tag = ms ? "mat-select" : inp ? "input" : "other";
-        results.push(`"${lbl?.textContent?.trim() ?? "؟"}" (${tag})`);
-      }
-      return results;
-    }).catch(() => [] as string[]);
-    addLog(session, `🔍 [mat-form-field visible] ${visibleFF.length} حقل: ${visibleFF.join(" | ")}`);
-  } catch { /* تابع */ }
-
-  // ── نوع المبنى ────────────────────────────────────────────────────────────
-  await scrollToLabelAndFill(session, "نوع المبنى");
-  await selectDropdownByPageLabel(session, /نوع.*مبنى|building.?type/i, report.buildingType, "نوع المبنى");
-
-  // ── حالة التشطيب ─────────────────────────────────────────────────────────
-  await scrollToLabelAndFill(session, "حالة التشطيب");
-  await selectDropdownByPageLabel(session, /حالة.*تشطيب|تشطيب|finishing.?status/i, report.finishingStatus, "حالة التشطيب");
-
-  // ── حالة التأثيث ─────────────────────────────────────────────────────────
-  await scrollToLabelAndFill(session, "حالة التأثيث");
-  await selectDropdownByPageLabel(session, /حالة.*تأثيث|تأثيث|furniture.?status/i, report.furnitureStatus, "حالة التأثيث");
-
-  // ── نوع التكييف ───────────────────────────────────────────────────────────
-  await scrollToLabelAndFill(session, "التكييف");
-  await selectDropdownByPageLabel(session, /التكييف|تكييف|air.?condition/i, report.airConditioningType, "التكييف");
-
-  // ── الأرض تحت المبنى مستأجرة ────────────────────────────────────────────
+  // ── الأرض مستأجرة (attribute[15]) — radio ────────────────────────────────
   await clickRadioByGroupLabel(session, /مستأجرة|land.?rent/i, report.isLandRented ?? "لا", "الأرض مستأجرة");
 
-  // ── الميزات الإضافية — مصدر: نص المرافق + additionalFeatures ────────────
-  {
-    // نجمع نص المصادر: المرافق + ميزات إضافية
-    const srcText = [report.utilities, report.additionalFeatures]
-      .filter(Boolean).join("، ");
+  // ── أفضل استخدام  (attribute[27]) — radio (دائماً = نعم) ─────────────────
+  await clickRadioByGroupLabel(session, /أفضل.*استخدام|best.?use/i, "نعم", "أفضل استخدام");
 
-    if (srcText.trim()) {
-      // تطبيع عربي لمقارنة أفضل
-      const normalizeAr = (s: string) =>
-        s.replace(/[\u064B-\u065F\u0670]/g, "")
-         .replace(/[أإآ]/g, "ا")
-         .replace(/ة/g, "ه")
-         .replace(/ى/g, "ي")
-         .replace(/\s+/g, " ").trim().toLowerCase();
-
-      const srcNorm = normalizeAr(srcText);
-      addLog(session, `🔧 [ميزات إضافية] نص المصدر: "${srcText.slice(0, 150)}"`);
-
-      // اجلب جميع checkboxes من الصفحة مع نصوصها
-      const cbs = await page.evaluate(() => {
-        const results: { index: number; text: string; checked: boolean }[] = [];
-        // mat-checkbox
-        document.querySelectorAll("mat-checkbox").forEach((el, i) => {
-          const txt = el.textContent?.replace(/\s+/g, " ").trim() ?? "";
-          if (txt) results.push({ index: i, text: txt, checked: (el.querySelector("input") as HTMLInputElement)?.checked ?? false });
-        });
-        // plain checkboxes with labels not already captured
-        document.querySelectorAll<HTMLInputElement>("input[type='checkbox']").forEach((inp, i) => {
-          const lbl =
-            inp.labels?.[0]?.textContent?.replace(/\s+/g, " ").trim() ??
-            inp.closest("label")?.textContent?.replace(/\s+/g, " ").trim() ??
-            inp.nextElementSibling?.textContent?.replace(/\s+/g, " ").trim() ??
-            inp.parentElement?.textContent?.replace(/\s+/g, " ").trim() ?? "";
-          if (lbl && !results.some(r => r.text === lbl))
-            results.push({ index: i, text: lbl, checked: inp.checked });
-        });
-        return results;
-      }).catch(() => [] as { index: number; text: string; checked: boolean }[]);
-
-      if (cbs.length > 0) {
-        addLog(session, `🔍 [ميزات إضافية] checkboxes المتاحة: ${cbs.map(c => `"${c.text}"`).join(" | ")}`);
-      }
-
-      // لكل checkbox — إذا كان نصه يتضمن كلمة موجودة في نص المصدر → اضغطه
-      for (const cb of cbs) {
-        const cbNorm = normalizeAr(cb.text);
-        // 1) تطابق كامل (نص الـ checkbox موجود بالكامل في نص المصدر)
-        let matched = srcNorm.includes(cbNorm);
-        // 2) تطابق كلمة: كلمة ≥ 4 أحرف من نص الـ checkbox موجودة في نص المصدر
-        if (!matched) {
-          const words = cbNorm.split(/[\s،,\/\-]+/).filter(w => w.length >= 4);
-          matched = words.some(w => srcNorm.includes(w));
-        }
-        if (!matched) continue;
-
-        const clicked = await page.evaluate((cbText: string) => {
-          // mat-checkbox
-          const matCbs = Array.from(document.querySelectorAll("mat-checkbox"));
-          for (const el of matCbs) {
-            if ((el.textContent?.replace(/\s+/g, " ").trim() ?? "") === cbText) {
-              const inp = el.querySelector<HTMLInputElement>("input");
-              if (inp && !inp.checked) { inp.click(); return true; }
-              if (inp && inp.checked) return true; // already checked
-            }
-          }
-          // plain checkbox
-          const all = Array.from(document.querySelectorAll<HTMLInputElement>("input[type='checkbox']"));
-          for (const inp of all) {
-            const lbl =
-              inp.labels?.[0]?.textContent?.replace(/\s+/g, " ").trim() ??
-              inp.closest("label")?.textContent?.replace(/\s+/g, " ").trim() ??
-              inp.nextElementSibling?.textContent?.replace(/\s+/g, " ").trim() ??
-              inp.parentElement?.textContent?.replace(/\s+/g, " ").trim() ?? "";
-            if (lbl === cbText) {
-              if (!inp.checked) { inp.click(); inp.dispatchEvent(new MouseEvent("change", { bubbles: true })); }
-              return true;
-            }
-          }
-          return false;
-        }, cb.text).catch(() => false);
-
-        addLog(session, clicked
-          ? `✅ [ميزة إضافية] "${cb.text}" — تم التحديد`
-          : `⚠️ [ميزة إضافية] "${cb.text}" — فشل الضغط`);
-      }
+  // ── عمر الأصل محل التقييم (attribute[28]) ────────────────────────────────
+  if (report.buildingAge != null && String(report.buildingAge).trim() !== "") {
+    const ageEl = page.locator(`input[name="attribute[28]"]`);
+    if (await ageEl.count().catch(() => 0) > 0) {
+      await ageEl.fill(String(report.buildingAge));
+      addLog(session, `✅ عمر الأصل: ${report.buildingAge}`);
     } else {
-      addLog(session, "ℹ️ لا يوجد نص مرافق أو ميزات إضافية — تجاوز");
+      addLog(session, `⚠️ لم يُعثر على input[name="attribute[28]"] (عمر الأصل)`);
     }
   }
 
-  // ── يعتبر الاستخدام الحالي أفضل استخدام (دائماً = نعم) ──────────────────
-  await clickRadioByGroupLabel(session, /أفضل.*استخدام|best.?use/i, "نعم", "أفضل استخدام");
+  // ── عرض الشارع (attribute[31]) ───────────────────────────────────────────
+  const sw = report.streetWidth;
+  if (sw != null && sw !== 0 && sw !== "0" && String(sw).trim() !== "") {
+    const swEl = page.locator(`input[name="attribute[31]"]`);
+    if (await swEl.count().catch(() => 0) > 0) {
+      await swEl.fill(String(sw));
+      addLog(session, `✅ عرض الشارع: ${sw}`);
+    } else {
+      addLog(session, `⚠️ لم يُعثر على input[name="attribute[31]"] (عرض الشارع)`);
+    }
+  }
 
-  // محاولة رفع PDF في الصفحة 3 إن لم يرفع سابقاً
+  // ── رفع PDF إن لم يتم سابقاً ──────────────────────────────────────────────
   await uploadPdf(session, report, pdfState);
+}
+
+// ── مساعد: اختيار من native <select> بالاسم مع مطابقة عربية مرنة ────────────
+async function nativeSelectByName(
+  session: AutomationSession,
+  name: string,
+  value: string | null | undefined,
+  fieldName: string,
+): Promise<void> {
+  if (!value || String(value).trim() === "") {
+    addLog(session, `ℹ️ ${fieldName}: لا قيمة — تجاوز`);
+    return;
+  }
+  const { page } = session;
+  const normAr = (s: string) =>
+    s.replace(/[\u064B-\u065F\u0670]/g, "")
+     .replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي")
+     .replace(/\s+/g, " ").trim().toLowerCase();
+  const normVal = normAr(value);
+
+  const result = await page.evaluate(
+    ({ selName, target, normTarget }: { selName: string; target: string; normTarget: string }) => {
+      const norm = (s: string) =>
+        s.replace(/[\u064B-\u065F\u0670]/g, "")
+         .replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي")
+         .replace(/\s+/g, " ").trim().toLowerCase();
+      const sel = document.querySelector<HTMLSelectElement>(`select[name="${selName}"]`);
+      if (!sel) return { ok: false, err: "not_found", available: [] as string[] };
+      const opts = Array.from(sel.options);
+      const available = opts.map(o => o.text.trim()).filter(Boolean);
+      const pick = (o: HTMLOptionElement) => {
+        sel.value = o.value;
+        sel.dispatchEvent(new Event("change", { bubbles: true }));
+        return { ok: true, chosen: o.text.trim(), available };
+      };
+      let m = opts.find(o => o.text.trim() === target);
+      if (!m) m = opts.find(o => norm(o.text) === normTarget);
+      if (!m) m = opts.find(o => norm(o.text).includes(normTarget) || normTarget.includes(norm(o.text)));
+      return m ? pick(m) : { ok: false, err: "no_match", available };
+    },
+    { selName: name, target: value, normTarget: normVal },
+  ).catch(() => null);
+
+  if (result?.ok) {
+    addLog(session, `✅ ${fieldName}: "${result.chosen ?? value}"`);
+  } else if (result?.err === "not_found") {
+    addLog(session, `⚠️ ${fieldName}: select[name="${name}"] غير موجود في الصفحة`);
+  } else {
+    const avail = result?.available ?? [];
+    addLog(session, avail.length
+      ? `⚠️ ${fieldName}: "${value}" غير موجود — المتاح: [${avail.join(" | ")}]`
+      : `⚠️ ${fieldName}: لا خيارات في القائمة`
+    );
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
