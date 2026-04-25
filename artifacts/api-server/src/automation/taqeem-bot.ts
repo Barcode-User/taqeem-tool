@@ -3173,11 +3173,13 @@ async function fillPage3(session: AutomationSession, report: any, els: any[], pd
   }
 
   // ── عمر الأصل محل التقييم ─────────────────────────────────────────────────
+  await scrollToLabelAndFill(session, "عمر الأصل");
   await fillInputByPageLabel(session,
     /عمر.*أصل|عمر.*مبنى|عمر.*عقار|عمر.*تقييم|عمر.*الاصل|building.?age|^age$/i,
     report.buildingAge, "عمر الأصل محل التقييم");
 
   // ── عرض الشارع ───────────────────────────────────────────────────────────
+  await scrollToLabelAndFill(session, "عرض الشارع");
   await fillInputByPageLabel(session,
     /عرض.*شارع|عرض.*طريق|شارع.*عرض|street.?width|road.?width/i,
     report.streetWidth, "عرض الشارع");
@@ -3192,16 +3194,55 @@ async function fillPage3(session: AutomationSession, report: any, els: any[], pd
     }
   }
 
+  // ── تمرير للأسفل قبل حقول المبنى الخاصة ────────────────────────────────
+  // هذه الحقول تظهر في أسفل صفحة 3 وقد تكون خارج نطاق الرؤية
+  addLog(session, "🔽 تمرير للأسفل للوصول لحقول المبنى...");
+  await page.evaluate(() => window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" }));
+  await page.waitForTimeout(800);
+
+  // ── تشخيص: عرض قيم حقول المبنى الخاصة ─────────────────────────────────
+  addLog(session, "🔍 [حقول المبنى] القيم المُراد إدخالها:");
+  addLog(session, `  buildingType     = "${report.buildingType ?? "NULL (سيُتجاوز)"}"`);
+  addLog(session, `  finishingStatus  = "${report.finishingStatus ?? "NULL (سيُتجاوز)"}"`);
+  addLog(session, `  furnitureStatus  = "${report.furnitureStatus ?? "NULL (سيُتجاوز)"}"`);
+  addLog(session, `  airCond          = "${report.airConditioningType ?? "NULL (سيُتجاوز)"}"`);
+  addLog(session, `  buildingAge      = "${report.buildingAge ?? "NULL"}"`);
+  addLog(session, `  streetWidth      = "${report.streetWidth ?? "NULL"}"`);
+  addLog(session, `  isBestUse        = "${report.isBestUse ?? "NULL"}"`);
+  addLog(session, `  isLandRented     = "${report.isLandRented ?? "NULL"}"`);
+
+  // ── مسح كل mat-form-field مرئي لعرض labels الحقول المكشوفة ─────────────
+  try {
+    const visibleFF = await page.evaluate(() => {
+      const results: string[] = [];
+      for (const ff of Array.from(document.querySelectorAll("mat-form-field"))) {
+        const rect = ff.getBoundingClientRect();
+        if (rect.height === 0) continue; // مخفي
+        const lbl = ff.querySelector("mat-label, label");
+        const ms  = ff.querySelector("mat-select");
+        const inp = ff.querySelector("input");
+        const tag = ms ? "mat-select" : inp ? "input" : "other";
+        results.push(`"${lbl?.textContent?.trim() ?? "؟"}" (${tag})`);
+      }
+      return results;
+    }).catch(() => [] as string[]);
+    addLog(session, `🔍 [mat-form-field visible] ${visibleFF.length} حقل: ${visibleFF.join(" | ")}`);
+  } catch { /* تابع */ }
+
   // ── نوع المبنى ────────────────────────────────────────────────────────────
+  await scrollToLabelAndFill(session, "نوع المبنى");
   await selectDropdownByPageLabel(session, /نوع.*مبنى|building.?type/i, report.buildingType, "نوع المبنى");
 
   // ── حالة التشطيب ─────────────────────────────────────────────────────────
+  await scrollToLabelAndFill(session, "حالة التشطيب");
   await selectDropdownByPageLabel(session, /حالة.*تشطيب|تشطيب|finishing.?status/i, report.finishingStatus, "حالة التشطيب");
 
   // ── حالة التأثيث ─────────────────────────────────────────────────────────
+  await scrollToLabelAndFill(session, "حالة التأثيث");
   await selectDropdownByPageLabel(session, /حالة.*تأثيث|تأثيث|furniture.?status/i, report.furnitureStatus, "حالة التأثيث");
 
   // ── نوع التكييف ───────────────────────────────────────────────────────────
+  await scrollToLabelAndFill(session, "التكييف");
   await selectDropdownByPageLabel(session, /التكييف|تكييف|air.?condition/i, report.airConditioningType, "التكييف");
 
   // ── الأرض تحت المبنى مستأجرة ────────────────────────────────────────────
@@ -3309,6 +3350,23 @@ async function fillPage3(session: AutomationSession, report: any, els: any[], pd
 // ─────────────────────────────────────────────────────────────────────────────
 
 // اختيار قيمة في dropdown (mat-select أو native select) عبر label الصفحة
+/** تمرير الصفحة إلى عنصر label يحتوي النص المطلوب — يُساعد على إظهار الحقول المخفية */
+async function scrollToLabelAndFill(session: AutomationSession, labelText: string): Promise<void> {
+  try {
+    await session.page.evaluate((txt: string) => {
+      const all = Array.from(document.querySelectorAll("mat-label, label, span, div, p, td"));
+      for (const el of all) {
+        const t = el.textContent?.replace(/\s+/g, " ").replace(/\*/g, "").trim() ?? "";
+        if (t.includes(txt) && t.length < 80) {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+          return;
+        }
+      }
+    }, labelText);
+    await session.page.waitForTimeout(300);
+  } catch { /* تابع */ }
+}
+
 async function selectDropdownByPageLabel(
   session: AutomationSession,
   labelRx: RegExp,
