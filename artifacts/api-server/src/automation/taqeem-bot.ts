@@ -3380,10 +3380,85 @@ async function selectDropdownByPageLabel(
   const tryMatSelect = async (ms: import("@playwright/test").Locator): Promise<boolean> => {
     try {
       await ms.scrollIntoViewIfNeeded().catch(() => {});
-      await ms.click({ force: true, timeout: 2000 });
 
-      // انتظر ظهور panel الخيارات في CDK overlay (Angular يضعها في body)
-      await page.waitForTimeout(600);
+      // ── جرّب النقر على mat-select-trigger أولاً (العنصر الداخلي المرئي) ──
+      const trigger = ms.locator(".mat-select-trigger, .mat-mdc-select-trigger, mat-select-trigger").first();
+      const hasTrigger = await trigger.count().catch(() => 0) > 0;
+      if (hasTrigger) {
+        await trigger.click({ force: true, timeout: 2000 }).catch(() => {});
+      } else {
+        await ms.click({ force: true, timeout: 2000 });
+      }
+
+      // انتظر ظهور panel الخيارات — Angular يحتاج وقتاً للأنيميشن
+      await page.waitForTimeout(800);
+
+      // ── تشخيص شامل: ماذا يوجد في DOM الآن؟ ─────────────────────────────
+      const diag = await page.evaluate(() => {
+        const cdk = document.querySelector(".cdk-overlay-container");
+        const matOptAll  = document.querySelectorAll("mat-option");
+        const roleOptAll = document.querySelectorAll("[role='option']");
+        const matMdc     = document.querySelectorAll(".mat-mdc-option");
+        const overlayPanels = document.querySelectorAll(
+          ".cdk-overlay-pane, .mat-select-panel, .mat-mdc-select-panel, " +
+          "[class*='select-panel'], [class*='overlay-pane']"
+        );
+        // جمع كل النصوص من الخيارات
+        const collectTexts = (els: NodeListOf<Element>) =>
+          Array.from(els).map(e => e.textContent?.replace(/\s+/g, " ").trim() ?? "").filter(Boolean);
+
+        return {
+          cdkExists:   !!cdk,
+          cdkVisible:  cdk ? window.getComputedStyle(cdk).display !== "none" : false,
+          cdkInnerHTML: cdk?.innerHTML?.slice(0, 1500) ?? "",
+          matOptCount: matOptAll.length,
+          roleOptCount: roleOptAll.length,
+          matMdcCount:  matMdc.length,
+          overlayPaneCount: overlayPanels.length,
+          overlayPaneClasses: Array.from(overlayPanels).map(e => e.className).slice(0, 5),
+          matOptTexts:  collectTexts(matOptAll).slice(0, 15),
+          roleOptTexts: collectTexts(roleOptAll).slice(0, 15),
+          matMdcTexts:  collectTexts(matMdc).slice(0, 15),
+          // كل العناصر open/active في الـ overlay
+          activeOverlayHTML: cdk?.querySelector(
+            ".mat-select-panel, .mat-mdc-select-panel, [class*='select-panel']"
+          )?.outerHTML?.slice(0, 800) ?? "",
+        };
+      }).catch(() => null);
+
+      if (diag) {
+        addLog(session, `🔍 [${fieldName}] cdk=${diag.cdkExists}/${diag.cdkVisible} matOpt=${diag.matOptCount} [role=opt]=${diag.roleOptCount} mdc=${diag.matMdcCount} panes=${diag.overlayPaneCount}`);
+        if (diag.matOptTexts.length)  addLog(session, `🔍 mat-option texts: [${diag.matOptTexts.join(" | ")}]`);
+        if (diag.roleOptTexts.length) addLog(session, `🔍 [role=option] texts: [${diag.roleOptTexts.join(" | ")}]`);
+        if (diag.matMdcTexts.length)  addLog(session, `🔍 mat-mdc-option texts: [${diag.matMdcTexts.join(" | ")}]`);
+        if (diag.overlayPaneClasses.length) addLog(session, `🔍 overlay pane classes: ${diag.overlayPaneClasses.join(", ")}`);
+        if (diag.matOptCount === 0 && diag.roleOptCount === 0 && diag.matMdcCount === 0) {
+          // لا توجد خيارات بعد — ربما تأخرت — أنتظر أكثر
+          addLog(session, `⏳ [${fieldName}] لا خيارات بعد 800ms — أنتظر 1500ms إضافية...`);
+          await page.waitForSelector(
+            "mat-option, [role='option'], .mat-mdc-option, .cdk-overlay-container li",
+            { timeout: 1500 }
+          ).catch(() => {});
+          // تشخيص ثاني بعد الانتظار الإضافي
+          const diag2 = await page.evaluate(() => {
+            const matOpt  = document.querySelectorAll("mat-option");
+            const roleOpt = document.querySelectorAll("[role='option']");
+            const matMdc  = document.querySelectorAll(".mat-mdc-option");
+            const collect = (els: NodeListOf<Element>) =>
+              Array.from(els).map(e => e.textContent?.replace(/\s+/g, " ").trim() ?? "").filter(Boolean);
+            return { matOptCount: matOpt.length, roleOptCount: roleOpt.length, matMdcCount: matMdc.length,
+                     matOptTexts: collect(matOpt).slice(0, 15) };
+          }).catch(() => null);
+          if (diag2) addLog(session, `🔍 [ثانٍ] matOpt=${diag2.matOptCount} roleOpt=${diag2.roleOptCount} mdc=${diag2.matMdcCount} texts:[${diag2.matOptTexts.join("|")}]`);
+        }
+        // سجّل HTML مختصر إن كان فارغاً لتشخيص البنية
+        if (diag.matOptCount === 0 && diag.activeOverlayHTML) {
+          addLog(session, `🔍 activePanel HTML: ${diag.activeOverlayHTML.slice(0, 300)}`);
+        }
+        if (diag.cdkInnerHTML && diag.matOptCount === 0 && diag.cdkVisible) {
+          addLog(session, `🔍 CDK HTML: ${diag.cdkInnerHTML.slice(0, 400)}`);
+        }
+      }
 
       // تطبيع عربي للمقارنة
       const normAr = (s: string) =>
@@ -3392,61 +3467,55 @@ async function selectDropdownByPageLabel(
          .replace(/\s+/g, " ").trim().toLowerCase();
       const normVal = normAr(value);
 
-      // ── أولاً: استخدم page.evaluate للبحث المباشر في DOM ──────────────────
-      // هذا الأسلوب أكثر موثوقية لأنه يعمل مباشرة في DOM بدون مشاكل locator
+      // ── أسلوب DOM (page.evaluate): يبحث في كل الـ selectors الممكنة ─────
       const domResult = await page.evaluate(({ targetVal, normTarget }: { targetVal: string; normTarget: string }) => {
         const normAr2 = (s: string) =>
           s.replace(/[\u064B-\u065F\u0670]/g, "")
            .replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي")
            .replace(/\s+/g, " ").trim().toLowerCase();
 
-        // ابحث في كل الـ selectors المحتملة للخيارات
         const optionSelectors = [
           ".cdk-overlay-container mat-option",
           ".cdk-overlay-container .mat-option",
           ".cdk-overlay-container .mat-mdc-option",
           ".cdk-overlay-container [role='option']",
+          ".cdk-overlay-container li",
           ".mat-select-panel mat-option",
           ".mat-mdc-select-panel mat-option",
-          ".mat-autocomplete-panel mat-option",
+          ".mat-mdc-select-panel [role='option']",
           "mat-option",
           "[role='option']",
+          ".mat-mdc-option",
         ];
 
         const allOptions: Element[] = [];
         for (const sel of optionSelectors) {
-          const els = Array.from(document.querySelectorAll(sel));
-          for (const el of els) {
+          for (const el of Array.from(document.querySelectorAll(sel))) {
             if (!allOptions.includes(el)) allOptions.push(el);
           }
         }
 
-        const available: string[] = allOptions.map(el => el.textContent?.replace(/\s+/g, " ").trim() ?? "");
+        const available = allOptions.map(el => el.textContent?.replace(/\s+/g, " ").trim() ?? "");
 
-        // مطابقة تامة
+        const tryClick = (opt: Element, how: string) => {
+          (opt as HTMLElement).click();
+          // dispatch Angular-compatible events
+          opt.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+          return { matched: opt.textContent?.replace(/\s+/g, " ").trim() ?? "", how };
+        };
+
         for (const opt of allOptions) {
           const txt = opt.textContent?.replace(/\s+/g, " ").trim() ?? "";
-          if (txt === targetVal) {
-            (opt as HTMLElement).click();
-            return { matched: txt, how: "exact" };
-          }
+          if (txt === targetVal) return tryClick(opt, "exact");
         }
-        // مطابقة جزئية
         for (const opt of allOptions) {
           const txt = opt.textContent?.replace(/\s+/g, " ").trim() ?? "";
-          if (txt.includes(targetVal) || targetVal.includes(txt)) {
-            (opt as HTMLElement).click();
-            return { matched: txt, how: "partial" };
-          }
+          if (txt.includes(targetVal) || targetVal.includes(txt)) return tryClick(opt, "partial");
         }
-        // مطابقة مُطبَّعة
         for (const opt of allOptions) {
           const txt = opt.textContent?.replace(/\s+/g, " ").trim() ?? "";
-          const normTxt = normAr2(txt);
-          if (normTxt === normTarget || normTxt.includes(normTarget) || normTarget.includes(normTxt)) {
-            (opt as HTMLElement).click();
-            return { matched: txt, how: "normalized" };
-          }
+          const nt = normAr2(txt);
+          if (nt === normTarget || nt.includes(normTarget) || normTarget.includes(nt)) return tryClick(opt, "norm");
         }
         return { matched: null, how: "not-found", available: available.slice(0, 15) };
       }, { targetVal: value, normTarget: normVal }).catch(() => null);
@@ -3454,25 +3523,21 @@ async function selectDropdownByPageLabel(
       if (domResult?.matched) {
         await page.waitForTimeout(350);
         const how = domResult.how !== "exact" ? ` (${domResult.how}: "${domResult.matched}")` : "";
-        addLog(session, `✅ ${fieldName}: "${value}"${how} [DOM-click]`);
+        addLog(session, `✅ ${fieldName}: "${value}"${how} [DOM]`);
         return true;
       }
-
-      // سجّل الخيارات المتاحة إذا وجدت أو لا
       if (domResult && !domResult.matched) {
         const avail = (domResult as { available?: string[] }).available ?? [];
-        if (avail.length > 0) {
-          addLog(session, `⚠️ ${fieldName} [DOM]: لم يُطابق "${value}" — المتاح: [${avail.join(" | ")}]`);
-        } else {
-          addLog(session, `⚠️ ${fieldName} [DOM]: لم تُوجد خيارات في الـ overlay بعد النقر`);
-        }
+        addLog(session, avail.length
+          ? `⚠️ ${fieldName} [DOM]: لم يُطابق "${value}" — المتاح: [${avail.join(" | ")}]`
+          : `⚠️ ${fieldName} [DOM]: صفر خيارات في DOM`
+        );
       }
 
-      // ── ثانياً: Playwright locators كطريقة احتياطية ───────────────────────
-      // انتظر أطول إذا لم نجد شيئاً بعد
+      // ── أسلوب Playwright locator كاحتياطي ───────────────────────────────
       await page.waitForSelector(
-        ".cdk-overlay-container mat-option, .cdk-overlay-container [role='option'], mat-option, [role='option']",
-        { timeout: 3000 }
+        ".cdk-overlay-container mat-option, .cdk-overlay-container [role='option'], mat-option, [role='option'], .mat-mdc-option",
+        { timeout: 2000 }
       ).catch(() => {});
 
       const opts = page.locator([
@@ -3482,54 +3547,40 @@ async function selectDropdownByPageLabel(
         "mat-option",
         ".mat-mdc-option",
         "[role='option']",
-        ".mat-select-panel li",
       ].join(", "));
       const cnt = await opts.count().catch(() => 0);
 
       if (cnt > 0) {
-        // 1) مطابقة تامة
         for (let oi = 0; oi < cnt; oi++) {
           const txt = (await opts.nth(oi).textContent().catch(() => ""))?.trim() ?? "";
-          if (txt === value) {
+          if (txt === value || txt.includes(value) || value.includes(txt)) {
             await opts.nth(oi).click({ force: true });
             await page.waitForTimeout(300);
+            addLog(session, `✅ ${fieldName}: "${value}" ← "${txt}" [PW]`);
             return true;
           }
         }
-        // 2) مطابقة جزئية
+        const normTxt2 = async (oi: number) => normAr((await opts.nth(oi).textContent().catch(() => ""))?.trim() ?? "");
         for (let oi = 0; oi < cnt; oi++) {
-          const txt = (await opts.nth(oi).textContent().catch(() => ""))?.trim() ?? "";
-          if (txt.includes(value) || value.includes(txt)) {
+          const nt = await normTxt2(oi);
+          if (nt === normVal || nt.includes(normVal) || normVal.includes(nt)) {
+            const raw = (await opts.nth(oi).textContent().catch(() => ""))?.trim() ?? "";
             await opts.nth(oi).click({ force: true });
             await page.waitForTimeout(300);
-            addLog(session, `⚠️ ${fieldName}: مطابقة جزئية "${txt}" بدلاً من "${value}" [PW]`);
+            addLog(session, `✅ ${fieldName}: "${value}" ← "${raw}" (norm) [PW]`);
             return true;
           }
         }
-        // 3) مطابقة مُطبَّعة
-        for (let oi = 0; oi < cnt; oi++) {
-          const txt = (await opts.nth(oi).textContent().catch(() => ""))?.trim() ?? "";
-          const normTxt = normAr(txt);
-          if (normTxt === normVal || normTxt.includes(normVal) || normVal.includes(normTxt)) {
-            await opts.nth(oi).click({ force: true });
-            await page.waitForTimeout(300);
-            addLog(session, `⚠️ ${fieldName}: مطابقة مُطبَّعة "${txt}" بدلاً من "${value}" [PW]`);
-            return true;
-          }
-        }
-        // سجّل المتاح
-        const available = [];
-        for (let oi = 0; oi < Math.min(cnt, 10); oi++) {
-          available.push((await opts.nth(oi).textContent().catch(() => ""))?.trim() ?? "");
-        }
-        addLog(session, `⚠️ ${fieldName}: لم يُعثر على "${value}" — المتاح: [${available.join(" | ")}] [PW]`);
+        const avail2 = [];
+        for (let oi = 0; oi < Math.min(cnt, 10); oi++) avail2.push((await opts.nth(oi).textContent().catch(() => ""))?.trim() ?? "");
+        addLog(session, `⚠️ ${fieldName}: لم يُعثر على "${value}" — المتاح: [${avail2.join(" | ")}] [PW]`);
       } else {
-        addLog(session, `⚠️ ${fieldName}: لم تُوجد خيارات بـ Playwright locators أيضاً`);
+        addLog(session, `⚠️ ${fieldName}: صفر خيارات — حتى بعد الانتظار الكامل`);
       }
 
       await page.keyboard.press("Escape").catch(() => {});
     } catch (e) {
-      addLog(session, `⚠️ ${fieldName}: استثناء في tryMatSelect: ${String(e).slice(0, 100)}`);
+      addLog(session, `⚠️ ${fieldName}: استثناء في tryMatSelect: ${String(e).slice(0, 120)}`);
       await page.keyboard.press("Escape").catch(() => {});
     }
     return false;
