@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { Link } from "wouter";
 import { useListReports, useGetReportStats } from "@workspace/api-client-react";
 import { 
@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { FileText, Clock, CheckCircle2, Upload, AlertCircle, PlusCircle, Search, Filter, Database } from "lucide-react";
+import { FileText, Clock, CheckCircle2, Upload, AlertCircle, PlusCircle, Search, Filter, Database, Loader2, CircleDashed, Ban, RotateCcw } from "lucide-react";
 import { format } from "date-fns";
 import { arSA } from "date-fns/locale";
 import { Button } from "@/components/ui/button";
@@ -30,6 +30,16 @@ const statusMap: Record<string, { label: string, color: string }> = {
   extracted: { label: "تم الاستخراج", color: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 border-blue-200" },
   reviewed:  { label: "تمت المراجعة", color: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400 border-purple-200" },
   submitted: { label: "تم الرفع",     color: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border-green-200" },
+};
+
+const automationStatusMap: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
+  idle:         { label: "لم يُرفع",       color: "bg-gray-100 text-gray-500 border-gray-200",                           icon: <CircleDashed className="h-3 w-3" /> },
+  pending:      { label: "في الانتظار",    color: "bg-yellow-100 text-yellow-700 border-yellow-200",                     icon: <Clock className="h-3 w-3" /> },
+  queued:       { label: "في الطابور",     color: "bg-orange-100 text-orange-700 border-orange-200",                     icon: <RotateCcw className="h-3 w-3" /> },
+  running:      { label: "جارٍ الرفع",     color: "bg-blue-100 text-blue-700 border-blue-200 animate-pulse",             icon: <Loader2 className="h-3 w-3 animate-spin" /> },
+  waiting_otp:  { label: "ينتظر OTP",      color: "bg-purple-100 text-purple-700 border-purple-200 animate-pulse",       icon: <Loader2 className="h-3 w-3 animate-spin" /> },
+  completed:    { label: "تم الرفع",       color: "bg-green-100 text-green-700 border-green-200",                        icon: <CheckCircle2 className="h-3 w-3" /> },
+  failed:       { label: "فشل الرفع",      color: "bg-red-100 text-red-700 border-red-200",                              icon: <Ban className="h-3 w-3" /> },
 };
 
 function FieldScore({ score }: { score: number | undefined }) {
@@ -54,12 +64,22 @@ type DsEntry = {
 export default function Dashboard() {
   const apiBase = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
 
-  const { data: reports, isLoading: reportsLoading } = useListReports({
-    query: { staleTime: 30_000, refetchOnWindowFocus: false }
+  const { data: reports, isLoading: reportsLoading, refetch: refetchReports } = useListReports({
+    query: { staleTime: 5_000, refetchOnWindowFocus: true }
   });
   const { data: stats, isLoading: statsLoading } = useGetReportStats({
     query: { staleTime: 60_000, refetchOnWindowFocus: false }
   });
+
+  // تحديث تلقائي كل 5 ثوانٍ عند وجود طلبات جارية أو في الطابور
+  const hasActiveAutomation = reports?.some(r =>
+    ["running", "waiting_otp", "queued"].includes((r as any).automationStatus ?? "")
+  );
+  useEffect(() => {
+    if (!hasActiveAutomation) return;
+    const interval = setInterval(() => refetchReports(), 5000);
+    return () => clearInterval(interval);
+  }, [hasActiveAutomation, refetchReports]);
 
   const [searchQuery,  setSearchQuery]  = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -204,6 +224,7 @@ export default function Dashboard() {
                     <TableHead className="text-right">نوع العقار</TableHead>
                     <TableHead className="text-right">تاريخ التقرير</TableHead>
                     <TableHead className="text-right">الحالة</TableHead>
+                    <TableHead className="text-right">حالة الرفع في تقييم</TableHead>
                     <TableHead className="text-right">مصدر البيانات</TableHead>
                     <TableHead className="text-right">التطابق الكلي</TableHead>
                   </TableRow>
@@ -263,6 +284,20 @@ export default function Dashboard() {
                               </Badge>
                             </div>
                           </Link>
+                        </TableCell>
+
+                        {/* حالة الرفع في تقييم */}
+                        <TableCell>
+                          {(() => {
+                            const as = (report as any).automationStatus ?? "idle";
+                            const info = automationStatusMap[as] ?? automationStatusMap["idle"];
+                            return (
+                              <Badge variant="outline" className={`${info.color} px-2 py-0.5 rounded-full font-normal flex items-center gap-1 w-fit`}>
+                                {info.icon}
+                                {info.label}
+                              </Badge>
+                            );
+                          })()}
                         </TableCell>
 
                         {/* مصدر البيانات */}
