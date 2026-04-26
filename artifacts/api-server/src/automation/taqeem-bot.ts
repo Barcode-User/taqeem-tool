@@ -859,6 +859,56 @@ async function setInputValue(page: Page, selector: string, val: string): Promise
   }, { sel: selector, v: val });
 }
 
+// ─── تعبئة حقل رقمي بالاسم مباشرةً — يتجنب مشكلة الأقواس في CSS selector ───
+// مثال: attribute[31] → CSS يُربك بعض المحركات بسبب الأقواس المتداخلة
+async function fillInputByName(
+  session: AutomationSession,
+  name: string,
+  value: string | number | null | undefined,
+  label: string,
+): Promise<void> {
+  if (value === null || value === undefined || String(value).trim() === "") {
+    addLog(session, `⏭️ تخطي "${label}" — لا توجد قيمة`);
+    return;
+  }
+  const val = String(value).trim();
+  const { page } = session;
+  try {
+    // انتظر حتى يظهر العنصر — XPath أكثر أماناً مع الأسماء التي تحتوي أقواساً
+    await page.waitForSelector(`xpath=//input[@name="${name}"]`, { timeout: 2000 });
+
+    // طريقة 1: JavaScript مباشر (يتجنب CSS selector issues)
+    const filled = await page.evaluate(({ n, v }: { n: string; v: string }) => {
+      const el = Array.from(document.querySelectorAll("input"))
+        .find((e) => (e as HTMLInputElement).name === n) as HTMLInputElement | null;
+      if (!el) return false;
+      el.focus();
+      el.select();
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+      if (setter) setter.call(el, v); else el.value = v;
+      el.dispatchEvent(new Event("input",  { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      el.dispatchEvent(new Event("blur",   { bubbles: true }));
+      return true;
+    }, { n: name, v: val });
+
+    if (filled) {
+      addLog(session, `✅ ${label}: ${val}`);
+      return;
+    }
+
+    // طريقة 2: XPath + keyboard typing — احتياطية
+    const loc = page.locator(`xpath=//input[@name="${name}"]`).first();
+    await loc.click({ clickCount: 3 });
+    await page.keyboard.press("Control+a");
+    await loc.pressSequentially(val, { delay: 30 });
+    await page.keyboard.press("Tab");
+    addLog(session, `✅ ${label}: ${val} (keyboard)`);
+  } catch (err: any) {
+    addLog(session, `⚠️ لم يُعبَّأ "${label}": ${(err as Error).message}`);
+  }
+}
+
 async function fillAngular(
   session: AutomationSession, selector: string,
   value: string | number | null | undefined, label: string,
@@ -3181,19 +3231,11 @@ async function fillPage3(session: AutomationSession, report: any, _els: any[], p
 
   // ── عمر الأصل محل التقييم (attribute[28]) ────────────────────────────────
   const ageVal = extractNumber(report.buildingAge);
-  if (ageVal) {
-    await fillAngular(session, `input[name="attribute[28]"]`, ageVal, "عمر الأصل");
-  } else {
-    addLog(session, `⏭️ تخطي عمر الأصل — القيمة غير متوفرة: "${report.buildingAge ?? "NULL"}"`);
-  }
+  await fillInputByName(session, "attribute[28]", ageVal || null, "عمر الأصل");
 
   // ── عرض الشارع (attribute[31]) ───────────────────────────────────────────
   const swVal = extractNumber(report.streetWidth);
-  if (swVal) {
-    await fillAngular(session, `input[name="attribute[31]"]`, swVal, "عرض الشارع");
-  } else {
-    addLog(session, `⏭️ تخطي عرض الشارع — القيمة غير متوفرة: "${report.streetWidth ?? "NULL"}"`);
-  }
+  await fillInputByName(session, "attribute[31]", swVal || null, "عرض الشارع");
 
   // ── رفع PDF إن لم يتم سابقاً ──────────────────────────────────────────────
   await uploadPdf(session, report, pdfState);
