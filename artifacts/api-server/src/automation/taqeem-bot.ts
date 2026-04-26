@@ -3098,24 +3098,32 @@ async function fillPage3(session: AutomationSession, report: any, _els: any[], p
   // ── أفضل استخدام  (attribute[27]) — radio (دائماً = نعم) ─────────────────
   await clickRadioByGroupLabel(session, /أفضل.*استخدام|best.?use/i, "نعم", "أفضل استخدام");
 
+  // مساعد: استخراج أول رقم (صحيح أو عشري) من نص مثل "20م" أو "عرض 15.5 متر"
+  const extractNumber = (v: any): string => {
+    if (v == null) return "";
+    const m = String(v).match(/[\d]+(?:[.,]\d+)?/);
+    return m ? m[0].replace(",", ".") : "";
+  };
+
   // ── عمر الأصل محل التقييم (attribute[28]) ────────────────────────────────
-  if (report.buildingAge != null && String(report.buildingAge).trim() !== "") {
+  const ageVal = extractNumber(report.buildingAge);
+  if (ageVal !== "") {
     const ageEl = page.locator(`input[name="attribute[28]"]`);
     if (await ageEl.count().catch(() => 0) > 0) {
-      await ageEl.fill(String(report.buildingAge));
-      addLog(session, `✅ عمر الأصل: ${report.buildingAge}`);
+      await ageEl.fill(ageVal);
+      addLog(session, `✅ عمر الأصل: ${ageVal}`);
     } else {
       addLog(session, `⚠️ لم يُعثر على input[name="attribute[28]"] (عمر الأصل)`);
     }
   }
 
   // ── عرض الشارع (attribute[31]) ───────────────────────────────────────────
-  const sw = report.streetWidth;
-  if (sw != null && sw !== 0 && sw !== "0" && String(sw).trim() !== "") {
+  const swVal = extractNumber(report.streetWidth);
+  if (swVal !== "" && swVal !== "0") {
     const swEl = page.locator(`input[name="attribute[31]"]`);
     if (await swEl.count().catch(() => 0) > 0) {
-      await swEl.fill(String(sw));
-      addLog(session, `✅ عرض الشارع: ${sw}`);
+      await swEl.fill(swVal);
+      addLog(session, `✅ عرض الشارع: ${swVal}`);
     } else {
       addLog(session, `⚠️ لم يُعثر على input[name="attribute[31]"] (عرض الشارع)`);
     }
