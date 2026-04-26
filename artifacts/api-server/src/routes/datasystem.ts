@@ -334,7 +334,7 @@ function extractFields(body: Record<string, any>, filePath: string) {
     floorsCount:                n(body.floorsCount),
     permittedFloorsCount:       i(body.permittedFloorsCount),
     permittedBuildingRatio:     n(body.permittedBuildingRatio),
-    streetWidth:                n(body.streetWidth),
+    streetWidth:                s(body.streetWidth),
     streetFacades:              s(body.streetFacades),
     facadesCount:               i(body.facadesCount),
     utilities:                  s(body.utilities),
