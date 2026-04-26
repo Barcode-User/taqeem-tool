@@ -110,7 +110,7 @@ function getDb(): DatabaseSync {
       PdfFileName               TEXT,
       PdfFilePath               TEXT,
       Notes                     TEXT,
-      AutomationStatus          TEXT NOT NULL DEFAULT 'pending',
+      AutomationStatus          TEXT NOT NULL DEFAULT 'idle',
       AutomationError           TEXT,
       AutomationSessionId       TEXT,
       QrCodeBase64              TEXT,
@@ -147,6 +147,12 @@ function getDb(): DatabaseSync {
   addIfMissing("MarketWay",                 "TEXT");
   addIfMissing("IncomeWay",                 "TEXT");
   addIfMissing("CostWay",                   "TEXT");
+  addIfMissing("AutomationStatus",          "TEXT NOT NULL DEFAULT 'idle'");
+  addIfMissing("AutomationError",           "TEXT");
+  addIfMissing("AutomationSessionId",       "TEXT");
+  addIfMissing("QrCodeBase64",              "TEXT");
+  addIfMissing("CertificatePath",           "TEXT");
+  addIfMissing("TaqeemSubmittedAt",         "TEXT");
 
   // ─── جدول datasystem ──────────────────────────────────────────────────────
   _db.exec(`
@@ -363,7 +369,7 @@ function rowToReport(row: any): Report {
     pdfFileName: str(row.PdfFileName),
     pdfFilePath: str(row.PdfFilePath),
     notes: str(row.Notes),
-    automationStatus: str(row.AutomationStatus) ?? "pending",
+    automationStatus: str(row.AutomationStatus) ?? "idle",
     automationError: str(row.AutomationError),
     automationSessionId: str(row.AutomationSessionId),
     qrCodeBase64: str(row.QrCodeBase64),
