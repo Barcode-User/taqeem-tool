@@ -796,17 +796,42 @@ async function screenshot(page: Page, name: string): Promise<void> {
 }
 
 // تحويل التاريخ إلى YYYY-MM-DD (المطلوب من حقول <input type="date"> في قيمة)
+// تاريخ اليوم بصيغة YYYY-MM-DD
+function todayStr(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+// هل التاريخ فارغ أو افتراضي (.NET / قواعد البيانات)؟
+function isInvalidDate(s: string): boolean {
+  // تواريخ افتراضية شائعة: 0001-01-01، 1900-01-01، 1970-01-01
+  return /^0001-|^1900-01-01|^1970-01-01/.test(s) || parseInt(s.substring(0, 4), 10) < 1980;
+}
+
 function formatDate(raw: string | null | undefined): string | null {
-  if (!raw) return null;
+  if (!raw) return todayStr();          // لا توجد قيمة → تاريخ اليوم
   const s = raw.trim();
-  // الصيغة المثالية YYYY-MM-DD — لا تعديل
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  if (!s)  return todayStr();
+
+  // الصيغة المثالية YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    return isInvalidDate(s) ? todayStr() : s;  // 0001-01-01 → اليوم
+  }
   // صيغة DD/MM/YYYY → YYYY-MM-DD
   const dmy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`;
+  if (dmy) {
+    const result = `${dmy[3]}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`;
+    return isInvalidDate(result) ? todayStr() : result;
+  }
   // صيغة MM/DD/YYYY → YYYY-MM-DD (احتياطي)
   const mdy = s.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
-  if (mdy) return `${mdy[3]}-${mdy[1].padStart(2, "0")}-${mdy[2].padStart(2, "0")}`;
+  if (mdy) {
+    const result = `${mdy[3]}-${mdy[1].padStart(2, "0")}-${mdy[2].padStart(2, "0")}`;
+    return isInvalidDate(result) ? todayStr() : result;
+  }
   return s;
 }
 
