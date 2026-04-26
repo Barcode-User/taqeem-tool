@@ -33,7 +33,7 @@ const storage = multer.diskStorage({
     cb(null, `ds_${unique}_${file.originalname}`);
   },
 });
-const upload = multer({ storage, limits: { fileSize: 30 * 1024 * 1024 } });
+const upload = multer({ storage, limits: { fileSize: 200 * 1024 * 1024 } });
 
 const router: IRouter = Router();
 
