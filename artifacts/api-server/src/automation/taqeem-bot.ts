@@ -811,14 +811,17 @@ function isInvalidDate(s: string): boolean {
   return /^0001-|^1900-01-01|^1970-01-01/.test(s) || parseInt(s.substring(0, 4), 10) < 1980;
 }
 
-function formatDate(raw: string | null | undefined): string | null {
-  if (!raw) return todayStr();          // لا توجد قيمة → تاريخ اليوم
+function formatDate(raw: string | null | undefined): string {
+  if (!raw) return todayStr();
   const s = raw.trim();
   if (!s)  return todayStr();
 
-  // الصيغة المثالية YYYY-MM-DD
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
-    return isInvalidDate(s) ? todayStr() : s;  // 0001-01-01 → اليوم
+  // استخرج الجزء التاريخي فقط من أي صيغة ISO (0001-01-01T00:00:00 → 0001-01-01)
+  const datePart = s.substring(0, 10);
+
+  // الصيغة المثالية YYYY-MM-DD (أو مستخرجة من ISO)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+    return isInvalidDate(datePart) ? todayStr() : datePart;
   }
   // صيغة DD/MM/YYYY → YYYY-MM-DD
   const dmy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
@@ -826,12 +829,14 @@ function formatDate(raw: string | null | undefined): string | null {
     const result = `${dmy[3]}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`;
     return isInvalidDate(result) ? todayStr() : result;
   }
-  // صيغة MM/DD/YYYY → YYYY-MM-DD (احتياطي)
+  // صيغة D-M-YYYY أو M-D-YYYY → YYYY-MM-DD
   const mdy = s.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
   if (mdy) {
     const result = `${mdy[3]}-${mdy[1].padStart(2, "0")}-${mdy[2].padStart(2, "0")}`;
     return isInvalidDate(result) ? todayStr() : result;
   }
+  // أي تاريخ يبدأ بـ 0001 أو سنة غير صالحة — أرجع اليوم
+  if (isInvalidDate(s)) return todayStr();
   return s;
 }
 
