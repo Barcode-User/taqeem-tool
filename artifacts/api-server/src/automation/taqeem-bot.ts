@@ -3106,8 +3106,8 @@ async function fillPage3(session: AutomationSession, report: any, _els: any[], p
   };
 
   // ── عمر الأصل محل التقييم (attribute[28]) ────────────────────────────────
-  const ageVal = extractNumber(report.buildingAge);
-  if (ageVal !== "") {
+  const ageVal = extractNumber(report.buildingAge) || "0";
+  {
     const ageEl = page.locator(`input[name="attribute[28]"]`);
     if (await ageEl.count().catch(() => 0) > 0) {
       await ageEl.fill(ageVal);
@@ -3118,8 +3118,8 @@ async function fillPage3(session: AutomationSession, report: any, _els: any[], p
   }
 
   // ── عرض الشارع (attribute[31]) ───────────────────────────────────────────
-  const swVal = extractNumber(report.streetWidth);
-  if (swVal !== "" && swVal !== "0") {
+  const swVal = extractNumber(report.streetWidth) || "0";
+  {
     const swEl = page.locator(`input[name="attribute[31]"]`);
     if (await swEl.count().catch(() => 0) > 0) {
       await swEl.fill(swVal);
