@@ -3118,8 +3118,8 @@ async function fillPage3(session: AutomationSession, report: any, _els: any[], p
   };
 
   // ── عمر الأصل محل التقييم (attribute[28]) ────────────────────────────────
-  const ageVal = extractNumber(report.buildingAge) || "0";
-  {
+  const ageVal = extractNumber(report.buildingAge);
+  if (ageVal) {
     const ageEl = page.locator(`input[name="attribute[28]"]`);
     if (await ageEl.count().catch(() => 0) > 0) {
       await ageEl.fill(ageVal);
@@ -3127,11 +3127,13 @@ async function fillPage3(session: AutomationSession, report: any, _els: any[], p
     } else {
       addLog(session, `⚠️ لم يُعثر على input[name="attribute[28]"] (عمر الأصل)`);
     }
+  } else {
+    addLog(session, `⏭️ تخطي عمر الأصل — القيمة غير متوفرة: "${report.buildingAge ?? "NULL"}"`);
   }
 
   // ── عرض الشارع (attribute[31]) ───────────────────────────────────────────
-  const swVal = extractNumber(report.streetWidth) || "0";
-  {
+  const swVal = extractNumber(report.streetWidth);
+  if (swVal) {
     const swEl = page.locator(`input[name="attribute[31]"]`);
     if (await swEl.count().catch(() => 0) > 0) {
       await swEl.fill(swVal);
@@ -3139,6 +3141,8 @@ async function fillPage3(session: AutomationSession, report: any, _els: any[], p
     } else {
       addLog(session, `⚠️ لم يُعثر على input[name="attribute[31]"] (عرض الشارع)`);
     }
+  } else {
+    addLog(session, `⏭️ تخطي عرض الشارع — القيمة غير متوفرة: "${report.streetWidth ?? "NULL"}"`);
   }
 
   // ── رفع PDF إن لم يتم سابقاً ──────────────────────────────────────────────
