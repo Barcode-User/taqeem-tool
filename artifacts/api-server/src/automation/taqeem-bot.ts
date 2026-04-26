@@ -3120,13 +3120,7 @@ async function fillPage3(session: AutomationSession, report: any, _els: any[], p
   // ── عمر الأصل محل التقييم (attribute[28]) ────────────────────────────────
   const ageVal = extractNumber(report.buildingAge);
   if (ageVal) {
-    const ageEl = page.locator(`input[name="attribute[28]"]`);
-    if (await ageEl.count().catch(() => 0) > 0) {
-      await ageEl.fill(ageVal);
-      addLog(session, `✅ عمر الأصل: ${ageVal}`);
-    } else {
-      addLog(session, `⚠️ لم يُعثر على input[name="attribute[28]"] (عمر الأصل)`);
-    }
+    await fillAngular(session, `input[name="attribute[28]"]`, ageVal, "عمر الأصل");
   } else {
     addLog(session, `⏭️ تخطي عمر الأصل — القيمة غير متوفرة: "${report.buildingAge ?? "NULL"}"`);
   }
@@ -3134,13 +3128,7 @@ async function fillPage3(session: AutomationSession, report: any, _els: any[], p
   // ── عرض الشارع (attribute[31]) ───────────────────────────────────────────
   const swVal = extractNumber(report.streetWidth);
   if (swVal) {
-    const swEl = page.locator(`input[name="attribute[31]"]`);
-    if (await swEl.count().catch(() => 0) > 0) {
-      await swEl.fill(swVal);
-      addLog(session, `✅ عرض الشارع: ${swVal}`);
-    } else {
-      addLog(session, `⚠️ لم يُعثر على input[name="attribute[31]"] (عرض الشارع)`);
-    }
+    await fillAngular(session, `input[name="attribute[31]"]`, swVal, "عرض الشارع");
   } else {
     addLog(session, `⏭️ تخطي عرض الشارع — القيمة غير متوفرة: "${report.streetWidth ?? "NULL"}"`);
   }
