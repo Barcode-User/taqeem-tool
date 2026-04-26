@@ -331,7 +331,7 @@ function extractFields(body: Record<string, any>, filePath: string) {
     buildingArea:               n(body.buildingArea),
     basementArea:               n(body.basementArea),
     annexArea:                  n(body.annexArea),
-    floorsCount:                i(body.floorsCount),
+    floorsCount:                n(body.floorsCount),
     permittedFloorsCount:       i(body.permittedFloorsCount),
     permittedBuildingRatio:     n(body.permittedBuildingRatio),
     streetWidth:                n(body.streetWidth),
