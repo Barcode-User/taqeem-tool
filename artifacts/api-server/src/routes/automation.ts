@@ -9,7 +9,7 @@ import {
   updateReport,
 } from "@workspace/db";
 import { startAutomation } from "../automation/taqeem-bot";
-import { getSessionByReportId, submitOtp } from "../automation/session-manager";
+import { getSessionByReportId, submitOtp, isAnySessionRunning } from "../automation/session-manager";
 import {
   startLogin,
   submitLoginOtp,
@@ -185,6 +185,17 @@ router.post("/automation/submit-external", upload.single("pdf"), async (req, res
     const sessionContext = await getAuthenticatedContext();
 
     if (sessionContext) {
+      // ── تحقق: هل توجد عملية أتمتة تعمل الآن؟ ──────────────────────────────
+      if (isAnySessionRunning()) {
+        res.status(409).json({
+          status:  "busy",
+          reportId: report.id,
+          draftSaved: true,
+          message: "يوجد تقرير آخر قيد الرفع حالياً. تم حفظ طلبك كمسودة وسيُرفع لاحقاً.",
+        });
+        return;
+      }
+
       // ✅ جلسة نشطة — رفع فوري (يبقى في الطابور حتى يكمل startAutomation)
       console.log(`[ExternalSubmit] ✅ تقرير #${report.id} — رفع فوري (جلسة نشطة)`);
 
@@ -247,6 +258,11 @@ router.post("/automation/start/:reportId", async (req, res) => {
       // لا توجد جلسة — الحالة عالقة من جلسة سابقة (مثلاً إعادة تشغيل الخادم)
       // أعد الضبط وابدأ من جديد
       await updateReport(reportId, { automationStatus: "idle", automationError: "تم إعادة الضبط تلقائياً — كانت الحالة عالقة" });
+    }
+
+    if (isAnySessionRunning()) {
+      res.status(409).json({ error: "يوجد تقرير آخر قيد الرفع حالياً — انتظر حتى ينتهي ثم أعد المحاولة" });
+      return;
     }
 
     const sessionId = await startAutomation(reportId);

@@ -82,3 +82,9 @@ export function addLog(session: AutomationSession, message: string): void {
 export function getAllSessions(): AutomationSession[] {
   return Array.from(sessions.values());
 }
+
+export function isAnySessionRunning(): boolean {
+  return Array.from(sessions.values()).some(
+    (s) => s.status === "running" || s.status === "waiting_otp",
+  );
+}
