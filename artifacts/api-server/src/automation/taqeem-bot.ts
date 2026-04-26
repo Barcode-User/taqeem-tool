@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
 import * as fs from "fs";
 import * as path from "path";
-import { getReportById, updateReport, sqliteGetDataSystemByReportId } from "@workspace/db";
+import { getReportById, updateReport, sqliteGetDataSystemByReportId, getReportsByAutomationStatus } from "@workspace/db";
 import {
   createSession,
   closeSession,
@@ -55,6 +55,19 @@ export async function startAutomation(
     .finally(async () => {
       // إغلاق السياق المعزول — لا يؤثر على الجلسة الرئيسية أو أي مستخدم آخر
       await cleanup();
+      // ── تشغيل الطلب التالي في الطابور تلقائياً ──────────────────────────
+      setTimeout(async () => {
+        try {
+          const queued = await getReportsByAutomationStatus("queued");
+          if (queued.length > 0) {
+            const next = queued[0];
+            console.log(`[Queue] ▶ تشغيل التقرير التالي #${next.id} تلقائياً...`);
+            await startAutomation(next.id);
+          }
+        } catch (e: any) {
+          console.error(`[Queue] ❌ خطأ في تشغيل الطلب التالي: ${e.message}`);
+        }
+      }, 3000);
     });
 
   return sessionId;

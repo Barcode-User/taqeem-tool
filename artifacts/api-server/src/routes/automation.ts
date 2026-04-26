@@ -185,21 +185,20 @@ router.post("/automation/submit-external", upload.single("pdf"), async (req, res
     const sessionContext = await getAuthenticatedContext();
 
     if (sessionContext) {
-      // ── تحقق: هل توجد عملية أتمتة تعمل الآن؟ ──────────────────────────────
       if (isAnySessionRunning()) {
-        res.status(409).json({
-          status:  "busy",
-          reportId: report.id,
+        // يوجد تقرير آخر يعمل الآن — اترك هذا في الطابور وسيُنفَّذ تلقائياً بعد انتهاء الأول
+        console.log(`[ExternalSubmit] 🕐 تقرير #${report.id} — أُضيف للطابور (يوجد تقرير يعمل الآن)`);
+        res.status(202).json({
+          status:     "queued",
+          reportId:   report.id,
           draftSaved: true,
-          message: "يوجد تقرير آخر قيد الرفع حالياً. تم حفظ طلبك كمسودة وسيُرفع لاحقاً.",
+          message:    "تم حفظ الطلب وسيُرفع تلقائياً بعد انتهاء الطلب الحالي",
         });
         return;
       }
 
-      // ✅ جلسة نشطة — رفع فوري (يبقى في الطابور حتى يكمل startAutomation)
+      // ✅ لا يوجد شيء يعمل — ابدأ فوراً
       console.log(`[ExternalSubmit] ✅ تقرير #${report.id} — رفع فوري (جلسة نشطة)`);
-
-      // startAutomation سيُغيّر automationStatus من queued → running تلقائياً
       const sessionId = await startAutomation(report.id);
 
       res.status(202).json({
@@ -207,7 +206,7 @@ router.post("/automation/submit-external", upload.single("pdf"), async (req, res
         reportId:  report.id,
         sessionId,
         draftSaved: true,
-        message:   "تم حفظ الطلب وجارٍ رفعه فوراً على منصة تقييم (الجلسة نشطة)",
+        message:   "تم حفظ الطلب وجارٍ رفعه فوراً على منصة تقييم",
       });
     } else {
       // 🕐 جلسة منتهية — يبقى مسودة حتى تسجيل الدخول
@@ -261,7 +260,9 @@ router.post("/automation/start/:reportId", async (req, res) => {
     }
 
     if (isAnySessionRunning()) {
-      res.status(409).json({ error: "يوجد تقرير آخر قيد الرفع حالياً — انتظر حتى ينتهي ثم أعد المحاولة" });
+      // اترك في الطابور وسيُنفَّذ تلقائياً
+      await updateReport(reportId, { automationStatus: "queued" });
+      res.json({ status: "queued", message: "تمت إضافة الطلب للطابور وسيُنفَّذ بعد انتهاء الطلب الحالي" });
       return;
     }
 
