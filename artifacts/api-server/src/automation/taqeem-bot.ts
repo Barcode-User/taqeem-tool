@@ -1570,18 +1570,17 @@ async function selectNativeByName(
   const sel = `[name="${name}"]`;
 
   try {
-    await session.page.waitForSelector(sel, { timeout: 5000 });
+    await session.page.waitForSelector(sel, { timeout: 1500 });
 
-    // انتظار تحميل الخيارات من API (Angular يحمّلها بشكل غير متزامن)
-    // نحتاج options.length > 1 حتى نختار — وإلا نختار من قائمة فارغة فيعود "اختر"
+    // انتظار تحميل الخيارات — خفّفنا التايمآوت لأن قوائم TAQEEM محملة مسبقاً
     await session.page.waitForFunction(
       (s: string) => {
         const el = document.querySelector<HTMLSelectElement>(s);
         return !!el && el.options.length > 1;
       },
       sel,
-      { timeout: 10000 },
-    ).catch(() => addLog(session, `⚠️ "${label}": الخيارات لم تُحمَّل — سأحاول على أي حال`));
+      { timeout: 1500 },
+    ).catch(() => {});
 
     // محاولة 1: page.selectOption بالنص الأصلي ثم القيمة
     const chosen = await session.page
