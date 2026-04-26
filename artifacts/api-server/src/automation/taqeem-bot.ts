@@ -188,7 +188,7 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     // ① انتقل للصفحة الرئيسية أولاً لإعادة ضبط Angular router
     await page.goto(`${TAQEEM_URL}/`, { waitUntil: "domcontentloaded", timeout: 20000 })
       .catch(() => {}); // تجاهل الفشل — الهدف تحديد السياق فقط
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(300);
 
     // ② امسح localStorage/sessionStorage الخاصة بـ TAQEEM
     await page.evaluate(() => {
@@ -219,10 +219,12 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     addLog(session, "═══════════════════════════════════════");
 
     await page.goto(`${TAQEEM_URL}/report/create/1/13`, {
-      waitUntil: "networkidle",
+      waitUntil: "domcontentloaded",
       timeout: 30000,
     });
-    await page.waitForTimeout(2000);
+    // انتظر ظهور أول حقل في النموذج بدلاً من ثابت 2 ثانية
+    await page.waitForSelector('[name="title"], [name="purpose_id"], form', { timeout: 10000 })
+      .catch(() => {});
 
     if (page.url().includes("/login") || page.url().includes("sso.taqeem")) {
       throw new Error("انتهت الجلسة — يرجى تسجيل الدخول مجدداً من صفحة الإعدادات.");
@@ -241,12 +243,13 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
       addLog(session, `🔄 إعادة المحاولة: التنقل المباشر لنموذج إنشاء جديد...`);
 
       // انتظر قليلاً ثم أعد المحاولة
-      await page.waitForTimeout(2000);
+      await page.waitForTimeout(500);
       await page.goto(`${TAQEEM_URL}/report/create/1/13`, {
-        waitUntil: "networkidle",
+        waitUntil: "domcontentloaded",
         timeout: 30000,
       });
-      await page.waitForTimeout(2000);
+      await page.waitForSelector('[name="title"], [name="purpose_id"], form', { timeout: 8000 })
+        .catch(() => {});
 
       if (!page.url().includes("/report/create/")) {
         throw new Error(
@@ -315,7 +318,7 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
       });
 
     await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(400);
 
     // ── استخراج رقم التقرير من URL الصفحة 2 والتحقق منه ─────────────────
     const page2Url = page.url();
@@ -339,8 +342,9 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     const expectedPage2 = `${TAQEEM_URL}/report/asset/create/${taqeemReportId}`;
     if (!page2Url.includes(`/report/asset/create/${taqeemReportId}`)) {
       addLog(session, `↩️ التنقل المباشر لصفحة الأصل: ${expectedPage2}`);
-      await page.goto(expectedPage2, { waitUntil: "networkidle", timeout: 30000 });
-      await page.waitForTimeout(1500);
+      await page.goto(expectedPage2, { waitUntil: "domcontentloaded", timeout: 30000 });
+      await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
+      await page.waitForTimeout(400);
     }
     addLog(session, `✅ تأكيد URL الصفحة 2: ${page.url()}`);
 
@@ -374,8 +378,8 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
       { timeout: 30000 },
     ).catch(() => addLog(session, "⚠️ URL لم يتغير بعد 30 ثانية"));
 
-    await page.waitForLoadState("domcontentloaded", { timeout: 15000 }).catch(() => {});
-    await page.waitForTimeout(1200);
+    await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
+    await page.waitForTimeout(300);
 
     const afterSavePage2Url = page.url();
     addLog(session, `🔗 URL بعد حفظ الصفحة 2: ${afterSavePage2Url}`);
@@ -412,7 +416,8 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     if (!afterSavePage2Url.includes("/report/attribute/create/")) {
       addLog(session, "↩️ الانتقال المباشر لصفحة السمات...");
       await page.goto(expectedPage3, { waitUntil: "domcontentloaded", timeout: 30000 });
-      await page.waitForTimeout(1500);
+      await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
+      await page.waitForTimeout(300);
     }
     addLog(session, `✅ تأكيد URL الصفحة 3 [assetId: ${assetId}]: ${page.url()}`);
 
@@ -430,7 +435,8 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
       addLog(session, `⚠️ URL غير متوقع قبل تعبئة الصفحة 3: ${p3CurrentUrl}`);
       addLog(session, "↩️ محاولة الانتقال المباشر لصفحة 3...");
       await page.goto(expectedPage3, { waitUntil: "domcontentloaded", timeout: 30000 });
-      await page.waitForTimeout(2000);
+      await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
+      await page.waitForTimeout(300);
     }
     addLog(session, `✅ URL الصفحة 3 مؤكد: ${page.url()}`);
 
@@ -462,29 +468,32 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
       addLog(session, `⚠️ تغيّر URL أثناء تعبئة الصفحة 3: ${urlAfterFillP3}`);
       addLog(session, "↩️ إعادة الانتقال لصفحة 3...");
       await page.goto(expectedPage3, { waitUntil: "domcontentloaded", timeout: 30000 });
-      await page.waitForTimeout(1500);
+      await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
+      await page.waitForTimeout(300);
     }
 
     // انتظر قصير لتستقر Angular form validation قبل الحفظ
-    await page.waitForTimeout(800);
+    await page.waitForTimeout(400);
     await screenshot(page, `p3_after_${reportId}`);
 
     // ── ضغط زر "حفظ وإغلاق" (الصفحة 3 تستخدم هذا الزر لا "حفظ واستمرار") ──
     const urlBeforeSaveP3 = page.url();
     await clickSaveAndClose(session);
-    await page.waitForTimeout(1000);
+    await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
+    await page.waitForTimeout(400);
     // إذا لم يتغير URL → جرب "حفظ واستمرار" ثم "continue" كاحتياط
     if (page.url() === urlBeforeSaveP3) {
       addLog(session, "ℹ️ URL لم يتغير بعد حفظ وإغلاق — أجرب حفظ واستمرار");
       await clickSaveAndContinue(session);
-      await page.waitForTimeout(800);
+      await page.waitForLoadState("networkidle", { timeout: 6000 }).catch(() => {});
+      await page.waitForTimeout(300);
     }
     if (page.url() === urlBeforeSaveP3) {
       addLog(session, "ℹ️ URL لم يتغير — أجرب زر المتابعة");
       await clickContinueButton(session);
+      await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
     }
-    await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(300);
 
     await screenshot(page, `review_${reportId}`);
     const finalUrl = page.url();
@@ -508,8 +517,12 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
 // أدوات مساعدة مشتركة
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function waitForAngular(page: Page, extra = 2000): Promise<void> {
-  await page.waitForTimeout(extra);
+// انتظر استقرار Angular — أسرع بكثير من ثابت 2 ثانية
+async function waitForAngular(page: Page, extra = 800): Promise<void> {
+  // أولاً: انتظر هدوء الشبكة (500ms بلا طلبات) — أقصى 3 ثوانٍ
+  await page.waitForLoadState("networkidle", { timeout: 3000 }).catch(() => {});
+  // ثانياً: انتظر إضافي قصير لاستقرار Angular zone.js بعد آخر استجابة
+  if (extra > 0) await page.waitForTimeout(Math.min(extra, 400));
 }
 
 // ينتظر انتهاء الانتقال بين الصفحات
@@ -540,8 +553,8 @@ async function waitForPageTransition(
     .waitForLoadState("networkidle", { timeout: 15000 })
     .catch(() => {});
 
-  // انتظر إضافي ليُكمل Angular تهيئة النموذج
-  await page.waitForTimeout(2500);
+  // انتظر قصير لاستقرار Angular بعد آخر استجابة
+  await page.waitForTimeout(500);
   addLog(session, `✅ ${label} جاهزة: ${page.url()}`);
 }
 
@@ -1049,7 +1062,7 @@ async function selectAngular(
       const optLoc = page.locator("mat-option, .mat-option, .mat-mdc-option")
         .filter({ hasText: optionText.found });
       await optLoc.first().click({ timeout: 2000 });
-      await page.waitForTimeout(300);
+      await page.waitForTimeout(80);
       if (optionText.usedFallback) {
         addLog(session, `⚠️ "${label}": "${value}" غير موجود — تم اختيار "${optionText.found}" (${optionText.fallbackReason})`);
       } else {
@@ -1393,8 +1406,39 @@ async function fillFormPage(
   const selectByName = (name: string, value: any, label: string, fallback?: string) =>
     selectNativeByName(session, name, value, label, fallback);
 
-  // ── عنوان التقرير ────────────────────────────────────────────────────────
-  await fillByName("title", report.reportNumber, "عنوان التقرير");
+  // ── ملء حقول النص دفعة واحدة (أسرع بكثير من استدعاء تسلسلي) ─────────────
+  const textBatch: Record<string, string> = {};
+  if (report.reportNumber)         textBatch["title"]                   = String(report.reportNumber);
+  if (report.finalValue != null)   textBatch["value"]                   = String(report.finalValue);
+  if (report.assumptions)          textBatch["assumptions"]             = String(report.assumptions);
+  if (report.specialAssumptions)   textBatch["special_assumptions"]     = String(report.specialAssumptions);
+  if (report.clientName)           textBatch["client[0][name]"]         = String(report.clientName);
+  if (report.clientPhone)          textBatch["client[0][telephone]"]    = String(report.clientPhone);
+  if (report.clientEmail)          textBatch["client[0][email]"]        = String(report.clientEmail);
+
+  if (Object.keys(textBatch).length > 0) {
+    const filled = await session.page.evaluate((batch: Record<string, string>) => {
+      const results: string[] = [];
+      for (const [name, val] of Object.entries(batch)) {
+        const el = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(
+          `[name="${name}"]`
+        );
+        if (!el) { results.push(`⚠️ ${name}: لم يُعثر`); continue; }
+        // استخدم native setter المناسب لكل نوع عنصر لإخطار Angular zone.js
+        const proto = el instanceof HTMLTextAreaElement
+          ? window.HTMLTextAreaElement.prototype
+          : window.HTMLInputElement.prototype;
+        const nativeSetter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
+        if (nativeSetter) nativeSetter.call(el, val); else el.value = val;
+        el.dispatchEvent(new Event("input",  { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        el.dispatchEvent(new Event("blur",   { bubbles: true }));
+        results.push(`✅ ${name}: ${val.slice(0, 30)}`);
+      }
+      return results;
+    }, textBatch);
+    filled.forEach(r => addLog(session, r));
+  }
 
   // ── الغرض من التقييم ─────────────────────────────────────────────────────
   await selectByName("purpose_id", report.valuationPurpose, "الغرض من التقييم", "أخرى");
@@ -1430,30 +1474,8 @@ async function fillFormPage(
   // ── تاريخ إصدار التقرير ───────────────────────────────────────────────────
   await fillDate(session, '[name="submitted_at"]', report.reportDate, "تاريخ إصدار التقرير");
 
-  // ── الافتراضات ────────────────────────────────────────────────────────────
-  if (report.assumptions) {
-    await fillByName("assumptions", report.assumptions, "الافتراضات");
-  }
-
-  // ── الافتراضات الخاصة ────────────────────────────────────────────────────
-  if (report.specialAssumptions) {
-    await fillByName("special_assumptions", report.specialAssumptions, "الافتراضات الخاصة");
-  }
-
-  // ── الرأي النهائي في القيمة ───────────────────────────────────────────────
-  await fillByName("value", report.finalValue, "الرأي النهائي في القيمة");
-
   // ── عملة التقييم (افتراضي: ريال سعودي) ──────────────────────────────────
   await selectByName("currency_id", report.currency ?? "ريال سعودي", "عملة التقييم");
-
-  // ── اسم العميل ───────────────────────────────────────────────────────────
-  await fillByName("client[0][name]", report.clientName, "اسم العميل");
-
-  // ── رقم الهاتف ───────────────────────────────────────────────────────────
-  await fillByName("client[0][telephone]", report.clientPhone, "رقم الهاتف");
-
-  // ── البريد الإلكتروني ─────────────────────────────────────────────────────
-  await fillByName("client[0][email]", report.clientEmail, "البريد الإلكتروني");
 
   // ── بيانات المقيمين ──────────────────────────────────────────────────────
   // دالة مساعدة: اختيار المقيم من الـ dropdown بـ رقم العضوية أو الاسم
@@ -1490,7 +1512,8 @@ async function fillFormPage(
       });
       if (clicked) {
         addLog(session, `✅ ضغط زر إضافة مقيم آخر (via ${clicked})`);
-        await session.page.waitForTimeout(2000);
+        await session.page.waitForLoadState("networkidle", { timeout: 3000 }).catch(() => {});
+        await session.page.waitForTimeout(300);
         // سجّل أسماء جميع الـ selects ذات الصلة للتشخيص
         const selectNames = await session.page.evaluate(() =>
           Array.from(document.querySelectorAll<HTMLSelectElement>("select[name]"))
@@ -1908,7 +1931,7 @@ async function fillApproachFields(
           await page.locator("select").nth(found.index).selectOption({ value: optValue });
           addLog(session, `✅ ${ap.label}: "${statusLabel}" (native selectOption)`);
           statusDone = true;
-          await page.waitForTimeout(700);
+          await page.waitForTimeout(150);
         }
       } catch (e: any) {
         addLog(session, `⚠️ ${ap.label}: native selectOption فشل — ${e.message}`);
@@ -1926,7 +1949,7 @@ async function fillApproachFields(
           await optLoc.first().click({ timeout: 2000 });
           addLog(session, `✅ ${ap.label}: "${statusLabel}" (mat-option click)`);
           statusDone = true;
-          await page.waitForTimeout(700);
+          await page.waitForTimeout(150);
         } else {
           await page.keyboard.press("Escape").catch(() => {});
           addLog(session, `⚠️ ${ap.label}: خيار "${statusLabel}" غير موجود في mat-select`);
@@ -2008,9 +2031,9 @@ async function fillAssetPage(
 
   // ── انتظار انتهاء كاسكاد نوع الأصل → استخدام/قطاع الأصل ────────────────
   // TAQEEM تُطلق API call بعد اختيار نوع الأصل لتحديث قائمة استخدام/قطاع الأصل
-  // نمنح 2 ثانية لانتهاء الطلب قبل الاختيار
   addLog(session, "⏳ انتظار انتهاء كاسكاد نوع الأصل...");
-  await session.page.waitForTimeout(2000);
+  await session.page.waitForLoadState("networkidle", { timeout: 4000 }).catch(() => {});
+  await session.page.waitForTimeout(200);
 
   // ── استخدام/قطاع الأصل ───────────────────────────────────────────────────
   // الاسم الفعلي: asset_usage_id — نفس أسلوب المنطقة (selectNativeByName)
@@ -2037,7 +2060,9 @@ async function fillAssetPage(
   if (regionEl && report.region) {
     // جرب حتى 3 مرات — Angular قد يُعيد ضبط الـ dropdown بعد التحديث
     for (let attempt = 1; attempt <= 3; attempt++) {
-      await session.page.waitForTimeout(600 * attempt); // انتظار تصاعدي
+      // انتظار networkidle بدلاً من ثابت تصاعدي
+      await session.page.waitForLoadState("networkidle", { timeout: 3000 }).catch(() => {});
+      await session.page.waitForTimeout(150 * attempt);
       await (regionEl.isMat
         ? selectAngular(session, buildSelector(regionEl), report.region, "المنطقة", true)
         : selectNativeByName(session, regionEl.name || "", report.region, "المنطقة"));
@@ -2052,7 +2077,9 @@ async function fillAssetPage(
       }
       if (attempt < 3) addLog(session, `⏳ إعادة محاولة اختيار المنطقة (${attempt}/3)...`);
     }
-    await session.page.waitForTimeout(1200); // انتظر تحميل المدن
+    // انتظر تحميل المدن بعد اختيار المنطقة (كاسكاد API)
+    await session.page.waitForLoadState("networkidle", { timeout: 4000 }).catch(() => {});
+    await session.page.waitForTimeout(200);
   } else if (!regionEl) {
     addLog(session, "⚠️ لم يُعثر على «المنطقة»");
   }
@@ -2063,7 +2090,9 @@ async function fillAssetPage(
     await (cityEl.isMat
       ? selectAngular(session, buildSelector(cityEl), report.city, "المدينة", true)
       : selectNativeByName(session, cityEl.name || "", report.city, "المدينة"));
-    await session.page.waitForTimeout(800);
+    // انتظر استقرار Angular بعد اختيار المدينة
+    await session.page.waitForLoadState("networkidle", { timeout: 3000 }).catch(() => {});
+    await session.page.waitForTimeout(150);
   } else addLog(session, "⚠️ لم يُعثر على «المدينة»");
 
   // ── الحي ─────────────────────────────────────────────────────────────────
@@ -2614,7 +2643,7 @@ async function fillAttributePage(
           try {
             await session.page.locator(xp).selectOption({ value: chosenOpt.v });
             addLog(session, `✅ الواجهات: اختار "${chosenOpt.t}" (value=${chosenOpt.v})`);
-            await session.page.waitForTimeout(500);
+            await session.page.waitForTimeout(100);
           } catch (e: any) {
             addLog(session, `⚠️ الواجهات: selectOption فشل — ${e.message}`);
             // محاولة بالنص مباشرة
@@ -3024,7 +3053,8 @@ async function fillPage2(session: AutomationSession, report: any, els: any[], pd
   const regionEl = findEl(selects, /region|province|regionid|emirate|منطقة|محافظة|إمارة/i);
   if (regionEl && report.region) {
     for (let attempt = 1; attempt <= 3; attempt++) {
-      await session.page.waitForTimeout(600 * attempt);
+      await session.page.waitForLoadState("networkidle", { timeout: 3000 }).catch(() => {});
+      await session.page.waitForTimeout(150 * attempt);
       await selectAngular(session, buildSelector(regionEl), report.region, "المنطقة", regionEl.isMat);
       const val = await session.page.evaluate((sel: string) => {
         const el = document.querySelector(sel) as HTMLSelectElement | null;
@@ -3036,7 +3066,9 @@ async function fillPage2(session: AutomationSession, report: any, els: any[], pd
       }
       if (attempt < 3) addLog(session, `⏳ إعادة محاولة اختيار المنطقة (${attempt}/3)...`);
     }
-    await session.page.waitForTimeout(1200);
+    // انتظر تحميل المدن بعد اختيار المنطقة
+    await session.page.waitForLoadState("networkidle", { timeout: 4000 }).catch(() => {});
+    await session.page.waitForTimeout(200);
   } else if (!regionEl) {
     addLog(session, `⚠️ لم يُعثر على حقل «المنطقة»`);
   }
