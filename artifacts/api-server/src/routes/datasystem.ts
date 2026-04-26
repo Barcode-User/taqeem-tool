@@ -416,9 +416,11 @@ router.post("/datasystem/upload", (req, res, next) => {
     }
 
     // ── 1: حفظ بيانات الشاشة في datasystem ────────────────────────────────
+    console.log(`[datasystem] STEP-1: extractFields`);
     const dsData = extractFields(body, filePath);
-
+    console.log(`[datasystem] STEP-2: sqliteInsertDataSystem`);
     const dsRecord = await sqliteInsertDataSystem(dsData);
+    console.log(`[datasystem] STEP-2 ✅ dsRecord.id=${dsRecord.id}`);
 
     // ── 2: استخراج نص PDF وإرساله لـ OpenAI ───────────────────────────────
     let extracted: Record<string, any> = {};
@@ -495,6 +497,7 @@ router.post("/datasystem/upload", (req, res, next) => {
     }
 
     // ── 3: حفظ نتيجة OpenAI في جدول reports ───────────────────────────────
+    console.log(`[datasystem] STEP-3: insertReport`);
     const reportRecord = await insertReport({
       ...extracted,
       pdfFilePath: filePath,
@@ -504,7 +507,9 @@ router.post("/datasystem/upload", (req, res, next) => {
     });
 
     // ── 4: ربط datasystem بالتقرير المستخرج ──────────────────────────────
+    console.log(`[datasystem] STEP-4: link ds=${dsRecord.id} → report=${reportRecord.id}`);
     await sqliteUpdateDataSystemLinkedReport(dsRecord.id, reportRecord.id);
+    console.log(`[datasystem] STEP-4 ✅`);
 
     // ── 5: حساب نسب التطابق ───────────────────────────────────────────────
     const comparison = COMPARE_FIELDS.map(({ key, label }) => {
@@ -553,8 +558,13 @@ router.post("/datasystem/upload", (req, res, next) => {
       _debug,
     });
   } catch (err: any) {
-    console.error("[datasystem] خطأ:", err);
-    res.status(500).json({ error: err.message });
+    console.error("[datasystem] ❌ خطأ كامل:", err);
+    console.error("[datasystem] stack:", err?.stack);
+    res.status(500).json({
+      error: err.message ?? String(err),
+      stack: err?.stack?.split("\n")?.slice(0, 5),
+      type: err?.constructor?.name,
+    });
   }
 });
 
