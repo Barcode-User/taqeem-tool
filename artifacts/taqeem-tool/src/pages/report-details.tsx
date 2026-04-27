@@ -950,6 +950,27 @@ export default function ReportDetails() {
             </CardHeader>
             <CardContent className="pt-6 space-y-6">
 
+              {/* رقم تقييم الحكومي — يظهر دائماً عند وجوده */}
+              {automationData?.taqeemReportNumber && (
+                <div className="rounded-xl p-5 bg-emerald-50 border-2 border-emerald-400 flex items-center gap-4">
+                  <div className="h-12 w-12 rounded-full bg-emerald-500 text-white flex items-center justify-center shrink-0">
+                    <Check className="h-6 w-6" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-emerald-900 font-bold text-base">🏆 تم الرفع على منصة تقييم</p>
+                    <p className="text-emerald-700 text-xs mt-0.5">رقم الطلب في نظام قيمة</p>
+                    <p className="font-mono text-2xl font-extrabold text-emerald-800 mt-1 tracking-wider select-all">
+                      {automationData.taqeemReportNumber}
+                    </p>
+                    {automationData.taqeemSubmittedAt && (
+                      <p className="text-xs text-emerald-600 mt-1">
+                        وقت الإرسال: {new Date(automationData.taqeemSubmittedAt).toLocaleString("ar-SA")}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* Automation Status Banner */}
               {automationData && automationData.automationStatus !== "idle" && (
                 <div className={`rounded-lg p-4 flex items-center gap-3 ${
@@ -968,17 +989,12 @@ export default function ReportDetails() {
                     <p className="font-semibold text-sm">
                       {automationData.isStale && "⚠️ توقفت عملية الرفع (أُعيد تشغيل الخادم) — اضغط «ابدأ الرفع» مجدداً"}
                       {!automationData.isStale && automationData.automationStatus === "running" && "جارٍ الرفع الآلي..."}
-                      {automationData.automationStatus === "submitted_taqeem" && `🏆 تم الرفع لتقييم — رقم التقرير: ${automationData.taqeemReportNumber ?? "—"}`}
+                      {automationData.automationStatus === "submitted_taqeem" && "🏆 تم الرفع لتقييم بنجاح"}
                       {automationData.automationStatus === "completed" && "✅ اكتملت العملية بنجاح!"}
                       {!automationData.isStale && automationData.automationStatus === "failed" && "❌ فشلت العملية"}
                     </p>
                     {automationData.automationError && !automationData.isStale && (
                       <p className="text-xs mt-1 opacity-80">{automationData.automationError}</p>
-                    )}
-                    {automationData.taqeemSubmittedAt && (
-                      <p className="text-xs mt-1 opacity-70">
-                        وقت الإرسال: {new Date(automationData.taqeemSubmittedAt).toLocaleString("ar-SA")}
-                      </p>
                     )}
                   </div>
                 </div>

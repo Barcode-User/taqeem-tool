@@ -822,7 +822,7 @@ export async function sqliteGetReportStats() {
   const total = (db.prepare("SELECT COUNT(*) as c FROM Reports").get() as any).c;
   const extracted = (db.prepare("SELECT COUNT(*) as c FROM Reports WHERE Status = 'extracted'").get() as any).c;
   const reviewed = (db.prepare("SELECT COUNT(*) as c FROM Reports WHERE Status = 'reviewed'").get() as any).c;
-  const submitted = (db.prepare("SELECT COUNT(*) as c FROM Reports WHERE Status = 'submitted'").get() as any).c;
+  const submitted = (db.prepare("SELECT COUNT(*) as c FROM Reports WHERE TaqeemReportNumber IS NOT NULL AND TaqeemReportNumber != ''").get() as any).c;
   const pending = (db.prepare("SELECT COUNT(*) as c FROM Reports WHERE Status = 'pending'").get() as any).c;
   return { total, extracted, reviewed, submitted, pending };
 }

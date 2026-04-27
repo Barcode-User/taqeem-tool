@@ -289,13 +289,23 @@ export default function Dashboard() {
                         {/* حالة الرفع في تقييم */}
                         <TableCell>
                           {(() => {
+                            const taqeemNum = (report as any).taqeemReportNumber as string | null | undefined;
                             const as = (report as any).automationStatus ?? "idle";
-                            const info = automationStatusMap[as] ?? automationStatusMap["idle"];
+                            const info = taqeemNum
+                              ? { label: "تم الرفع", color: "bg-green-100 text-green-700 border-green-200", icon: <CheckCircle2 className="h-3 w-3" /> }
+                              : (automationStatusMap[as] ?? automationStatusMap["idle"]);
                             return (
-                              <Badge variant="outline" className={`${info.color} px-2 py-0.5 rounded-full font-normal flex items-center gap-1 w-fit`}>
-                                {info.icon}
-                                {info.label}
-                              </Badge>
+                              <div className="flex flex-col gap-1">
+                                <Badge variant="outline" className={`${info.color} px-2 py-0.5 rounded-full font-normal flex items-center gap-1 w-fit`}>
+                                  {info.icon}
+                                  {info.label}
+                                </Badge>
+                                {taqeemNum && (
+                                  <span className="text-[11px] font-mono text-green-700 bg-green-50 border border-green-200 rounded px-1.5 py-0.5 w-fit select-all">
+                                    {taqeemNum}
+                                  </span>
+                                )}
+                              </div>
                             );
                           })()}
                         </TableCell>
