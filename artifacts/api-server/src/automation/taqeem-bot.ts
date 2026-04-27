@@ -3245,8 +3245,9 @@ async function fillPage3(session: AutomationSession, report: any, _els: any[], p
   await fillInputByName(session, "attribute[28]", ageVal || null, "عمر الأصل");
 
   // ── عرض الشارع (attribute[31]) ───────────────────────────────────────────
+  // إذا لم تُستخرج قيمة من PDF نضع 0 افتراضياً لأن الحقل إلزامي
   const swVal = extractNumber(report.streetWidth);
-  await fillInputByName(session, "attribute[31]", swVal || null, "عرض الشارع");
+  await fillInputByName(session, "attribute[31]", swVal || "0", "عرض الشارع");
 
   // ── رفع PDF إن لم يتم سابقاً ──────────────────────────────────────────────
   await uploadPdf(session, report, pdfState);
