@@ -3164,11 +3164,74 @@ async function fillPage2(session: AutomationSession, report: any, els: any[], pd
     addLog(session, `⚠️ لم يُعثر على حقل «المنطقة»`);
   }
 
-  // ── المدينة ───────────────────────────────────────────────────────────────
-  const cityEl = findEl(selects, /city|cityid|مدينة|بلدية/) ??
-    findEl(inputs, /city|cityid|مدينة|بلدية/);
-  if (cityEl) await selectAngular(session, buildSelector(cityEl), report.city, "المدينة", cityEl?.isMat);
-  else addLog(session, `⚠️ لم يُعثر على حقل «المدينة»`);
+  // ── المدينة (نُعيد مسح DOM الحي بعد تحميل خيارات المنطقة) ──────────────
+  // cityEl من المسح الأوّلي قد يكون قديماً — المدن تُحمَّل ديناميكياً بعد المنطقة
+  if (report.city) {
+    // انتظر إضافياً لتستقر قائمة المدن في Angular
+    await session.page.waitForTimeout(400);
+
+    // مسح حي للعنصر من DOM مباشرة
+    const liveCitySelector = await session.page.evaluate(() => {
+      const rx = /city|cityid|مدينة|بلدية/i;
+      const testEl = (el: Element) =>
+        rx.test(el.getAttribute("name") ?? "") ||
+        rx.test(el.getAttribute("id") ?? "") ||
+        rx.test(el.getAttribute("formcontrolname") ?? "") ||
+        rx.test(el.getAttribute("ng-reflect-name") ?? "");
+
+      // mat-select أولاً
+      const mat = Array.from(document.querySelectorAll("mat-select")).find(testEl);
+      if (mat) {
+        const fc = mat.getAttribute("formcontrolname") ?? mat.getAttribute("ng-reflect-name") ?? "";
+        const nm = mat.getAttribute("name") ?? mat.getAttribute("id") ?? "";
+        if (fc) return { sel: `mat-select[formcontrolname="${fc}"]`, isMat: true };
+        if (nm) return { sel: `mat-select[name="${nm}"]`, isMat: true };
+        return { sel: "mat-select", isMat: true };
+      }
+      // native select
+      const ns = Array.from(document.querySelectorAll("select")).find(testEl);
+      if (ns) {
+        const nm = ns.getAttribute("name") ?? "";
+        const id = ns.getAttribute("id") ?? "";
+        if (nm) return { sel: `select[name="${nm}"]`, isMat: false };
+        if (id) return { sel: `#${id}`,              isMat: false };
+      }
+      return null;
+    }).catch(() => null);
+
+    if (liveCitySelector) {
+      addLog(session, `🔍 المدينة: عنصر حي = "${liveCitySelector.sel}"`);
+      // retry حتى 3 محاولات (قائمة المدن قد تأخذ وقتاً)
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        await selectAngular(session, liveCitySelector.sel, report.city, "المدينة", liveCitySelector.isMat);
+        // تحقق من نجاح الاختيار
+        const chosen = await session.page.evaluate((sel: string) => {
+          const el = document.querySelector(sel);
+          return el ? (el as any).value || el.textContent?.trim() || "" : "";
+        }, liveCitySelector.sel).catch(() => "");
+        if (chosen && chosen !== "" && chosen !== "null") {
+          addLog(session, `✅ المدينة محددة (محاولة ${attempt}): "${chosen}"`);
+          break;
+        }
+        if (attempt < 3) {
+          addLog(session, `⏳ إعادة محاولة اختيار المدينة (${attempt}/3)...`);
+          await session.page.waitForTimeout(500 * attempt);
+        }
+      }
+    } else {
+      // fallback للعنصر المحفوظ
+      const cityElFb = findEl(selects, /city|cityid|مدينة|بلدية/) ??
+        findEl(inputs, /city|cityid|مدينة|بلدية/);
+      if (cityElFb) {
+        addLog(session, `🔍 المدينة: عنصر محفوظ = "${buildSelector(cityElFb)}"`);
+        await selectAngular(session, buildSelector(cityElFb), report.city, "المدينة", cityElFb?.isMat);
+      } else {
+        addLog(session, `⚠️ لم يُعثر على حقل «المدينة» في DOM`);
+      }
+    }
+  } else {
+    addLog(session, `⏭️ تخطي «المدينة» — لا توجد قيمة`);
+  }
 
   // ── الحي ─────────────────────────────────────────────────────────────────
   const districtEl = findEl(inputs,
