@@ -1098,6 +1098,19 @@ async function selectAngular(
     );
     await page.waitForTimeout(150);
 
+    // ── بحث داخل القائمة المنسدلة (لقوائم طويلة كالمدن) ──────────────────────
+    // بعض قوائم Angular Material تحتوي على حقل بحث — نكتب القيمة فيه لتصفية الخيارات
+    const searchInput = await page.$(
+      "mat-select-panel input, .mat-select-panel input, .cdk-overlay-pane input[type='text'], " +
+      ".mat-select-panel input[type='search'], .cdk-overlay-pane mat-form-field input",
+    );
+    if (searchInput) {
+      await searchInput.click();
+      await searchInput.fill(value);
+      await page.waitForTimeout(400);
+      addLog(session, `🔍 كتابة "${value}" في مربع بحث القائمة`);
+    }
+
     // ابحث بمطابقة مرنة مع تطبيع شامل (داخل المتصفح) + fallback متعدد المستويات
     const optionText = await page.evaluate(
       new Function("nv", "fb", `
