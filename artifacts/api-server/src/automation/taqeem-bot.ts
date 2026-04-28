@@ -3314,7 +3314,36 @@ async function fillPage3(session: AutomationSession, report: any, _els: any[], p
 
   // ── عرض الشارع (attribute[31]) ───────────────────────────────────────────
   // إذا لم تُستخرج قيمة من PDF نضع 0 افتراضياً لأن الحقل إلزامي
-  const swVal = extractNumber(report.streetWidth);
+  // نستخدم دالة ذكية تُفضّل عرض الشارع على عرض الارتداد
+  const extractStreetWidth = (v: any): string => {
+    if (v == null) return "";
+    const s = String(v);
+
+    // أولاً: ابحث عن الرقم المرتبط بـ «شارع» تحديداً
+    const streetPatterns = [
+      /شارع[^،.\d]*?عرض\s*([\d.,]+)/,        // شارع ... عرض X
+      /شارع[^،.\d]*?بعرض\s*([\d.,]+)/,       // شارع ... بعرض X
+      /عرض\s+الشارع\s*[:\s]\s*([\d.,]+)/,    // عرض الشارع: X
+      /الشارع\s+(?:ذو\s+)?(?:عرض|بعرض)\s*([\d.,]+)/, // الشارع بعرض X
+    ];
+    for (const pat of streetPatterns) {
+      const m = s.match(pat);
+      if (m) return m[1].replace(",", ".");
+    }
+
+    // ثانياً: احذف أقسام الارتداد ثم خذ أول رقم
+    const withoutSetback = s
+      .replace(/ارتداد(?:ات)?\s+عرض\s*[\d.,]+\s*م?/g, "")
+      .replace(/ارتداد(?:ات)?\s+[\d.,]+\s*م?/g, "")
+      .replace(/الارتداد\s+[\d.,]+\s*م?/g, "");
+    const m2 = withoutSetback.match(/[\d]+(?:[.,]\d+)?/);
+    if (m2) return m2[0].replace(",", ".");
+
+    // أخيراً: fallback العادي
+    return extractNumber(v);
+  };
+
+  const swVal = extractStreetWidth(report.streetWidth);
   await fillInputByName(session, "attribute[31]", swVal || "0", "عرض الشارع");
 
   // ── رفع PDF إن لم يتم سابقاً ──────────────────────────────────────────────
