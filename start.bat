@@ -57,7 +57,13 @@ set NODE_ENV=production
 REM ─── تثبيت المكتبات إن لم تكن موجودة ───────────────
 if not exist "node_modules" (
     echo [0/2] تثبيت المكتبات... قد يستغرق دقيقتين
-    call pnpm install --no-frozen-lockfile
+    where pnpm >nul 2>&1
+    if %ERRORLEVEL% EQU 0 (
+        call pnpm install --no-frozen-lockfile
+    ) else (
+        echo [تنبيه] pnpm غير موجود — سيُستخدم npm بدلاً
+        call npm install --legacy-peer-deps
+    )
     if %ERRORLEVEL% NEQ 0 (
         echo [خطأ] فشل تثبيت المكتبات.
         pause
