@@ -58,11 +58,19 @@ REM ─── تثبيت Playwright إن لم يكن موجوداً ────
 if not exist "artifacts\api-server\node_modules\playwright-core" (
     echo [0/2] تثبيت مكتبة Playwright...
 
-    REM إنشاء مجلد مؤقت بـ package.json نظيف بدون مراجع workspace
-    if not exist "tmp-pw-install" mkdir tmp-pw-install
-    echo {"name":"pw-install","version":"1.0.0","private":true} > tmp-pw-install\package.json
+    REM إنشاء مجلد مؤقت بـ package.json نظيف
+    if exist "tmp-pw-install" rmdir /S /Q tmp-pw-install
+    mkdir tmp-pw-install
+    (
+        echo {
+        echo   "name": "pw-install",
+        echo   "version": "1.0.0",
+        echo   "private": true
+        echo }
+    ) > tmp-pw-install\package.json
 
-    call npm install playwright playwright-core --prefix tmp-pw-install --legacy-peer-deps --silent
+    REM --no-workspaces يمنع npm من قراءة إعدادات workspace في المشروع
+    call npm install playwright playwright-core --prefix tmp-pw-install --legacy-peer-deps --no-workspaces --silent
     if %ERRORLEVEL% NEQ 0 (
         echo [خطأ] فشل تثبيت Playwright.
         rmdir /S /Q tmp-pw-install 2>nul
@@ -80,7 +88,7 @@ if not exist "artifacts\api-server\node_modules\playwright-core" (
 if not exist "%LOCALAPPDATA%\ms-playwright" (
     echo [0/2] تثبيت متصفح Playwright...
     cd artifacts\api-server
-    call npx playwright install chromium 2>nul
+    call npx playwright install chromium --no-workspaces 2>nul
     cd ..\..
 )
 
