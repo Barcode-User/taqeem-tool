@@ -54,28 +54,25 @@ REM ─── إعدادات عامة ──────────────
 set PORT=8080
 set NODE_ENV=production
 
-REM ─── تثبيت المكتبات إن لم تكن موجودة ───────────────
-if not exist "node_modules" (
-    echo [0/2] تثبيت المكتبات... قد يستغرق دقيقتين
-    where pnpm >nul 2>&1
-    if %ERRORLEVEL% EQU 0 (
-        call pnpm install --no-frozen-lockfile
-    ) else (
-        echo [تنبيه] pnpm غير موجود — سيُستخدم npm بدلاً
-        call npm install --legacy-peer-deps
-    )
+REM ─── تثبيت Playwright إن لم يكن موجوداً ─────────────
+if not exist "artifacts\api-server\node_modules\playwright-core" (
+    echo [0/2] تثبيت مكتبة Playwright...
+    cd artifacts\api-server
+    call npm install playwright playwright-core --legacy-peer-deps --no-save
+    cd ..\..
     if %ERRORLEVEL% NEQ 0 (
-        echo [خطأ] فشل تثبيت المكتبات.
+        echo [خطأ] فشل تثبيت Playwright.
         pause
         exit /b 1
     )
     echo.
 )
 
-REM ─── تثبيت Playwright إن لم يكن موجوداً ─────────────
 if not exist "%LOCALAPPDATA%\ms-playwright" (
     echo [0/2] تثبيت متصفح Playwright...
+    cd artifacts\api-server
     call npx playwright install chromium 2>nul
+    cd ..\..
 )
 
 REM ─── التحقق من الملفات المبنية ───────────────────────
