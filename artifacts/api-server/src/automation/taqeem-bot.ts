@@ -3804,26 +3804,66 @@ async function fillValueByMethodLabel(
   }
   const { page } = session;
   const strVal = String(value);
-  const prefix  = methodLabel.substring(0, Math.min(6, methodLabel.length));
 
-  const ok = await page.evaluate((label: string, prefix: string, val: string) => {
+  // ── استخرج الكلمات المميزة: تجاهل الكلمات العامة مثل "طريقة" و"أسلوب" ──
+  const stopWords = new Set(["طريقة", "أسلوب", "اسلوب", "method", "approach", "of", "the", "و"]);
+  const uniqueWords = methodLabel
+    .replace(/[()]/g, " ")
+    .split(/\s+/)
+    .map(w => w.trim())
+    .filter(w => w.length > 2 && !stopWords.has(w));
+  // استخدم أطول كلمة مميزة للمطابقة الدقيقة، مع الحفاظ على الكلمات الأخرى كاحتياط
+  const primaryWord = uniqueWords.sort((a, b) => b.length - a.length)[0] ?? methodLabel;
+
+  addLog(session, `🔍 ${fieldName}: البحث بالكلمة المميزة "${primaryWord}" من "${methodLabel}"`);
+
+  const ok = await page.evaluate(
+    ({ label, primaryWord: pw, val }: { label: string; primaryWord: string; val: string }) => {
+    const nl = (s: string) =>
+      (s || "")
+        .replace(/[\u064B-\u065F\u0670]/g, "")
+        .replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي")
+        .replace(/\s+/g, " ").trim();
+
+    const normPW    = nl(pw);
+    const normLabel = nl(label);
+
     const allEls = Array.from(
       document.querySelectorAll("td, th, label, span, div, p, mat-label, li"),
     );
-    for (const el of allEls) {
-      const txt = ((el as HTMLElement).innerText ?? el.textContent ?? "")
-        .replace(/\s+/g, " ").trim();
-      if (!txt.includes(prefix)) continue;
-      if (txt.length > 120) continue;
 
-      // ابحث عن input في نفس الصف (tr) أو في العنصر الأب
+    // ── جولة 1: مطابقة بالكلمة المميزة (أدق) ─────────────────────────────
+    for (const el of allEls) {
+      const txt = nl(((el as HTMLElement).innerText ?? el.textContent ?? ""));
+      if (!txt.includes(normPW)) continue;
+      if (txt.length > 150) continue;
+
       const row = el.closest("tr") ?? el.closest(".method-row, .row, .field-row") ?? el.parentElement;
       const inp = row?.querySelector<HTMLInputElement>(
         "input[type='text'], input:not([type='radio']):not([type='checkbox']):not([type='hidden'])",
       );
       if (inp) {
-        inp.focus();
-        inp.value = val;
+        inp.focus(); inp.value = val;
+        inp.dispatchEvent(new Event("input",  { bubbles: true }));
+        inp.dispatchEvent(new Event("change", { bubbles: true }));
+        inp.dispatchEvent(new Event("blur",   { bubbles: true }));
+        return true;
+      }
+    }
+
+    // ── جولة 2: احتياط — مطابقة بالاسم الكامل (أول 12 حرف) ──────────────
+    const prefix12 = normLabel.substring(0, 12);
+    for (const el of allEls) {
+      const txt = nl(((el as HTMLElement).innerText ?? el.textContent ?? ""));
+      if (!txt.includes(prefix12)) continue;
+      if (txt.length > 150) continue;
+
+      const row = el.closest("tr") ?? el.closest(".method-row, .row, .field-row") ?? el.parentElement;
+      const inp = row?.querySelector<HTMLInputElement>(
+        "input[type='text'], input:not([type='radio']):not([type='checkbox']):not([type='hidden'])",
+      );
+      if (inp) {
+        inp.focus(); inp.value = val;
         inp.dispatchEvent(new Event("input",  { bubbles: true }));
         inp.dispatchEvent(new Event("change", { bubbles: true }));
         inp.dispatchEvent(new Event("blur",   { bubbles: true }));
@@ -3831,7 +3871,7 @@ async function fillValueByMethodLabel(
       }
     }
     return false;
-  }, methodLabel, prefix, strVal).catch(() => false);
+  }, { label: methodLabel, primaryWord, val: strVal }).catch(() => false);
 
   addLog(
     session,
