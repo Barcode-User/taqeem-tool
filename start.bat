@@ -57,14 +57,23 @@ set NODE_ENV=production
 REM ─── تثبيت Playwright إن لم يكن موجوداً ─────────────
 if not exist "artifacts\api-server\node_modules\playwright-core" (
     echo [0/2] تثبيت مكتبة Playwright...
-    cd artifacts\api-server
-    call npm install playwright playwright-core --legacy-peer-deps --no-save
-    cd ..\..
+
+    REM إنشاء مجلد مؤقت بـ package.json نظيف بدون مراجع workspace
+    if not exist "tmp-pw-install" mkdir tmp-pw-install
+    echo {"name":"pw-install","version":"1.0.0","private":true} > tmp-pw-install\package.json
+
+    call npm install playwright playwright-core --prefix tmp-pw-install --legacy-peer-deps --silent
     if %ERRORLEVEL% NEQ 0 (
         echo [خطأ] فشل تثبيت Playwright.
+        rmdir /S /Q tmp-pw-install 2>nul
         pause
         exit /b 1
     )
+
+    REM نسخ المكتبات إلى المكان الصحيح
+    if not exist "artifacts\api-server\node_modules" mkdir artifacts\api-server\node_modules
+    robocopy tmp-pw-install\node_modules artifacts\api-server\node_modules /E /NFL /NDL /NJH /NJS /nc /ns /np >nul
+    rmdir /S /Q tmp-pw-install 2>nul
     echo.
 )
 
