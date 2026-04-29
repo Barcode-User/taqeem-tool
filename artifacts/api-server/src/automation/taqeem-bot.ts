@@ -1861,7 +1861,7 @@ async function fillApproachFields(
   const normPct = (v: any): number => {
     const n = Number(v);
     if (!n || isNaN(n)) return 0;
-    return n <= 1 ? n * 100 : n; // 0.7 → 70, 70 → 70
+    return n < 1 ? n * 100 : n; // 0.7 → 70, 70 → 70, 1 → 1 (وليس 100!)
   };
 
   const mktPct  = normPct(report.marketApproachPercentage);
