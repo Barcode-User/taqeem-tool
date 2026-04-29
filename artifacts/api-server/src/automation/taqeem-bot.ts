@@ -1573,7 +1573,7 @@ async function fillFormPage(
   // ── بيانات المقيمين ──────────────────────────────────────────────────────
   // دالة مساعدة: اختيار المقيم من الـ dropdown بـ رقم العضوية أو الاسم
   // selectValuerById: يستخدم selectByNameFuzzy — XPath + locator.selectOption
-  // هذه هي الطريقة الوحيدة الموثوقة مع Angular وأسماء المصفوفات valuer[N][id]
+  // إذا لم يُعثر على المقيم → يُرفض التقرير فوراً ولا يختار عشوائياً
   const selectValuerById = async (
     index: number,
     membershipNum: string | null | undefined,
@@ -1582,7 +1582,10 @@ async function fillFormPage(
   ) => {
     const term = membershipNum?.trim() || valuerName?.trim() || "";
     if (!term) { addLog(session, `⏭️ تخطي "${label}" — لا توجد بيانات`); return; }
-    await selectByNameFuzzy(session, `valuer[${index}][id]`, term, label);
+    const found = await selectByNameFuzzy(session, `valuer[${index}][id]`, term, label);
+    if (!found) {
+      throw new Error(`رقم عضوية المقيم "${term}" غير موجود في قائمة المقيمين على المنصة — تم رفض التقرير`);
+    }
   };
 
   // دالة مساعدة: ضبط نسبة المساهمة
@@ -2225,6 +2228,16 @@ async function fillAssetPage(
     if (parts.length >= 2) {
       if (!lat) lat = parts[0];
       if (!lng) lng = parts[1];
+    }
+  }
+
+  // ── تصحيح ترتيب الإحداثيات: خط الطول دائماً الرقم الأكبر ───────────────
+  if (lat && lng) {
+    const latNum = parseFloat(lat);
+    const lngNum = parseFloat(lng);
+    if (!isNaN(latNum) && !isNaN(lngNum) && latNum > lngNum) {
+      addLog(session, `🔄 تصحيح الإحداثيات: تبديل lat(${lat}) ↔ lng(${lng}) لأن خط الطول يجب أن يكون الأكبر`);
+      [lat, lng] = [lng, lat];
     }
   }
 
@@ -3254,8 +3267,21 @@ async function fillPage2(session: AutomationSession, report: any, els: any[], pd
   let lat: string | null = null;
   let lng: string | null = null;
   if (report.coordinates) {
-    const parts = String(report.coordinates).split(",").map((s: string) => s.trim());
-    if (parts.length === 2) { lat = parts[0]; lng = parts[1]; }
+    const parts = String(report.coordinates)
+      .trim()
+      .split(/[,،\s]+/)
+      .map((s: string) => s.trim())
+      .filter((s: string) => /^-?\d+(\.\d+)?$/.test(s));
+    if (parts.length >= 2) { lat = parts[0]; lng = parts[1]; }
+  }
+  // تصحيح الترتيب: خط الطول دائماً الرقم الأكبر
+  if (lat && lng) {
+    const latNum = parseFloat(lat);
+    const lngNum = parseFloat(lng);
+    if (!isNaN(latNum) && !isNaN(lngNum) && latNum > lngNum) {
+      addLog(session, `🔄 تصحيح الإحداثيات (ص2): تبديل lat(${lat}) ↔ lng(${lng})`);
+      [lat, lng] = [lng, lat];
+    }
   }
   const lngEl = findEl(inputs, /longitude|long\b|lng\b|خط.*طول|طول.*جغرافي/i);
   if (lngEl && lng) await fillAngular(session, buildSelector(lngEl), lng, "خط الطول");
