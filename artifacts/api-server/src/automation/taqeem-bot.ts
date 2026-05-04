@@ -2060,36 +2060,87 @@ async function fillApproachFields(
     }
 
     // ── ب) تعبئة أول input يظهر بعد الـ select في DOM ────────────────────
+    // Angular قد تُظهر الـ input بعد اختيار الـ dropdown — نُعيد المحاولة
     const selTag = found.type === "native" ? "select" : "mat-select";
-    const valueNth: number = await page.evaluate(
-      ({ tag, idx }: { tag: string; idx: number }) => {
-        const allSels   = Array.from(document.querySelectorAll(tag));
-        const allInputs = Array.from(document.querySelectorAll("input"));
-        const sel       = allSels[idx];
-        if (!sel) return -1;
-        const first = allInputs.find(inp => {
-          if (["radio", "checkbox", "hidden"].includes((inp as HTMLInputElement).type)) return false;
-          return (sel.compareDocumentPosition(inp) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
-        });
-        return first ? allInputs.indexOf(first) : -1;
-      },
-      { tag: selTag, idx: found.index },
-    );
+
+    const findValueInput = async (): Promise<number> =>
+      page.evaluate(
+        ({ tag, idx }: { tag: string; idx: number }) => {
+          const allSels   = Array.from(document.querySelectorAll(tag));
+          const allInputs = Array.from(document.querySelectorAll("input"));
+          const sel       = allSels[idx];
+          if (!sel) return -1;
+
+          // الأولوية 1: input داخل نفس الحاوية (tr / .row / mat-form-field / قسم الأسلوب)
+          const container =
+            sel.closest("tr, .row, .form-row, .form-group, mat-form-field") ??
+            sel.parentElement?.parentElement;
+          if (container) {
+            const inp = Array.from(container.querySelectorAll("input")).find(
+              i => !["radio", "checkbox", "hidden"].includes((i as HTMLInputElement).type),
+            ) as HTMLInputElement | undefined;
+            if (inp) return allInputs.indexOf(inp);
+          }
+
+          // الاحتياط: أول input يأتي بعده في ترتيب DOM
+          const first = allInputs.find(inp => {
+            if (["radio", "checkbox", "hidden"].includes((inp as HTMLInputElement).type)) return false;
+            return (sel.compareDocumentPosition(inp) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+          });
+          return first ? allInputs.indexOf(first) : -1;
+        },
+        { tag: selTag, idx: found.index },
+      );
+
+    // retry حتى 3 مرات — Angular تحتاج وقتاً لإظهار الـ input بعد تغيير الـ dropdown
+    let valueNth = -1;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await page.waitForTimeout(attempt === 0 ? 250 : 350);
+      valueNth = await findValueInput();
+      if (valueNth >= 0) break;
+      addLog(session, `🔄 ${ap.label}: input غير موجود بعد — محاولة ${attempt + 2}/3`);
+    }
 
     addLog(session, `🔍 ${ap.label}: أول input بعد الـ select → nth=${valueNth}`);
 
     if (valueNth >= 0) {
+      const strVal = String(ap.value);
+      // الطريقة 1: Playwright fill (يُحرّك Angular zone)
+      let filled = false;
       try {
         const inputLoc = page.locator("input").nth(valueNth);
         await inputLoc.click({ timeout: 2000 });
         await inputLoc.selectText().catch(() => {});
-        await inputLoc.fill(String(ap.value));
-        addLog(session, `✅ ${ap.label}: قيمة=${ap.value} → input[${valueNth}]`);
+        await inputLoc.fill(strVal, { timeout: 2000 });
+        filled = true;
+        addLog(session, `✅ ${ap.label}: قيمة=${strVal} → input[${valueNth}]`);
       } catch (e: any) {
-        addLog(session, `⚠️ ${ap.label}: فشل تعبئة القيمة — ${e.message}`);
+        addLog(session, `⚠️ ${ap.label}: fill فشل — ${(e as Error).message} — سأحاول native setter`);
+      }
+
+      // الطريقة 2 (احتياط): native setter + events
+      if (!filled) {
+        const ok = await page.evaluate(
+          ({ idx, v }: { idx: number; v: string }) => {
+            const inputs = Array.from(document.querySelectorAll("input"))
+              .filter(i => !["radio", "checkbox", "hidden"].includes((i as HTMLInputElement).type));
+            const el = inputs[idx] as HTMLInputElement | undefined;
+            if (!el) return false;
+            const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+            if (setter) setter.call(el, v); else el.value = v;
+            el.dispatchEvent(new Event("input",  { bubbles: true }));
+            el.dispatchEvent(new Event("change", { bubbles: true }));
+            el.dispatchEvent(new Event("blur",   { bubbles: true }));
+            return true;
+          },
+          { idx: valueNth, v: strVal },
+        ).catch(() => false);
+        addLog(session, ok
+          ? `✅ ${ap.label}: قيمة=${strVal} → input[${valueNth}] (native setter)`
+          : `⚠️ ${ap.label}: native setter أيضاً فشل`);
       }
     } else {
-      addLog(session, `⚠️ ${ap.label}: لم يُعثر على input للقيمة (قد تظهر بعد التأخير)`);
+      addLog(session, `⚠️ ${ap.label}: لم يُعثر على input للقيمة بعد 3 محاولات`);
     }
   }
 }
