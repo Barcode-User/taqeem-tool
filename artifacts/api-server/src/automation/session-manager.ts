@@ -83,8 +83,16 @@ export function getAllSessions(): AutomationSession[] {
   return Array.from(sessions.values());
 }
 
-export function isAnySessionRunning(): boolean {
-  return Array.from(sessions.values()).some(
+export function getRunningSessionCount(): number {
+  return Array.from(sessions.values()).filter(
     (s) => s.status === "running" || s.status === "waiting_otp",
-  );
+  ).length;
+}
+
+export function isAnySessionRunning(): boolean {
+  return getRunningSessionCount() > 0;
+}
+
+export function canStartNewSession(maxConcurrent = 2): boolean {
+  return getRunningSessionCount() < maxConcurrent;
 }

@@ -9,7 +9,7 @@ import {
   updateReport,
 } from "@workspace/db";
 import { startAutomation } from "../automation/taqeem-bot";
-import { getSessionByReportId, submitOtp, isAnySessionRunning } from "../automation/session-manager";
+import { getSessionByReportId, submitOtp, isAnySessionRunning, canStartNewSession } from "../automation/session-manager";
 import {
   startLogin,
   submitLoginOtp,
@@ -185,19 +185,19 @@ router.post("/automation/submit-external", upload.single("pdf"), async (req, res
     const sessionContext = await getAuthenticatedContext();
 
     if (sessionContext) {
-      if (isAnySessionRunning()) {
-        // يوجد تقرير آخر يعمل الآن — اترك هذا في الطابور وسيُنفَّذ تلقائياً بعد انتهاء الأول
-        console.log(`[ExternalSubmit] 🕐 تقرير #${report.id} — أُضيف للطابور (يوجد تقرير يعمل الآن)`);
+      if (!canStartNewSession(2)) {
+        // وصلنا للحد الأقصى (2 متصفح) — أضف للطابور
+        console.log(`[ExternalSubmit] 🕐 تقرير #${report.id} — أُضيف للطابور (الحد الأقصى مشغول)`);
         res.status(202).json({
           status:     "queued",
           reportId:   report.id,
           draftSaved: true,
-          message:    "تم حفظ الطلب وسيُرفع تلقائياً بعد انتهاء الطلب الحالي",
+          message:    "تم حفظ الطلب وسيُرفع تلقائياً بعد انتهاء الطلبات الحالية",
         });
         return;
       }
 
-      // ✅ لا يوجد شيء يعمل — ابدأ فوراً
+      // ✅ يوجد فراغ — ابدأ فوراً
       console.log(`[ExternalSubmit] ✅ تقرير #${report.id} — رفع فوري (جلسة نشطة)`);
       const sessionId = await startAutomation(report.id);
 
@@ -259,10 +259,10 @@ router.post("/automation/start/:reportId", async (req, res) => {
       await updateReport(reportId, { automationStatus: "idle", automationError: "تم إعادة الضبط تلقائياً — كانت الحالة عالقة" });
     }
 
-    if (isAnySessionRunning()) {
-      // اترك في الطابور وسيُنفَّذ تلقائياً
+    if (!canStartNewSession(2)) {
+      // الحد الأقصى (2 متصفح) مشغول — اترك في الطابور
       await updateReport(reportId, { automationStatus: "queued" });
-      res.json({ status: "queued", message: "تمت إضافة الطلب للطابور وسيُنفَّذ بعد انتهاء الطلب الحالي" });
+      res.json({ status: "queued", message: "تمت إضافة الطلب للطابور (الحد الأقصى 2 متصفح مشغول)" });
       return;
     }
 

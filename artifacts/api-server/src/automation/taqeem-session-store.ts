@@ -488,7 +488,7 @@ export async function createIsolatedAutomationContext(): Promise<{
         newBrowser = await chromium.launch({
           headless: false,
           channel: "chrome",
-          slowMo: 80,
+          slowMo: 30,
           args: [
             "--disable-blink-features=AutomationControlled",
             "--no-first-run",

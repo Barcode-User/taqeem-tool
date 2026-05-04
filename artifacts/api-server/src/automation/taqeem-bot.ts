@@ -55,19 +55,17 @@ export async function startAutomation(
     .finally(async () => {
       // إغلاق السياق المعزول — لا يؤثر على الجلسة الرئيسية أو أي مستخدم آخر
       await cleanup();
-      // ── تشغيل الطلب التالي في الطابور تلقائياً ──────────────────────────
+      // ── تسليم الطابور لـ processQueue الذي يتحكم بالحد الأقصى (2 متصفح) ──
       setTimeout(async () => {
         try {
-          const queued = await getReportsByAutomationStatus("queued");
-          if (queued.length > 0) {
-            const next = queued[0];
-            console.log(`[Queue] ▶ تشغيل التقرير التالي #${next.id} تلقائياً...`);
-            await startAutomation(next.id);
-          }
+          const { processQueue } = await import("./queue-processor.js");
+          processQueue().catch((e: any) =>
+            console.error(`[Queue] ❌ خطأ في processQueue بعد الانتهاء: ${e.message}`)
+          );
         } catch (e: any) {
-          console.error(`[Queue] ❌ خطأ في تشغيل الطلب التالي: ${e.message}`);
+          console.error(`[Queue] ❌ خطأ في استدعاء processQueue: ${e.message}`);
         }
-      }, 3000);
+      }, 1000);
     });
 
   return sessionId;
@@ -188,7 +186,7 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     // ① انتقل للصفحة الرئيسية أولاً لإعادة ضبط Angular router
     await page.goto(`${TAQEEM_URL}/`, { waitUntil: "domcontentloaded", timeout: 20000 })
       .catch(() => {}); // تجاهل الفشل — الهدف تحديد السياق فقط
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(120);
 
     // ② امسح localStorage/sessionStorage الخاصة بـ TAQEEM
     await page.evaluate(() => {
@@ -243,7 +241,7 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
       addLog(session, `🔄 إعادة المحاولة: التنقل المباشر لنموذج إنشاء جديد...`);
 
       // انتظر قليلاً ثم أعد المحاولة
-      await page.waitForTimeout(500);
+      await page.waitForTimeout(200);
       await page.goto(`${TAQEEM_URL}/report/create/1/13`, {
         waitUntil: "domcontentloaded",
         timeout: 30000,
@@ -274,7 +272,7 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
         document.querySelectorAll<HTMLInputElement>("input[type='text'], input:not([type]), textarea")
           .forEach(el => { el.value = ""; el.dispatchEvent(new Event("input", { bubbles: true })); });
       });
-      await page.waitForTimeout(500);
+      await page.waitForTimeout(200);
     } else {
       addLog(session, "✅ النموذج فارغ — لا يوجد تداخل مع تقارير سابقة");
     }
@@ -287,13 +285,13 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
 
     await fillFormPage(session, mergedReport, elsPage1, pdfState);
     // انتظر قصير لتستقر Angular form validation قبل الحفظ
-    await page.waitForTimeout(600);
+    await page.waitForTimeout(200);
 
     // ── إعادة محاولة رفع PDF ──────────────────────────────────────────────
     if (!pdfState.pdfUploaded) {
       addLog(session, "🔄 إعادة محاولة رفع PDF...");
       for (let r = 1; r <= 3 && !pdfState.pdfUploaded; r++) {
-        await page.waitForTimeout(1000);
+        await page.waitForTimeout(150);
         await uploadPdf(session, report, pdfState);
       }
     }
@@ -317,8 +315,8 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
         ).catch(() => {});
       });
 
-    await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
-    await page.waitForTimeout(400);
+    await page.waitForLoadState("networkidle", { timeout: 2000 }).catch(() => {});
+    await page.waitForTimeout(150);
 
     // ── استخراج رقم التقرير من URL الصفحة 2 والتحقق منه ─────────────────
     const page2Url = page.url();
@@ -343,8 +341,8 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     if (!page2Url.includes(`/report/asset/create/${taqeemReportId}`)) {
       addLog(session, `↩️ التنقل المباشر لصفحة الأصل: ${expectedPage2}`);
       await page.goto(expectedPage2, { waitUntil: "domcontentloaded", timeout: 30000 });
-      await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
-      await page.waitForTimeout(400);
+      await page.waitForLoadState("networkidle", { timeout: 2000 }).catch(() => {});
+      await page.waitForTimeout(150);
     }
     addLog(session, `✅ تأكيد URL الصفحة 2: ${page.url()}`);
 
@@ -363,7 +361,7 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
 
     await fillAssetPage(session, mergedReport, elsPage2);
     // انتظر قصير لتستقر Angular form validation قبل الحفظ
-    await page.waitForTimeout(600);
+    await page.waitForTimeout(200);
     await screenshot(page, `p2_after_${reportId}`);
 
     // ── ضغط زر "continue" — حفظ الصفحة 2 ──────────────────────────────────
@@ -378,8 +376,8 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
       { timeout: 30000 },
     ).catch(() => addLog(session, "⚠️ URL لم يتغير بعد 30 ثانية"));
 
-    await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
-    await page.waitForTimeout(300);
+    await page.waitForLoadState("networkidle", { timeout: 2000 }).catch(() => {});
+    await page.waitForTimeout(120);
 
     const afterSavePage2Url = page.url();
     addLog(session, `🔗 URL بعد حفظ الصفحة 2: ${afterSavePage2Url}`);
@@ -416,8 +414,8 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     if (!afterSavePage2Url.includes("/report/attribute/create/")) {
       addLog(session, "↩️ الانتقال المباشر لصفحة السمات...");
       await page.goto(expectedPage3, { waitUntil: "domcontentloaded", timeout: 30000 });
-      await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
-      await page.waitForTimeout(300);
+      await page.waitForLoadState("networkidle", { timeout: 2000 }).catch(() => {});
+      await page.waitForTimeout(120);
     }
     addLog(session, `✅ تأكيد URL الصفحة 3 [assetId: ${assetId}]: ${page.url()}`);
 
@@ -435,8 +433,8 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
       addLog(session, `⚠️ URL غير متوقع قبل تعبئة الصفحة 3: ${p3CurrentUrl}`);
       addLog(session, "↩️ محاولة الانتقال المباشر لصفحة 3...");
       await page.goto(expectedPage3, { waitUntil: "domcontentloaded", timeout: 30000 });
-      await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
-      await page.waitForTimeout(300);
+      await page.waitForLoadState("networkidle", { timeout: 2000 }).catch(() => {});
+      await page.waitForTimeout(120);
     }
     addLog(session, `✅ URL الصفحة 3 مؤكد: ${page.url()}`);
 
@@ -468,32 +466,32 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
       addLog(session, `⚠️ تغيّر URL أثناء تعبئة الصفحة 3: ${urlAfterFillP3}`);
       addLog(session, "↩️ إعادة الانتقال لصفحة 3...");
       await page.goto(expectedPage3, { waitUntil: "domcontentloaded", timeout: 30000 });
-      await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
-      await page.waitForTimeout(300);
+      await page.waitForLoadState("networkidle", { timeout: 2000 }).catch(() => {});
+      await page.waitForTimeout(120);
     }
 
     // انتظر قصير لتستقر Angular form validation قبل الحفظ
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(150);
     await screenshot(page, `p3_after_${reportId}`);
 
     // ── ضغط زر "حفظ وإغلاق" (الصفحة 3 تستخدم هذا الزر لا "حفظ واستمرار") ──
     const urlBeforeSaveP3 = page.url();
     await clickSaveAndClose(session);
-    await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
-    await page.waitForTimeout(400);
+    await page.waitForLoadState("networkidle", { timeout: 2000 }).catch(() => {});
+    await page.waitForTimeout(150);
     // إذا لم يتغير URL → جرب "حفظ واستمرار" ثم "continue" كاحتياط
     if (page.url() === urlBeforeSaveP3) {
       addLog(session, "ℹ️ URL لم يتغير بعد حفظ وإغلاق — أجرب حفظ واستمرار");
       await clickSaveAndContinue(session);
       await page.waitForLoadState("networkidle", { timeout: 6000 }).catch(() => {});
-      await page.waitForTimeout(300);
+      await page.waitForTimeout(120);
     }
     if (page.url() === urlBeforeSaveP3) {
       addLog(session, "ℹ️ URL لم يتغير — أجرب زر المتابعة");
       await clickContinueButton(session);
       await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
     }
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(120);
 
     await screenshot(page, `review_${reportId}`);
     const finalUrl = page.url();
@@ -520,7 +518,7 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
 // انتظر استقرار Angular — أسرع بكثير من ثابت 2 ثانية
 async function waitForAngular(page: Page, extra = 800): Promise<void> {
   // أولاً: انتظر هدوء الشبكة (500ms بلا طلبات) — أقصى 3 ثوانٍ
-  await page.waitForLoadState("networkidle", { timeout: 3000 }).catch(() => {});
+  await page.waitForLoadState("networkidle", { timeout: 2000 }).catch(() => {});
   // ثانياً: انتظر إضافي قصير لاستقرار Angular zone.js بعد آخر استجابة
   if (extra > 0) await page.waitForTimeout(Math.min(extra, 400));
 }
@@ -550,11 +548,11 @@ async function waitForPageTransition(
 
   // انتظر استقرار الشبكة
   await page
-    .waitForLoadState("networkidle", { timeout: 15000 })
+    .waitForLoadState("networkidle", { timeout: 2000 })
     .catch(() => {});
 
   // انتظر قصير لاستقرار Angular بعد آخر استجابة
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(200);
   addLog(session, `✅ ${label} جاهزة: ${page.url()}`);
 }
 
@@ -611,7 +609,7 @@ async function ensureOnStep(
     addLog(session, `↩️ الـ wizard تخطّى الخطوة — أحاول الانتقال المباشر: ${directUrl}`);
     try {
       await page.goto(directUrl, { waitUntil: "networkidle", timeout: 20000 });
-      await page.waitForTimeout(2000);
+      await page.waitForTimeout(120);
       const newStep = extractStepFromUrl(page.url());
       addLog(session, `🔗 بعد الانتقال: ${page.url()} | الخطوة: ${newStep}`);
       return newStep === expectedStep;
@@ -1107,7 +1105,7 @@ async function selectAngular(
     if (searchInput) {
       await searchInput.click();
       await searchInput.fill(value);
-      await page.waitForTimeout(400);
+      await page.waitForTimeout(150);
       addLog(session, `🔍 كتابة "${value}" في مربع بحث القائمة`);
     }
 
@@ -1217,7 +1215,7 @@ async function clickSaveAndContinue(session: AutomationSession): Promise<void> {
       if (await loc.count().catch(() => 0) > 0) {
         await loc.scrollIntoViewIfNeeded().catch(() => {});
         await loc.click({ force: true, timeout: 4000 });
-        await page.waitForTimeout(500);
+        await page.waitForTimeout(200);
         addLog(session, `✅ تم الضغط: "${txt}" (force)`);
         return;
       }
@@ -1246,7 +1244,7 @@ async function clickSaveAndContinue(session: AutomationSession): Promise<void> {
       return target.textContent?.trim().slice(0, 30) ?? (target as HTMLInputElement).value ?? "?";
     });
     if (result) {
-      await page.waitForTimeout(500);
+      await page.waitForTimeout(200);
       addLog(session, `✅ تم إجبار النقر: "${result}"`);
       return;
     }
@@ -1261,7 +1259,7 @@ async function clickSaveAndContinue(session: AutomationSession): Promise<void> {
       return true;
     });
     if (ok) {
-      await page.waitForTimeout(500);
+      await page.waitForTimeout(200);
       addLog(session, "✅ تم إرسال النموذج (form submit)");
       return;
     }
@@ -1283,7 +1281,7 @@ async function clickSaveAndClose(session: AutomationSession): Promise<void> {
       if (await loc.count().catch(() => 0) > 0) {
         await loc.scrollIntoViewIfNeeded().catch(() => {});
         await loc.click({ force: true, timeout: 4000 });
-        await page.waitForTimeout(500);
+        await page.waitForTimeout(200);
         addLog(session, `✅ تم الضغط: "${txt}"`);
         return;
       }
@@ -1311,7 +1309,7 @@ async function clickSaveAndClose(session: AutomationSession): Promise<void> {
       return target.textContent?.trim().slice(0, 30) ?? (target as HTMLInputElement).value ?? "?";
     });
     if (result) {
-      await page.waitForTimeout(500);
+      await page.waitForTimeout(200);
       addLog(session, `✅ تم الضغط (إجبار): "${result}"`);
       return;
     }
@@ -1437,7 +1435,7 @@ async function clickContinueButton(session: AutomationSession): Promise<void> {
     });
 
     if (forcedResult) {
-      await page.waitForTimeout(800);
+      await page.waitForTimeout(120);
       addLog(session, `✅ تم إجبار النقر على: "${forcedResult}"`);
       return;
     }
@@ -1455,7 +1453,7 @@ async function clickContinueButton(session: AutomationSession): Promise<void> {
       return true;
     });
     if (submitted) {
-      await page.waitForTimeout(800);
+      await page.waitForTimeout(120);
       addLog(session, "✅ تم إرسال النموذج مباشرة (form submit event)");
       return;
     }
@@ -1608,8 +1606,8 @@ async function fillFormPage(
       });
       if (clicked) {
         addLog(session, `✅ ضغط زر إضافة مقيم آخر (via ${clicked})`);
-        await session.page.waitForLoadState("networkidle", { timeout: 3000 }).catch(() => {});
-        await session.page.waitForTimeout(300);
+        await session.page.waitForLoadState("networkidle", { timeout: 2000 }).catch(() => {});
+        await session.page.waitForTimeout(120);
         // سجّل أسماء جميع الـ selects ذات الصلة للتشخيص
         const selectNames = await session.page.evaluate(() =>
           Array.from(document.querySelectorAll<HTMLSelectElement>("select[name]"))
@@ -2128,7 +2126,7 @@ async function fillAssetPage(
   // ── انتظار انتهاء كاسكاد نوع الأصل → استخدام/قطاع الأصل ────────────────
   // TAQEEM تُطلق API call بعد اختيار نوع الأصل لتحديث قائمة استخدام/قطاع الأصل
   addLog(session, "⏳ انتظار انتهاء كاسكاد نوع الأصل...");
-  await session.page.waitForLoadState("networkidle", { timeout: 4000 }).catch(() => {});
+  await session.page.waitForLoadState("networkidle", { timeout: 2000 }).catch(() => {});
   await session.page.waitForTimeout(200);
 
   // ── استخدام/قطاع الأصل ───────────────────────────────────────────────────
@@ -2157,7 +2155,7 @@ async function fillAssetPage(
     // جرب حتى 3 مرات — Angular قد يُعيد ضبط الـ dropdown بعد التحديث
     for (let attempt = 1; attempt <= 3; attempt++) {
       // انتظار networkidle بدلاً من ثابت تصاعدي
-      await session.page.waitForLoadState("networkidle", { timeout: 3000 }).catch(() => {});
+      await session.page.waitForLoadState("networkidle", { timeout: 2000 }).catch(() => {});
       await session.page.waitForTimeout(150 * attempt);
       await (regionEl.isMat
         ? selectAngular(session, buildSelector(regionEl), report.region, "المنطقة", true)
@@ -2174,7 +2172,7 @@ async function fillAssetPage(
       if (attempt < 3) addLog(session, `⏳ إعادة محاولة اختيار المنطقة (${attempt}/3)...`);
     }
     // انتظر تحميل المدن بعد اختيار المنطقة (كاسكاد API)
-    await session.page.waitForLoadState("networkidle", { timeout: 4000 }).catch(() => {});
+    await session.page.waitForLoadState("networkidle", { timeout: 2000 }).catch(() => {});
     await session.page.waitForTimeout(200);
   } else if (!regionEl) {
     addLog(session, "⚠️ لم يُعثر على «المنطقة»");
@@ -2187,7 +2185,7 @@ async function fillAssetPage(
       ? selectAngular(session, buildSelector(cityEl), report.city, "المدينة", true)
       : selectNativeByName(session, cityEl.name || "", report.city, "المدينة"));
     // انتظر استقرار Angular بعد اختيار المدينة
-    await session.page.waitForLoadState("networkidle", { timeout: 3000 }).catch(() => {});
+    await session.page.waitForLoadState("networkidle", { timeout: 2000 }).catch(() => {});
     await session.page.waitForTimeout(150);
   } else addLog(session, "⚠️ لم يُعثر على «المدينة»");
 
@@ -2923,7 +2921,7 @@ async function fillUtilitiesCheckboxes(
     if (!success) addLog(session, `⚠️ مرفق "${util.label}": لم يتفعل بعد 4 محاولات`);
   }
 
-  await session.page.waitForTimeout(300);
+  await session.page.waitForTimeout(120);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3162,7 +3160,7 @@ async function fillPage2(session: AutomationSession, report: any, els: any[], pd
   const regionEl = findEl(selects, /region|province|regionid|emirate|منطقة|محافظة|إمارة/i);
   if (regionEl && report.region) {
     for (let attempt = 1; attempt <= 3; attempt++) {
-      await session.page.waitForLoadState("networkidle", { timeout: 3000 }).catch(() => {});
+      await session.page.waitForLoadState("networkidle", { timeout: 2000 }).catch(() => {});
       await session.page.waitForTimeout(150 * attempt);
       await selectAngular(session, buildSelector(regionEl), report.region, "المنطقة", regionEl.isMat);
       const val = await session.page.evaluate((sel: string) => {
@@ -3176,7 +3174,7 @@ async function fillPage2(session: AutomationSession, report: any, els: any[], pd
       if (attempt < 3) addLog(session, `⏳ إعادة محاولة اختيار المنطقة (${attempt}/3)...`);
     }
     // انتظر تحميل المدن بعد اختيار المنطقة
-    await session.page.waitForLoadState("networkidle", { timeout: 4000 }).catch(() => {});
+    await session.page.waitForLoadState("networkidle", { timeout: 2000 }).catch(() => {});
     await session.page.waitForTimeout(200);
   } else if (!regionEl) {
     addLog(session, `⚠️ لم يُعثر على حقل «المنطقة»`);
@@ -3186,7 +3184,7 @@ async function fillPage2(session: AutomationSession, report: any, els: any[], pd
   // cityEl من المسح الأوّلي قد يكون قديماً — المدن تُحمَّل ديناميكياً بعد المنطقة
   if (report.city) {
     // انتظر إضافياً لتستقر قائمة المدن في Angular
-    await session.page.waitForTimeout(400);
+    await session.page.waitForTimeout(150);
 
     // مسح حي للعنصر من DOM مباشرة
     const liveCitySelector = await session.page.evaluate(() => {
@@ -3448,7 +3446,7 @@ async function scrollToLabelAndFill(session: AutomationSession, labelText: strin
         }
       }
     }, labelText);
-    await session.page.waitForTimeout(300);
+    await session.page.waitForTimeout(120);
   } catch { /* تابع */ }
 }
 
@@ -3475,7 +3473,7 @@ async function selectDropdownByPageLabel(
       }
 
       // انتظر ظهور الخيارات
-      await page.waitForTimeout(600);
+      await page.waitForTimeout(200);
 
       // ── اختيار بالنص (DOM evaluate) ────────────────────────────────────
       const normAr = (s: string) =>
@@ -3527,7 +3525,7 @@ async function selectDropdownByPageLabel(
       ).catch(() => null);
 
       if (domResult?.matched) {
-        await page.waitForTimeout(300);
+        await page.waitForTimeout(120);
         const note = domResult.how !== "exact" ? ` (${domResult.how})` : "";
         addLog(session, `✅ ${fieldName}: "${value}"${note}`);
         return true;
@@ -3925,7 +3923,7 @@ async function clickRadioByGroupLabel(
         const isNo  = noKeywords.some(k => btnText.includes(k) || btnVal === k);
         if ((wantYes && isYes) || (!wantYes && isNo)) {
           await btn.click({ force: true });
-          await page.waitForTimeout(300);
+          await page.waitForTimeout(120);
           addLog(session, `✅ ${fieldName}: "${value}" (mat-radio-group Playwright "${btnText}")`);
           return;
         }
@@ -4024,7 +4022,7 @@ async function clickRadioByGroupLabel(
   }, groupLabelRx.source, wantYes, yesKeywords, noKeywords).catch(() => null);
 
   if (result) {
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(120);
     addLog(session, `✅ ${fieldName}: "${value}" (${result})`);
   } else {
     addLog(session, `⚠️ لم يُعثر على حقل «${fieldName}» في الصفحة`);
@@ -4102,14 +4100,14 @@ async function uploadPdf(
         "position:fixed!important;top:10px!important;left:10px!important;" +
         "width:150px!important;height:50px!important;z-index:999999!important;";
     }, fileSel);
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(150);
 
     const [fc] = await Promise.all([
       page.waitForEvent("filechooser", { timeout: 5000 }),
       page.click(fileSel, { force: true }),
     ]);
     await fc.setFiles(filePath);
-    await page.waitForTimeout(1200);
+    await page.waitForTimeout(200);
 
     // أعد الإخفاء
     await page.evaluate((sel) => {
@@ -4138,7 +4136,7 @@ async function uploadPdf(
     }, fileSel);
 
     await page.setInputFiles(fileSel, filePath);
-    await page.waitForTimeout(600);
+    await page.waitForTimeout(200);
 
     // أطلق أحداث Angular
     await page.evaluate((sel) => {
@@ -4147,7 +4145,7 @@ async function uploadPdf(
       inp.dispatchEvent(new Event("input",  { bubbles: true }));
       inp.dispatchEvent(new Event("change", { bubbles: true }));
     }, fileSel);
-    await page.waitForTimeout(800);
+    await page.waitForTimeout(120);
 
     // تحقق من الرفع بالنظر لاسم الملف المعروض أو files.length
     const verified = await page.evaluate((sel) => {
@@ -4187,7 +4185,7 @@ async function uploadPdf(
         el.click({ force: true }),
       ]);
       await fc.setFiles(filePath);
-      await page.waitForTimeout(800);
+      await page.waitForTimeout(120);
       addLog(session, `✅ تم رفع PDF [3-label/button]: ${fileName}`);
       state.pdfUploaded = true;
       return;
@@ -4230,7 +4228,7 @@ async function submitAndDownloadCertificate(
       .catch(() => false);
     if (!isChecked) {
       await termsLocator.first().click({ force: true });
-      await page.waitForTimeout(400);
+      await page.waitForTimeout(150);
     }
     addLog(session, '✅ "لقد قرأت السياسات واللوائح وأوافق عليها" — تم التحديد');
   } else {
@@ -4249,7 +4247,7 @@ async function submitAndDownloadCertificate(
       ? '✅ terms (fallback) — تم التحديد'
       : '⚠️ checkbox الموافقة لم يُعثر عليه — تابع على مسؤوليتك');
   }
-  await page.waitForTimeout(600);
+  await page.waitForTimeout(200);
 
   // ── 3. ضغط "إرسال التقرير" ───────────────────────────────────────────────
   addLog(session, "▶ الخطوة 2: ضغط إرسال التقرير");
@@ -4269,7 +4267,7 @@ async function submitAndDownloadCertificate(
   // ── 4. انتظار صفحة التأكيد ───────────────────────────────────────────────
   addLog(session, "▶ الخطوة 3: انتظار صفحة التأكيد");
   await page.waitForLoadState("networkidle", { timeout: 30000 }).catch(() => {});
-  await page.waitForTimeout(3000);
+  await page.waitForTimeout(1500);
   await screenshot(page, `submitted_${reportId}`);
   const afterSubmitUrl = page.url();
   addLog(session, `📄 صفحة ما بعد الإرسال: ${afterSubmitUrl}`);
