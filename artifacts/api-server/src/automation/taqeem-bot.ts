@@ -2366,6 +2366,28 @@ async function fillAssetPage(
     addLog(session, `⚠️ fillApproachFields: ${e.message}`);
   }
 
+  // ── قيم الطرق المحددة لكل أسلوب ─────────────────────────────────────────
+  // fillApproachFields تضبط حالة الأسلوب (أساسي/مساعد/غير مستخدم) وتحاول تعبئة
+  // القيمة الإجمالية. لكن TAQEEM يعرض جدول الطرق (تكلفة الإحلال / المقارنة...)
+  // في صفوف منفصلة — يجب تعبئة حقل "النتيجة" في صف كل طريقة بشكل مستقل.
+  // مثال: أسلوب التكلفة → صف "تكلفة الإحلال" → خانة النتيجة = costValue
+  await page.waitForTimeout(400); // دع Angular يُظهر جداول الطرق
+  try {
+    await fillValueByMethodLabel(session, report.costWay,   report.costValue,   "قيمة طريقة التكلفة");
+  } catch (e: any) {
+    addLog(session, `⚠️ fillValueByMethodLabel (تكلفة): ${e.message}`);
+  }
+  try {
+    await fillValueByMethodLabel(session, report.marketWay, report.marketValue, "قيمة طريقة السوق");
+  } catch (e: any) {
+    addLog(session, `⚠️ fillValueByMethodLabel (سوق): ${e.message}`);
+  }
+  try {
+    await fillValueByMethodLabel(session, report.incomeWay, report.incomeValue, "قيمة طريقة الدخل");
+  } catch (e: any) {
+    addLog(session, `⚠️ fillValueByMethodLabel (دخل): ${e.message}`);
+  }
+
   // ── تحقق نهائي من المنطقة قبل الحفظ ──────────────────────────────────────
   // إذا فشل اختيار المنطقة في الـ retry أعلاه، نُعيد المحاولة مرة أخيرة هنا
   if (regionEl && report.region) {
