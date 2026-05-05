@@ -2851,159 +2851,117 @@ async function fillUtilitiesCheckboxes(
     addLog(session, `  ↪ "${u.label}": ${u.keywords.test(utilsNorm) ? "مطلوب" : "لا حاجة"}`);
   if (toCheck.length === 0) { addLog(session, "ℹ️ لا توجد مرافق مطابقة"); return; }
 
-  // ── مساعد: أوجد checkbox الصحيح وانقر input بشكل آمن ─────────────────────
-  // نضغط على `input` الداخلي مباشرةً (ليس mat-checkbox الأب)
-  // ثم نطلق أحداث Angular بالترتيب الصحيح ليُحدَّث FormControl
-  const clickOneCheckbox = async (cbText: string, label: string): Promise<boolean> => {
-    const pat = new RegExp(cbText, "i");
+  const { page } = session;
 
-    // 1) ابحث عن كل mat-checkbox ← ← طريقة Angular Material ─────────────────
-    const result = await session.page.evaluate(
-      ({ patStr, normSrc }: { patStr: string; normSrc: string }) => {
-        const n = (s: string) =>
-          s.replace(/[\u064B-\u065F\u0670]/g, "")
-           .replace(/[أإآ]/g, "ا")
-           .replace(/ة/g, "ه")
-           .replace(/ى/g, "ي")
-           .toLowerCase()
-           .replace(/\s+/g, " ").trim();
-
-        const pat = new RegExp(patStr, "i");
-
-        // حدد عنصر mat-checkbox المطابق
-        const matCbs = Array.from(document.querySelectorAll("mat-checkbox"));
-        for (const matEl of matCbs) {
-          if (!pat.test(n(matEl.textContent ?? ""))) continue;
-          const inp = matEl.querySelector<HTMLInputElement>("input[type='checkbox']");
-          if (!inp) continue;
-          if (inp.checked) return { status: "already_checked" };
-
-          // ضغط input مباشرةً (بدلاً من الأب) — هذا ما يُحدّث Angular FormControl
-          inp.click();
-
-          // انتظر microtask قصير (لا يمكن استخدام async/await هنا)
-          // ثم أطلق أحداث Angular الإضافية
-          inp.dispatchEvent(new Event("change", { bubbles: true }));
-          inp.dispatchEvent(new Event("input",  { bubbles: true }));
-
-          return { status: "clicked", text: n(matEl.textContent ?? "").slice(0, 40) };
-        }
-
-        // 2) fallback: بحث عكسي من input→label ────────────────────────────────
-        for (const inp of Array.from(document.querySelectorAll<HTMLInputElement>("input[type='checkbox']"))) {
-          const lbl = n(
-            inp.labels?.[0]?.textContent ??
-            inp.closest("label")?.textContent ??
-            inp.nextElementSibling?.textContent ??
-            inp.previousElementSibling?.textContent ?? ""
-          );
-          if (!pat.test(lbl)) continue;
-          if (inp.checked) return { status: "already_checked" };
-          inp.click();
-          inp.dispatchEvent(new Event("change", { bubbles: true }));
-          inp.dispatchEvent(new Event("input",  { bubbles: true }));
-          return { status: "fallback_clicked", text: lbl.slice(0, 40) };
-        }
-
-        return { status: "not_found" };
-      },
-      { patStr: pat.source, normSrc: utilsNorm },
-    ).catch(() => ({ status: "error" }));
-
-    return result.status === "clicked" || result.status === "fallback_clicked" || result.status === "already_checked";
-  };
-
-  // ── مساعد: تحقق هل checkbox مُفعَّل فعلاً ────────────────────────────────
-  const isCheckedNow = async (cbText: string): Promise<boolean> => {
-    const pat = new RegExp(cbText, "i");
-    return session.page.evaluate((patStr: string) => {
-      const n = (s: string) =>
-        s.replace(/[\u064B-\u065F\u0670]/g, "")
-         .replace(/[أإآ]/g, "ا")
-         .replace(/ة/g, "ه")
-         .replace(/ى/g, "ي")
-         .toLowerCase()
-         .replace(/\s+/g, " ").trim();
-      const pat2 = new RegExp(patStr, "i");
-      for (const matEl of Array.from(document.querySelectorAll("mat-checkbox"))) {
-        if (!pat2.test(n(matEl.textContent ?? ""))) continue;
-        return (matEl.querySelector("input[type='checkbox']") as HTMLInputElement)?.checked ?? false;
-      }
-      for (const inp of Array.from(document.querySelectorAll<HTMLInputElement>("input[type='checkbox']"))) {
-        const lbl = n(inp.labels?.[0]?.textContent ?? inp.nextElementSibling?.textContent ?? "");
-        if (!pat2.test(lbl)) continue;
-        return inp.checked;
-      }
-      return false;
-    }, pat.source).catch(() => false);
-  };
-
-  // ── المرحلة 1: اضغط كل المرافق المطلوبة دفعةً واحدة (evaluate واحد) ────────
-  type BatchResult = { pattern: string; status: "clicked"|"already"|"not_found"; text?: string };
-  const batchResults: BatchResult[] = await session.page.evaluate(
-    ({ items }: { items: Array<{ pat: string; label: string }> }) => {
-      const n = (s: string) =>
-        s.replace(/[\u064B-\u065F\u0670]/g, "")
-         .replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي")
-         .toLowerCase().replace(/\s+/g, " ").trim();
-
-      return items.map(({ pat: patStr }) => {
-        const rx = new RegExp(patStr, "i");
-        // mat-checkbox
-        for (const matEl of Array.from(document.querySelectorAll("mat-checkbox"))) {
-          if (!rx.test(n(matEl.textContent ?? ""))) continue;
-          const inp = matEl.querySelector<HTMLInputElement>("input[type='checkbox']");
-          if (!inp) continue;
-          if (inp.checked) return { pattern: patStr, status: "already" as const };
-          inp.click();
-          inp.dispatchEvent(new Event("change", { bubbles: true }));
-          inp.dispatchEvent(new Event("input",  { bubbles: true }));
-          return { pattern: patStr, status: "clicked" as const, text: n(matEl.textContent ?? "").slice(0,30) };
-        }
-        // native checkbox fallback
-        for (const inp of Array.from(document.querySelectorAll<HTMLInputElement>("input[type='checkbox']"))) {
-          const lbl = n(inp.labels?.[0]?.textContent ?? inp.nextElementSibling?.textContent ?? "");
-          if (!rx.test(lbl)) continue;
-          if (inp.checked) return { pattern: patStr, status: "already" as const };
-          inp.click();
-          inp.dispatchEvent(new Event("change", { bubbles: true }));
-          return { pattern: patStr, status: "clicked" as const, text: lbl.slice(0,30) };
-        }
-        return { pattern: patStr, status: "not_found" as const };
-      });
-    },
-    { items: toCheck.map(u => ({ pat: u.cbText, label: u.label })) },
-  ).catch(() => toCheck.map(u => ({ pattern: u.cbText, status: "not_found" as const })));
-
-  // انتظر Angular يستقر مرة واحدة لكل الـ checkboxes
-  await session.page.waitForTimeout(150);
-
-  // ── المرحلة 2: تحقق وretry للفاشلين فقط ──────────────────────────────────
-  for (let i = 0; i < toCheck.length; i++) {
-    const util = toCheck[i]!;
-    const r = batchResults[i];
-
-    if (r?.status === "already") {
-      addLog(session, `✅ مرفق "${util.label}": مُفعَّل مسبقاً`);
-      continue;
+  // ── مساعد تطبيع النص داخل المتصفح ───────────────────────────────────────
+  const NORM_JS = `
+    function _n(s){
+      return (s||'')
+        .replace(/[\\u064B-\\u065F\\u0670]/g,'')
+        .replace(/[أإآ]/g,'ا').replace(/ة/g,'ه').replace(/ى/g,'ي')
+        .toLowerCase().replace(/\\s+/g,' ').trim();
     }
-    if (r?.status === "clicked") {
-      // تحقق سريع بعد الانتظار الجماعي أعلاه
-      const ok = await isCheckedNow(util.cbText);
-      if (ok) { addLog(session, `✅ مرفق "${util.label}": تم`); continue; }
-      // محاولة ثانية أخيرة
-      await clickOneCheckbox(util.cbText, util.label);
-      await session.page.waitForTimeout(200);
-      const ok2 = await isCheckedNow(util.cbText);
-      addLog(session, ok2
-        ? `✅ مرفق "${util.label}": تم (محاولة 2)`
-        : `⚠️ مرفق "${util.label}": لم يتفعل`);
+  `;
+
+  // ── لكل مرفق: Playwright locator click (يُعيد البحث بعد كل re-render) ────
+  // السبب: page.evaluate batch يُشغّل Angular CD بعد أول click، فيُبطل باقي
+  // العناصر المحفوظة. Playwright locator يُعيد القرار من DOM الجديد في كل مرة.
+  for (const util of toCheck) {
+    const patSrc = util.cbText;
+
+    // 1) ابحث عن mat-checkbox من DOM الحالي (بعد آخر re-render)
+    const idx: number = await page.evaluate(
+      new Function("patSrc", `
+        ${NORM_JS}
+        var rx = new RegExp(patSrc, 'i');
+        var cbs = Array.from(document.querySelectorAll('mat-checkbox'));
+        for (var i = 0; i < cbs.length; i++) {
+          if (rx.test(_n(cbs[i].textContent || ''))) return i;
+        }
+        return -1;
+      `) as (p: string) => number,
+      patSrc,
+    ).catch(() => -1);
+
+    if (idx >= 0) {
+      // تحقق هل هو مُفعَّل بالفعل
+      const alreadyChecked: boolean = await page.evaluate(
+        new Function("idx", `
+          var inp = document.querySelectorAll('mat-checkbox')[idx]
+                      ?.querySelector('input[type="checkbox"]');
+          return inp ? inp.checked : false;
+        `) as (i: number) => boolean,
+        idx,
+      ).catch(() => false);
+
+      if (alreadyChecked) {
+        addLog(session, `✅ مرفق "${util.label}": مُفعَّل مسبقاً`);
+        continue;
+      }
+
+      // استخدم Playwright locator لضغط الـ input داخل mat-checkbox رقم idx
+      // (يُعيد البحث في DOM بعد أي re-render من Angular)
+      const inputLoc = page
+        .locator("mat-checkbox")
+        .nth(idx)
+        .locator("input[type='checkbox']");
+
+      let success = false;
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          await inputLoc.click({ force: true, timeout: 1500 });
+          await page.waitForTimeout(120);
+          const nowChecked = await inputLoc.isChecked().catch(() => false);
+          if (nowChecked) { success = true; break; }
+          addLog(session, `⏳ إعادة محاولة "${util.label}" (${attempt}/2)...`);
+        } catch {
+          addLog(session, `⚠️ "${util.label}": click فشل — محاولة ${attempt}`);
+        }
+      }
+      addLog(session, success
+        ? `✅ مرفق "${util.label}": تم`
+        : `⚠️ مرفق "${util.label}": لم يتفعل بعد 2 محاولات`);
+
     } else {
-      addLog(session, `⚠️ مرفق "${util.label}": checkbox غير موجود في الصفحة`);
+      // fallback: native input[type=checkbox] بحث بنص الـ label
+      const nativeIdx: number = await page.evaluate(
+        new Function("patSrc", `
+          ${NORM_JS}
+          var rx = new RegExp(patSrc, 'i');
+          var inputs = Array.from(document.querySelectorAll('input[type="checkbox"]'));
+          for (var i = 0; i < inputs.length; i++) {
+            var inp = inputs[i];
+            var lbl = _n(
+              (inp.labels && inp.labels[0] ? inp.labels[0].textContent : '') ||
+              (inp.nextElementSibling ? inp.nextElementSibling.textContent : '') ||
+              (inp.previousElementSibling ? inp.previousElementSibling.textContent : '')
+            );
+            if (rx.test(lbl)) return i;
+          }
+          return -1;
+        `) as (p: string) => number,
+        patSrc,
+      ).catch(() => -1);
+
+      if (nativeIdx >= 0) {
+        const nativeLoc = page.locator("input[type='checkbox']").nth(nativeIdx);
+        try {
+          await nativeLoc.click({ force: true, timeout: 1500 });
+          await page.waitForTimeout(120);
+          const ok = await nativeLoc.isChecked().catch(() => false);
+          addLog(session, ok
+            ? `✅ مرفق "${util.label}": تم (native)`
+            : `⚠️ مرفق "${util.label}": native click لم يتفعل`);
+        } catch {
+          addLog(session, `⚠️ مرفق "${util.label}": native click فشل`);
+        }
+      } else {
+        addLog(session, `⚠️ مرفق "${util.label}": checkbox غير موجود في DOM`);
+      }
     }
   }
 
-  await session.page.waitForTimeout(100);
+  await page.waitForTimeout(100);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
