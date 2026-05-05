@@ -17,7 +17,7 @@ import {
   logout,
   getAuthenticatedContext,
 } from "../automation/taqeem-session-store";
-import { hasPendingQueue } from "../automation/queue-processor";
+import { hasPendingQueue, MAX_CONCURRENT } from "../automation/queue-processor";
 
 const router = Router();
 
@@ -185,14 +185,14 @@ router.post("/automation/submit-external", upload.single("pdf"), async (req, res
     const sessionContext = await getAuthenticatedContext();
 
     if (sessionContext) {
-      if (!canStartNewSession(2)) {
-        // وصلنا للحد الأقصى (2 متصفح) — أضف للطابور
-        console.log(`[ExternalSubmit] 🕐 تقرير #${report.id} — أُضيف للطابور (الحد الأقصى مشغول)`);
+      if (!canStartNewSession(MAX_CONCURRENT)) {
+        // الحد الأقصى (متصفح واحد) مشغول — أضف للطابور
+        console.log(`[ExternalSubmit] 🕐 تقرير #${report.id} — أُضيف للطابور (المتصفح مشغول)`);
         res.status(202).json({
           status:     "queued",
           reportId:   report.id,
           draftSaved: true,
-          message:    "تم حفظ الطلب وسيُرفع تلقائياً بعد انتهاء الطلبات الحالية",
+          message:    "تم حفظ الطلب وسيُرفع تلقائياً بعد انتهاء الطلب الحالي",
         });
         return;
       }
@@ -259,10 +259,10 @@ router.post("/automation/start/:reportId", async (req, res) => {
       await updateReport(reportId, { automationStatus: "idle", automationError: "تم إعادة الضبط تلقائياً — كانت الحالة عالقة" });
     }
 
-    if (!canStartNewSession(2)) {
-      // الحد الأقصى (2 متصفح) مشغول — اترك في الطابور
+    if (!canStartNewSession(MAX_CONCURRENT)) {
+      // المتصفح الواحد مشغول — اترك في الطابور
       await updateReport(reportId, { automationStatus: "queued" });
-      res.json({ status: "queued", message: "تمت إضافة الطلب للطابور (الحد الأقصى 2 متصفح مشغول)" });
+      res.json({ status: "queued", message: "تمت إضافة الطلب للطابور (المتصفح مشغول بطلب آخر)" });
       return;
     }
 
@@ -341,8 +341,14 @@ router.post("/automation/retry/:reportId", async (req, res) => {
       return;
     }
 
-    await updateReport(reportId, { automationStatus: "idle", automationError: null });
+    if (!canStartNewSession(MAX_CONCURRENT)) {
+      // المتصفح مشغول — أضف للطابور
+      await updateReport(reportId, { automationStatus: "queued", automationError: null });
+      res.json({ status: "queued", message: "تمت إضافة الطلب للطابور (المتصفح مشغول بطلب آخر)" });
+      return;
+    }
 
+    await updateReport(reportId, { automationStatus: "idle", automationError: null });
     const sessionId = await startAutomation(reportId);
     res.json({ sessionId, message: "تمت إعادة المحاولة" });
   } catch (err: any) {

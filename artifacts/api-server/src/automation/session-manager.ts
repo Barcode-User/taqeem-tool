@@ -93,6 +93,6 @@ export function isAnySessionRunning(): boolean {
   return getRunningSessionCount() > 0;
 }
 
-export function canStartNewSession(maxConcurrent = 2): boolean {
+export function canStartNewSession(maxConcurrent = 1): boolean {
   return getRunningSessionCount() < maxConcurrent;
 }

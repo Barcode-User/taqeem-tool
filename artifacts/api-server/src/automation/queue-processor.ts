@@ -1,6 +1,6 @@
 /**
  * queue-processor.ts
- * معالج الطابور — يُعالج التقارير بالترتيب مع حد أقصى 2 متصفح في آن واحد
+ * معالج الطابور — متصفح واحد فقط في آن واحد لتجنب تداخل البيانات
  */
 
 import {
@@ -11,7 +11,7 @@ import {
 import { startAutomation } from "./taqeem-bot";
 import { canStartNewSession, getRunningSessionCount } from "./session-manager";
 
-const MAX_CONCURRENT = 2;
+const MAX_CONCURRENT = 1;
 let isProcessing = false;
 
 export async function processQueue(): Promise<void> {
