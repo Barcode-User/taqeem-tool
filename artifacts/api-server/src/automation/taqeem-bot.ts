@@ -55,17 +55,14 @@ export async function startAutomation(
     .finally(async () => {
       // إغلاق السياق المعزول — لا يؤثر على الجلسة الرئيسية أو أي مستخدم آخر
       await cleanup();
-      // ── تسليم الطابور لـ processQueue الذي يتحكم بالحد الأقصى (2 متصفح) ──
-      setTimeout(async () => {
-        try {
-          const { processQueue } = await import("./queue-processor.js");
-          processQueue().catch((e: any) =>
-            console.error(`[Queue] ❌ خطأ في processQueue بعد الانتهاء: ${e.message}`)
-          );
-        } catch (e: any) {
-          console.error(`[Queue] ❌ خطأ في استدعاء processQueue: ${e.message}`);
-        }
-      }, 1000);
+      // ── أخطر الطابور فوراً (event-driven — لا setTimeout، لا polling) ──
+      // notifyReportCompleted تُحلّ Promise الطابور مباشرة بدون أي تأخير
+      try {
+        const { notifyReportCompleted } = await import("./queue-processor.js");
+        notifyReportCompleted(reportId);
+      } catch (e: any) {
+        console.error(`[Queue] ❌ خطأ في notifyReportCompleted: ${e.message}`);
+      }
     });
 
   return sessionId;
