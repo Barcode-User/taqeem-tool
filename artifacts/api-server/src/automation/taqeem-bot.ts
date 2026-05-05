@@ -2199,22 +2199,35 @@ async function fillAssetPage(
   }
 
   // ── المنطقة (مع retry) ────────────────────────────────────────────────────
+  // تحقق صحيح لـ mat-select: el.value فارغ دائماً — نستخدم ng-reflect-value أو النص المعروض
+  const getRegionVal = async (sel: string): Promise<string> =>
+    session.page.evaluate((s: string) => {
+      const el = document.querySelector(s);
+      if (!el) return "";
+      if ((el as HTMLSelectElement).tagName === "SELECT") return (el as HTMLSelectElement).value || "";
+      return (
+        el.getAttribute("ng-reflect-value") ||
+        el.querySelector(".mat-mdc-select-value-text span, .mat-select-value-text span")?.textContent?.trim() ||
+        el.querySelector("mat-select-trigger")?.textContent?.trim() ||
+        ""
+      );
+    }, sel).catch(() => "");
+
   const regionEl = byName("region_id") ?? byLabel(/region|province|منطقة|محافظة/i);
   if (regionEl && report.region) {
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      await session.page.waitForTimeout(200);
+    const regionSel = buildSelector(regionEl);
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      // انتظار أطول في المحاولات اللاحقة
+      await session.page.waitForTimeout(attempt === 1 ? 200 : 400);
       await (regionEl.isMat
-        ? selectAngular(session, buildSelector(regionEl), report.region, "المنطقة", true)
+        ? selectAngular(session, regionSel, report.region, "المنطقة", true)
         : selectNativeByName(session, regionEl.name || "", report.region, "المنطقة"));
-      const currentVal = await session.page.evaluate((sel: string) => {
-        const el = document.querySelector(sel) as HTMLSelectElement | null;
-        return el?.value ?? el?.textContent?.trim() ?? "";
-      }, buildSelector(regionEl)).catch(() => "");
+      const currentVal = await getRegionVal(regionSel);
       if (currentVal && currentVal !== "" && currentVal !== "null") {
         addLog(session, `✅ المنطقة محددة (محاولة ${attempt}): "${currentVal}"`);
         break;
       }
-      if (attempt < 3) addLog(session, `⏳ إعادة محاولة اختيار المنطقة (${attempt}/3)...`);
+      if (attempt < 4) addLog(session, `⏳ إعادة محاولة اختيار المنطقة (${attempt}/4)...`);
     }
     // انتظر تحميل المدن بعد اختيار المنطقة (كاسكاد API)
     await session.page.waitForTimeout(300);
@@ -2314,6 +2327,27 @@ async function fillAssetPage(
     await fillApproachFields(session, els, report);
   } catch (e: any) {
     addLog(session, `⚠️ fillApproachFields: ${e.message}`);
+  }
+
+  // ── تحقق نهائي من المنطقة قبل الحفظ ──────────────────────────────────────
+  // إذا فشل اختيار المنطقة في الـ retry أعلاه، نُعيد المحاولة مرة أخيرة هنا
+  if (regionEl && report.region) {
+    const regionSel = buildSelector(regionEl);
+    const finalVal = await getRegionVal(regionSel);
+    if (!finalVal || finalVal === "" || finalVal === "null") {
+      addLog(session, `⚠️ المنطقة غير محددة قبل الحفظ — محاولة أخيرة...`);
+      await session.page.waitForTimeout(500);
+      await (regionEl.isMat
+        ? selectAngular(session, regionSel, report.region, "المنطقة (أخيرة)", true)
+        : selectNativeByName(session, regionEl.name || "", report.region, "المنطقة (أخيرة)"));
+      await session.page.waitForTimeout(400);
+      const retryVal = await getRegionVal(regionSel);
+      addLog(session, retryVal && retryVal !== "" && retryVal !== "null"
+        ? `✅ المنطقة محددة في المحاولة الأخيرة: "${retryVal}"`
+        : `❌ المنطقة لا تزال غير محددة — سيفشل الحفظ إذا كانت إلزامية`);
+    } else {
+      addLog(session, `✅ التحقق النهائي من المنطقة: "${finalVal}" ✓`);
+    }
   }
 }
 
@@ -2853,111 +2887,70 @@ async function fillUtilitiesCheckboxes(
 
   const { page } = session;
 
-  // ── مساعد تطبيع النص داخل المتصفح ───────────────────────────────────────
-  const NORM_JS = `
-    function _n(s){
-      return (s||'')
-        .replace(/[\\u064B-\\u065F\\u0670]/g,'')
-        .replace(/[أإآ]/g,'ا').replace(/ة/g,'ه').replace(/ى/g,'ي')
-        .toLowerCase().replace(/\\s+/g,' ').trim();
-    }
-  `;
-
-  // ── لكل مرفق: Playwright locator click (يُعيد البحث بعد كل re-render) ────
-  // السبب: page.evaluate batch يُشغّل Angular CD بعد أول click، فيُبطل باقي
-  // العناصر المحفوظة. Playwright locator يُعيد القرار من DOM الجديد في كل مرة.
+  // ── لكل مرفق: filter({ hasText }) — lazy locator يُعيد استعلام DOM بعد كل re-render ──
+  // هذا هو الحل الوحيد لمشكلة Angular Zone.js: كل click يُعيد رسم DOM،
+  // فالـ filter({ hasText }) يبحث في DOM الجديد تلقائياً عند كل عملية.
   for (const util of toCheck) {
-    const patSrc = util.cbText;
+    const rx = new RegExp(util.cbText, "i");
 
-    // 1) ابحث عن mat-checkbox من DOM الحالي (بعد آخر re-render)
-    const idx: number = await page.evaluate(
-      new Function("patSrc", `
-        ${NORM_JS}
-        var rx = new RegExp(patSrc, 'i');
-        var cbs = Array.from(document.querySelectorAll('mat-checkbox'));
-        for (var i = 0; i < cbs.length; i++) {
-          if (rx.test(_n(cbs[i].textContent || ''))) return i;
-        }
-        return -1;
-      `) as (p: string) => number,
-      patSrc,
-    ).catch(() => -1);
+    // filter({ hasText: RegExp }) — lazy: لا يُحفظ المؤشر، يُعيد البحث كل مرة
+    const matCb = page.locator("mat-checkbox").filter({ hasText: rx }).first();
+    const matCount = await matCb.count().catch(() => 0);
 
-    if (idx >= 0) {
-      // تحقق هل هو مُفعَّل بالفعل
-      const alreadyChecked: boolean = await page.evaluate(
-        new Function("idx", `
-          var inp = document.querySelectorAll('mat-checkbox')[idx]
-                      ?.querySelector('input[type="checkbox"]');
-          return inp ? inp.checked : false;
-        `) as (i: number) => boolean,
-        idx,
-      ).catch(() => false);
-
-      if (alreadyChecked) {
+    if (matCount > 0) {
+      const inp = matCb.locator("input[type='checkbox']");
+      const already = await inp.isChecked().catch(() => false);
+      if (already) {
         addLog(session, `✅ مرفق "${util.label}": مُفعَّل مسبقاً`);
         continue;
       }
 
-      // استخدم Playwright locator لضغط الـ input داخل mat-checkbox رقم idx
-      // (يُعيد البحث في DOM بعد أي re-render من Angular)
-      const inputLoc = page
-        .locator("mat-checkbox")
-        .nth(idx)
-        .locator("input[type='checkbox']");
-
       let success = false;
       for (let attempt = 1; attempt <= 2; attempt++) {
         try {
-          await inputLoc.click({ force: true, timeout: 1500 });
+          // force:true يتجاوز أي overlay/hidden — Angular يتلقى الحدث عبر zone.js
+          await inp.click({ force: true, timeout: 2000 });
           await page.waitForTimeout(120);
-          const nowChecked = await inputLoc.isChecked().catch(() => false);
-          if (nowChecked) { success = true; break; }
-          addLog(session, `⏳ إعادة محاولة "${util.label}" (${attempt}/2)...`);
+          success = await inp.isChecked().catch(() => false);
+          if (success) break;
+          if (attempt < 2) addLog(session, `⏳ إعادة محاولة "${util.label}" (${attempt}/2)...`);
         } catch {
           addLog(session, `⚠️ "${util.label}": click فشل — محاولة ${attempt}`);
         }
       }
       addLog(session, success
         ? `✅ مرفق "${util.label}": تم`
-        : `⚠️ مرفق "${util.label}": لم يتفعل بعد 2 محاولات`);
+        : `⚠️ مرفق "${util.label}": لم يتفعل — قد يكون مخفياً أو معطلاً`);
 
     } else {
-      // fallback: native input[type=checkbox] بحث بنص الـ label
-      const nativeIdx: number = await page.evaluate(
-        new Function("patSrc", `
-          ${NORM_JS}
-          var rx = new RegExp(patSrc, 'i');
-          var inputs = Array.from(document.querySelectorAll('input[type="checkbox"]'));
-          for (var i = 0; i < inputs.length; i++) {
-            var inp = inputs[i];
-            var lbl = _n(
-              (inp.labels && inp.labels[0] ? inp.labels[0].textContent : '') ||
-              (inp.nextElementSibling ? inp.nextElementSibling.textContent : '') ||
-              (inp.previousElementSibling ? inp.previousElementSibling.textContent : '')
-            );
-            if (rx.test(lbl)) return i;
-          }
-          return -1;
-        `) as (p: string) => number,
-        patSrc,
-      ).catch(() => -1);
-
-      if (nativeIdx >= 0) {
-        const nativeLoc = page.locator("input[type='checkbox']").nth(nativeIdx);
-        try {
-          await nativeLoc.click({ force: true, timeout: 1500 });
-          await page.waitForTimeout(120);
-          const ok = await nativeLoc.isChecked().catch(() => false);
-          addLog(session, ok
-            ? `✅ مرفق "${util.label}": تم (native)`
-            : `⚠️ مرفق "${util.label}": native click لم يتفعل`);
-        } catch {
-          addLog(session, `⚠️ مرفق "${util.label}": native click فشل`);
+      // fallback: native input[type=checkbox] مع evaluate منفرد (لا batch)
+      // نبحث ونضغط في evaluate واحد لتفادي stale index
+      const nativeResult = await page.evaluate((patSrc: string) => {
+        const rx2 = new RegExp(patSrc, "i");
+        const n = (s: string) =>
+          (s || "").replace(/[\u064B-\u065F\u0670]/g, "")
+            .replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي")
+            .toLowerCase().replace(/\s+/g, " ").trim();
+        for (const inp of Array.from(document.querySelectorAll<HTMLInputElement>("input[type='checkbox']"))) {
+          const lbl = n(
+            inp.labels?.[0]?.textContent ??
+            inp.closest("label")?.textContent ??
+            inp.nextElementSibling?.textContent ??
+            inp.previousElementSibling?.textContent ?? ""
+          );
+          if (!rx2.test(lbl)) continue;
+          if (inp.checked) return "already";
+          inp.click();
+          inp.dispatchEvent(new Event("change", { bubbles: true }));
+          return "clicked";
         }
-      } else {
-        addLog(session, `⚠️ مرفق "${util.label}": checkbox غير موجود في DOM`);
-      }
+        return "not_found";
+      }, util.cbText).catch(() => "error");
+
+      addLog(session,
+        nativeResult === "clicked"   ? `✅ مرفق "${util.label}": تم (native)` :
+        nativeResult === "already"   ? `✅ مرفق "${util.label}": مُفعَّل مسبقاً` :
+        `⚠️ مرفق "${util.label}": غير موجود في DOM`);
     }
   }
 
