@@ -2059,88 +2059,128 @@ async function fillApproachFields(
       continue;
     }
 
-    // ── ب) تعبئة أول input يظهر بعد الـ select في DOM ────────────────────
-    // Angular قد تُظهر الـ input بعد اختيار الـ dropdown — نُعيد المحاولة
+    // ── ب) تعبئة قيمة الأسلوب — atomic find+fill في evaluate واحد ─────────
+    //
+    // السبب الجذري للخلل السابق:
+    //   1. findValueInput() تحفظ nth index للـ input في T1
+    //   2. Angular تُعيد رسم DOM (تُظهر input جديد) بعد اختيار "أساسي"
+    //   3. في T2 كل الـ indices تتزحزح — nth(valueNth) يصل لحقل خاطئ
+    //
+    // الحل: البحث والتعبئة معاً في page.evaluate() واحد (atomic)
+    //   — لا تخزين index بين T1 و T2
+    //   — البحث في حاويات متعددة للأسلوب (ليس فقط container الـ select)
+    //   — الاعتماد على النص المحيط بالـ section وليس فقط على قرب الـ select
+    //
     const selTag = found.type === "native" ? "select" : "mat-select";
+    const strVal = String(ap.value);
+    const apTextSrc = ap.textRx.source; // e.g. "التكلفة" للبحث عن قسم التكلفة
 
-    const findValueInput = async (): Promise<number> =>
-      page.evaluate(
-        ({ tag, idx }: { tag: string; idx: number }) => {
-          const allSels   = Array.from(document.querySelectorAll(tag));
-          const allInputs = Array.from(document.querySelectorAll("input"));
-          const sel       = allSels[idx];
-          if (!sel) return -1;
+    // انتظر Angular أن يُظهر الـ input (تزيد مع كل محاولة)
+    const waits = [250, 400, 600];
+    let fillResult = "";
 
-          // الأولوية 1: input داخل نفس الحاوية (tr / .row / mat-form-field / قسم الأسلوب)
-          const container =
-            sel.closest("tr, .row, .form-row, .form-group, mat-form-field") ??
-            sel.parentElement?.parentElement;
-          if (container) {
-            const inp = Array.from(container.querySelectorAll("input")).find(
-              i => !["radio", "checkbox", "hidden"].includes((i as HTMLInputElement).type),
-            ) as HTMLInputElement | undefined;
-            if (inp) return allInputs.indexOf(inp);
+    for (let attempt = 0; attempt < 3 && !fillResult.startsWith("ok"); attempt++) {
+      await page.waitForTimeout(waits[attempt]);
+
+      fillResult = await page.evaluate(
+        ({ tag, selIdx, v, apText }: { tag: string; selIdx: number; v: string; apText: string }) => {
+          const notFillable = (el: Element) =>
+            ["radio", "checkbox", "hidden", "file", "submit", "button", "reset"]
+              .includes((el as HTMLInputElement).type);
+
+          // ── الاستراتيجية 1: ابحث في حاويات متصاعدة من الـ select ────────
+          const sel = document.querySelectorAll(tag)[selIdx];
+          if (sel) {
+            let p: Element | null = sel;
+            for (let lvl = 0; lvl < 10 && p; lvl++) {
+              const inp = Array.from(p.querySelectorAll("input"))
+                .find(i => !notFillable(i)) as HTMLInputElement | undefined;
+              if (inp) {
+                const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+                if (setter) setter.call(inp, v); else inp.value = v;
+                inp.dispatchEvent(new Event("input",  { bubbles: true }));
+                inp.dispatchEvent(new Event("change", { bubbles: true }));
+                inp.dispatchEvent(new Event("blur",   { bubbles: true }));
+                return `ok:lvl=${lvl}`;
+              }
+              p = p.parentElement;
+            }
           }
 
-          // الاحتياط: أول input يأتي بعده في ترتيب DOM
-          const first = allInputs.find(inp => {
-            if (["radio", "checkbox", "hidden"].includes((inp as HTMLInputElement).type)) return false;
-            return (sel.compareDocumentPosition(inp) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
-          });
-          return first ? allInputs.indexOf(first) : -1;
-        },
-        { tag: selTag, idx: found.index },
-      );
+          // ── الاستراتيجية 2: ابحث عن قسم بنص يطابق اسم الأسلوب ──────────
+          // يحل مشكلة CSS Grid/Flex حيث الـ input يكون خارج DOM tree للـ select
+          const apRx = new RegExp(apText, "i");
+          // نبحث عن headings/labels تحتوي اسم الأسلوب
+          const candidates = Array.from(document.querySelectorAll(
+            "h1,h2,h3,h4,h5,h6,label,th,td,div,span,p",
+          )).filter(el =>
+            el.children.length === 0 && // leaf node فقط
+            apRx.test((el.textContent || "").trim()),
+          );
 
-    // retry حتى 3 مرات — Angular تحتاج وقتاً لإظهار الـ input بعد تغيير الـ dropdown
-    let valueNth = -1;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      await page.waitForTimeout(attempt === 0 ? 150 : 200);
-      valueNth = await findValueInput();
-      if (valueNth >= 0) break;
-      addLog(session, `🔄 ${ap.label}: input غير موجود بعد — محاولة ${attempt + 2}/3`);
+          for (const heading of candidates) {
+            // اصعد للـ section container ثم ابحث داخله
+            let section: Element | null = heading.parentElement;
+            for (let lvl = 0; lvl < 8 && section; lvl++) {
+              const inp = Array.from(section.querySelectorAll("input"))
+                .find(i => !notFillable(i)) as HTMLInputElement | undefined;
+              if (inp) {
+                const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+                if (setter) setter.call(inp, v); else inp.value = v;
+                inp.dispatchEvent(new Event("input",  { bubbles: true }));
+                inp.dispatchEvent(new Event("change", { bubbles: true }));
+                inp.dispatchEvent(new Event("blur",   { bubbles: true }));
+                return `ok:section-heading`;
+              }
+              section = section.parentElement;
+            }
+          }
+
+          // ── الاستراتيجية 3 (أخيرة): أول input يأتي بعد الـ select ──────
+          if (sel) {
+            const allInputs = Array.from(document.querySelectorAll("input"))
+              .filter(i => !notFillable(i)) as HTMLInputElement[];
+            const afterSel = allInputs.find(i =>
+              sel.compareDocumentPosition(i) & Node.DOCUMENT_POSITION_FOLLOWING,
+            );
+            if (afterSel) {
+              const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+              if (setter) setter.call(afterSel, v); else afterSel.value = v;
+              afterSel.dispatchEvent(new Event("input",  { bubbles: true }));
+              afterSel.dispatchEvent(new Event("change", { bubbles: true }));
+              afterSel.dispatchEvent(new Event("blur",   { bubbles: true }));
+              return `ok:after-select`;
+            }
+          }
+
+          return `not_found:attempt`;
+        },
+        { tag: selTag, selIdx: found.index, v: strVal, apText: apTextSrc },
+      ).catch((e: any) => `error:${e.message}`);
+
+      addLog(session, `🔍 ${ap.label}: قيمة=${strVal} → محاولة ${attempt + 1}/3 → ${fillResult}`);
     }
 
-    addLog(session, `🔍 ${ap.label}: أول input بعد الـ select → nth=${valueNth}`);
-
-    if (valueNth >= 0) {
-      const strVal = String(ap.value);
-      // الطريقة 1: Playwright fill (يُحرّك Angular zone)
-      let filled = false;
+    // ── جـ) تحقق نهائي بـ Playwright fill إذا لم تنجح evaluate ──────────
+    if (!fillResult.startsWith("ok")) {
+      addLog(session, `⚠️ ${ap.label}: native setter فشل — سأحاول Playwright fill مباشرة`);
       try {
-        const inputLoc = page.locator("input").nth(valueNth);
-        await inputLoc.click({ timeout: 2000 });
-        await inputLoc.selectText().catch(() => {});
-        await inputLoc.fill(strVal, { timeout: 2000 });
-        filled = true;
-        addLog(session, `✅ ${ap.label}: قيمة=${strVal} → input[${valueNth}]`);
+        // ابحث عن أول input مرئي في الصفحة يقبل التعديل بالقرب من اسم الأسلوب
+        const apLabelLoc = page.locator(`text=/${apTextSrc}/i`).first();
+        const apInpLoc   = apLabelLoc.locator("xpath=ancestor::*[.//input][1]//input")
+          .filter({ hasNot: page.locator("[type='radio'],[type='checkbox'],[type='hidden']") })
+          .first();
+        if (await apInpLoc.count() > 0) {
+          await apInpLoc.click({ timeout: 2000 });
+          await apInpLoc.selectText().catch(() => {});
+          await apInpLoc.fill(strVal, { timeout: 2000 });
+          addLog(session, `✅ ${ap.label}: تم بـ Playwright fill (xpath)`);
+        } else {
+          addLog(session, `❌ ${ap.label}: لم يُعثر على input بعد كل المحاولات`);
+        }
       } catch (e: any) {
-        addLog(session, `⚠️ ${ap.label}: fill فشل — ${(e as Error).message} — سأحاول native setter`);
+        addLog(session, `❌ ${ap.label}: Playwright fill أيضاً فشل — ${e.message}`);
       }
-
-      // الطريقة 2 (احتياط): native setter + events
-      if (!filled) {
-        const ok = await page.evaluate(
-          ({ idx, v }: { idx: number; v: string }) => {
-            const inputs = Array.from(document.querySelectorAll("input"))
-              .filter(i => !["radio", "checkbox", "hidden"].includes((i as HTMLInputElement).type));
-            const el = inputs[idx] as HTMLInputElement | undefined;
-            if (!el) return false;
-            const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
-            if (setter) setter.call(el, v); else el.value = v;
-            el.dispatchEvent(new Event("input",  { bubbles: true }));
-            el.dispatchEvent(new Event("change", { bubbles: true }));
-            el.dispatchEvent(new Event("blur",   { bubbles: true }));
-            return true;
-          },
-          { idx: valueNth, v: strVal },
-        ).catch(() => false);
-        addLog(session, ok
-          ? `✅ ${ap.label}: قيمة=${strVal} → input[${valueNth}] (native setter)`
-          : `⚠️ ${ap.label}: native setter أيضاً فشل`);
-      }
-    } else {
-      addLog(session, `⚠️ ${ap.label}: لم يُعثر على input للقيمة بعد 3 محاولات`);
     }
   }
 }
