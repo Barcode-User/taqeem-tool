@@ -2848,8 +2848,19 @@ async function fillAttributePage(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// تعبئة checkboxes "المرافق المتاحة" — تحقق مباشرة من النص المستخرج
-// يدعم: mat-checkbox (Angular Material) + input[type=checkbox] عادي + label
+// تعبئة checkboxes "المرافق المتاحة" — Angular Material mat-checkbox
+// ─────────────────────────────────────────────────────────────────────────────
+// السبب الجذري لفشل الإصدارات السابقة:
+//   كنا نضغط inp (input المخفي) مع force:true — Angular Material لا يستمع لهذا
+//   الحدث على input بل على العنصر الخارجي mat-checkbox أو label بداخله.
+//   النتيجة: كهرباء تتفعّل بالصدفة لأنها أول عنصر، ثم Angular يدخل في حالة
+//   مُعطَّلة لأن change detection لم يُطلَق بشكل صحيح، فيفشل الباقي.
+//
+// الحل الجديد:
+//   1. نسحب كل nصوص mat-checkbox من DOM لنعرف ماذا يوجد فعلاً (debug)
+//   2. للنقر: نستهدف label داخل mat-checkbox (ما يُطلّق Angular الصحيح)
+//   3. نستخدم page.locator لا evaluate — حتى نضمن lazy re-query بعد كل re-render
+//   4. بعد كل ضغطة: ننتظر Angular Zone أن يستقر (waitForFunction) لا مجرد timeout ثابت
 // ─────────────────────────────────────────────────────────────────────────────
 async function fillUtilitiesCheckboxes(
   session: AutomationSession,
@@ -2870,91 +2881,102 @@ async function fillUtilitiesCheckboxes(
      .replace(/\s+/g, " ").trim();
 
   const utilsNorm = norm(String(report.utilities));
-  addLog(session, `🔧 المرافق — نص: "${String(report.utilities).slice(0, 120)}"`);
+  addLog(session, `🔧 المرافق — نص التقرير: "${String(report.utilities).slice(0, 120)}"`);
 
   const utilMap = [
-    { keywords: /كهرباء|electricity|electric|power|إنارة|انارة|إضاءة|اضاءة|lighting/i, cbText: "كهرباء", label: "كهرباء حكومية" },
-    { keywords: /مياه|مياة|ماء|water|drinking/i,                                        cbText: "مياه",    label: "مياه شرب"    },
-    { keywords: /صرف\s*صحي|sewage|sewer/i,                                               cbText: "صرف",     label: "صرف صحي"     },
-    { keywords: /غاز|gas/i,                                                               cbText: "غاز",     label: "غاز طبيعي"   },
-    { keywords: /طرق|رئيسي|road|access|سفلت|اسفلت|رصف|تعبيد|asphalt|pavement/i,        cbText: "طرق",     label: "طرق رئيسية"  },
+    { keywords: /كهرباء|electricity|electric|power|إنارة|انارة|إضاءة|اضاءة|lighting/i, cbText: "كهرباء", label: "كهرباء" },
+    { keywords: /مياه|مياة|ماء|water|drinking/i,                                        cbText: "مياه",    label: "مياه"    },
+    { keywords: /صرف\s*صحي|sewage|sewer/i,                                               cbText: "صرف",     label: "صرف صحي" },
+    { keywords: /غاز|gas/i,                                                               cbText: "غاز",     label: "غاز"     },
+    { keywords: /طرق|رئيسي|road|access|سفلت|اسفلت|رصف|تعبيد|asphalt|pavement/i,        cbText: "طرق",     label: "طرق"     },
   ];
 
   const toCheck = utilMap.filter(u => u.keywords.test(utilsNorm));
   for (const u of utilMap)
-    addLog(session, `  ↪ "${u.label}": ${u.keywords.test(utilsNorm) ? "مطلوب" : "لا حاجة"}`);
+    addLog(session, `  ↪ "${u.label}": ${u.keywords.test(utilsNorm) ? "✔ مطلوب" : "— لا حاجة"}`);
   if (toCheck.length === 0) { addLog(session, "ℹ️ لا توجد مرافق مطابقة"); return; }
 
   const { page } = session;
 
-  // ── لكل مرفق: filter({ hasText }) — lazy locator يُعيد استعلام DOM بعد كل re-render ──
-  // هذا هو الحل الوحيد لمشكلة Angular Zone.js: كل click يُعيد رسم DOM،
-  // فالـ filter({ hasText }) يبحث في DOM الجديد تلقائياً عند كل عملية.
+  // ── سجّل كل نصوص mat-checkbox الموجودة في DOM الآن (debug) ──────────────
+  const domLabels: string[] = await page.evaluate(() =>
+    Array.from(document.querySelectorAll("mat-checkbox"))
+      .map(el => (el.textContent ?? "").replace(/\s+/g, " ").trim())
+  ).catch(() => []);
+  addLog(session, `🔍 mat-checkboxes في الصفحة (${domLabels.length}): ${domLabels.join(" | ")}`);
+
+  // ── دالة الانتظار حتى يستقر Angular Zone ────────────────────────────────
+  const waitForAngular = async () => {
+    await page.waitForFunction(() => {
+      const w = window as any;
+      if (typeof w.getAllAngularTestabilities === "function") {
+        return w.getAllAngularTestabilities().every((t: any) => t.isStable());
+      }
+      return true; // إذا لم يكن Angular موجوداً — لا انتظار
+    }, { timeout: 3000 }).catch(() => {});
+    // ضمان إضافي: 150ms حتى يُكمل Angular أي async pipes
+    await page.waitForTimeout(150);
+  };
+
+  // ── انقر على كل مرفق مطلوب ──────────────────────────────────────────────
   for (const util of toCheck) {
     const rx = new RegExp(util.cbText, "i");
 
-    // filter({ hasText: RegExp }) — lazy: لا يُحفظ المؤشر، يُعيد البحث كل مرة
+    // ── انتظر Angular أولاً قبل البحث ──────────────────────────────────────
+    await waitForAngular();
+
+    // ── استهدف mat-checkbox بنص مطابق — lazy re-query بعد كل re-render ─────
     const matCb = page.locator("mat-checkbox").filter({ hasText: rx }).first();
-    const matCount = await matCb.count().catch(() => 0);
+    const found = await matCb.count().catch(() => 0);
 
-    if (matCount > 0) {
-      const inp = matCb.locator("input[type='checkbox']");
-      const already = await inp.isChecked().catch(() => false);
-      if (already) {
-        addLog(session, `✅ مرفق "${util.label}": مُفعَّل مسبقاً`);
-        continue;
-      }
-
-      let success = false;
-      for (let attempt = 1; attempt <= 2; attempt++) {
-        try {
-          // force:true يتجاوز أي overlay/hidden — Angular يتلقى الحدث عبر zone.js
-          await inp.click({ force: true, timeout: 2000 });
-          await page.waitForTimeout(120);
-          success = await inp.isChecked().catch(() => false);
-          if (success) break;
-          if (attempt < 2) addLog(session, `⏳ إعادة محاولة "${util.label}" (${attempt}/2)...`);
-        } catch {
-          addLog(session, `⚠️ "${util.label}": click فشل — محاولة ${attempt}`);
-        }
-      }
-      addLog(session, success
-        ? `✅ مرفق "${util.label}": تم`
-        : `⚠️ مرفق "${util.label}": لم يتفعل — قد يكون مخفياً أو معطلاً`);
-
-    } else {
-      // fallback: native input[type=checkbox] مع evaluate منفرد (لا batch)
-      // نبحث ونضغط في evaluate واحد لتفادي stale index
-      const nativeResult = await page.evaluate((patSrc: string) => {
-        const rx2 = new RegExp(patSrc, "i");
-        const n = (s: string) =>
-          (s || "").replace(/[\u064B-\u065F\u0670]/g, "")
-            .replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي")
-            .toLowerCase().replace(/\s+/g, " ").trim();
-        for (const inp of Array.from(document.querySelectorAll<HTMLInputElement>("input[type='checkbox']"))) {
-          const lbl = n(
-            inp.labels?.[0]?.textContent ??
-            inp.closest("label")?.textContent ??
-            inp.nextElementSibling?.textContent ??
-            inp.previousElementSibling?.textContent ?? ""
-          );
-          if (!rx2.test(lbl)) continue;
-          if (inp.checked) return "already";
-          inp.click();
-          inp.dispatchEvent(new Event("change", { bubbles: true }));
-          return "clicked";
-        }
-        return "not_found";
-      }, util.cbText).catch(() => "error");
-
-      addLog(session,
-        nativeResult === "clicked"   ? `✅ مرفق "${util.label}": تم (native)` :
-        nativeResult === "already"   ? `✅ مرفق "${util.label}": مُفعَّل مسبقاً` :
-        `⚠️ مرفق "${util.label}": غير موجود في DOM`);
+    if (found === 0) {
+      addLog(session, `⚠️ مرفق "${util.label}": mat-checkbox غير موجود في DOM — تجاوز`);
+      continue;
     }
+
+    // تحقق هل هو مُفعَّل مسبقاً
+    const inp = matCb.locator("input[type='checkbox']");
+    const already = await inp.isChecked().catch(() => false);
+    if (already) {
+      addLog(session, `✅ مرفق "${util.label}": مُفعَّل مسبقاً`);
+      continue;
+    }
+
+    // ── استراتيجية النقر: label داخل mat-checkbox (ما يُطلّق Angular صحيحاً) ─
+    // Angular Material يستمع للـ click على label لا على input المخفي
+    let success = false;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        // حاول label أولاً — هذا يُطلّق Angular change detection بشكل صحيح
+        const lbl = matCb.locator("label").first();
+        const lblCount = await lbl.count().catch(() => 0);
+        if (lblCount > 0) {
+          await lbl.click({ timeout: 2000 });
+        } else {
+          // إذا لم يوجد label: انقر mat-checkbox نفسه
+          await matCb.click({ timeout: 2000 });
+        }
+
+        // انتظر Angular Zone يستقر
+        await waitForAngular();
+
+        success = await inp.isChecked().catch(() => false);
+        if (success) break;
+
+        addLog(session, `⏳ إعادة محاولة "${util.label}" (${attempt}/3) — لم يتفعل بعد`);
+        await page.waitForTimeout(200);
+      } catch (e: any) {
+        addLog(session, `⚠️ "${util.label}": click فشل (${attempt}/3) — ${e.message?.slice(0, 60)}`);
+        await page.waitForTimeout(200);
+      }
+    }
+
+    addLog(session, success
+      ? `✅ مرفق "${util.label}": تم تفعيله`
+      : `❌ مرفق "${util.label}": فشل التفعيل — قد يكون معطلاً في الصفحة`);
   }
 
-  await page.waitForTimeout(100);
+  await page.waitForTimeout(200);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
