@@ -1092,9 +1092,9 @@ async function selectAngular(
     await page.click(selector);
     await page.waitForSelector(
       "mat-option, .mat-option, .mat-mdc-option",
-      { timeout: 1500 },
+      { timeout: 800 },
     );
-    await page.waitForTimeout(150);
+    await page.waitForTimeout(80);
 
     // ── بحث داخل القائمة المنسدلة (لقوائم طويلة كالمدن) ──────────────────────
     // بعض قوائم Angular Material تحتوي على حقل بحث — نكتب القيمة فيه لتصفية الخيارات
@@ -1153,7 +1153,7 @@ async function selectAngular(
       const optLoc = page.locator("mat-option, .mat-option, .mat-mdc-option")
         .filter({ hasText: optionText.found });
       await optLoc.first().click({ timeout: 2000 });
-      await page.waitForTimeout(80);
+      await page.waitForTimeout(40);
       if (optionText.usedFallback) {
         addLog(session, `⚠️ "${label}": "${value}" غير موجود — تم اختيار "${optionText.found}" (${optionText.fallbackReason})`);
       } else {
@@ -2095,7 +2095,7 @@ async function fillApproachFields(
     // retry حتى 3 مرات — Angular تحتاج وقتاً لإظهار الـ input بعد تغيير الـ dropdown
     let valueNth = -1;
     for (let attempt = 0; attempt < 3; attempt++) {
-      await page.waitForTimeout(attempt === 0 ? 250 : 350);
+      await page.waitForTimeout(attempt === 0 ? 150 : 200);
       valueNth = await findValueInput();
       if (valueNth >= 0) break;
       addLog(session, `🔄 ${ap.label}: input غير موجود بعد — محاولة ${attempt + 2}/3`);
@@ -2174,11 +2174,9 @@ async function fillAssetPage(
       : selectNativeByName(session, assetTypeEl.name || "", report.propertyType, "نوع الأصل"));
   } else addLog(session, "⚠️ لم يُعثر على «نوع الأصل»");
 
-  // ── انتظار انتهاء كاسكاد نوع الأصل → استخدام/قطاع الأصل ────────────────
-  // TAQEEM تُطلق API call بعد اختيار نوع الأصل لتحديث قائمة استخدام/قطاع الأصل
-  addLog(session, "⏳ انتظار انتهاء كاسكاد نوع الأصل...");
-  await session.page.waitForLoadState("networkidle", { timeout: 2000 }).catch(() => {});
-  await session.page.waitForTimeout(200);
+  // ── انتظار كاسكاد نوع الأصل → استخدام/قطاع الأصل ──────────────────────
+  addLog(session, "⏳ انتظار كاسكاد نوع الأصل...");
+  await session.page.waitForTimeout(300);
 
   // ── استخدام/قطاع الأصل ───────────────────────────────────────────────────
   // الاسم الفعلي: asset_usage_id — نفس أسلوب المنطقة (selectNativeByName)
@@ -2203,15 +2201,11 @@ async function fillAssetPage(
   // ── المنطقة (مع retry) ────────────────────────────────────────────────────
   const regionEl = byName("region_id") ?? byLabel(/region|province|منطقة|محافظة/i);
   if (regionEl && report.region) {
-    // جرب حتى 3 مرات — Angular قد يُعيد ضبط الـ dropdown بعد التحديث
     for (let attempt = 1; attempt <= 3; attempt++) {
-      // انتظار networkidle بدلاً من ثابت تصاعدي
-      await session.page.waitForLoadState("networkidle", { timeout: 2000 }).catch(() => {});
-      await session.page.waitForTimeout(150 * attempt);
+      await session.page.waitForTimeout(200);
       await (regionEl.isMat
         ? selectAngular(session, buildSelector(regionEl), report.region, "المنطقة", true)
         : selectNativeByName(session, regionEl.name || "", report.region, "المنطقة"));
-      // تحقق من أن القيمة اختيرت فعلاً
       const currentVal = await session.page.evaluate((sel: string) => {
         const el = document.querySelector(sel) as HTMLSelectElement | null;
         return el?.value ?? el?.textContent?.trim() ?? "";
@@ -2223,8 +2217,7 @@ async function fillAssetPage(
       if (attempt < 3) addLog(session, `⏳ إعادة محاولة اختيار المنطقة (${attempt}/3)...`);
     }
     // انتظر تحميل المدن بعد اختيار المنطقة (كاسكاد API)
-    await session.page.waitForLoadState("networkidle", { timeout: 2000 }).catch(() => {});
-    await session.page.waitForTimeout(200);
+    await session.page.waitForTimeout(300);
   } else if (!regionEl) {
     addLog(session, "⚠️ لم يُعثر على «المنطقة»");
   }
@@ -2235,9 +2228,7 @@ async function fillAssetPage(
     await (cityEl.isMat
       ? selectAngular(session, buildSelector(cityEl), report.city, "المدينة", true)
       : selectNativeByName(session, cityEl.name || "", report.city, "المدينة"));
-    // انتظر استقرار Angular بعد اختيار المدينة
-    await session.page.waitForLoadState("networkidle", { timeout: 2000 }).catch(() => {});
-    await session.page.waitForTimeout(150);
+    await session.page.waitForTimeout(200);
   } else addLog(session, "⚠️ لم يُعثر على «المدينة»");
 
   // ── الحي ─────────────────────────────────────────────────────────────────
@@ -3215,8 +3206,7 @@ async function fillPage2(session: AutomationSession, report: any, els: any[], pd
   const regionEl = findEl(selects, /region|province|regionid|emirate|منطقة|محافظة|إمارة/i);
   if (regionEl && report.region) {
     for (let attempt = 1; attempt <= 3; attempt++) {
-      await session.page.waitForLoadState("networkidle", { timeout: 2000 }).catch(() => {});
-      await session.page.waitForTimeout(150 * attempt);
+      await session.page.waitForTimeout(200);
       await selectAngular(session, buildSelector(regionEl), report.region, "المنطقة", regionEl.isMat);
       const val = await session.page.evaluate((sel: string) => {
         const el = document.querySelector(sel) as HTMLSelectElement | null;
@@ -3229,8 +3219,7 @@ async function fillPage2(session: AutomationSession, report: any, els: any[], pd
       if (attempt < 3) addLog(session, `⏳ إعادة محاولة اختيار المنطقة (${attempt}/3)...`);
     }
     // انتظر تحميل المدن بعد اختيار المنطقة
-    await session.page.waitForLoadState("networkidle", { timeout: 2000 }).catch(() => {});
-    await session.page.waitForTimeout(200);
+    await session.page.waitForTimeout(300);
   } else if (!regionEl) {
     addLog(session, `⚠️ لم يُعثر على حقل «المنطقة»`);
   }
@@ -3286,7 +3275,7 @@ async function fillPage2(session: AutomationSession, report: any, els: any[], pd
         }
         if (attempt < 3) {
           addLog(session, `⏳ إعادة محاولة اختيار المدينة (${attempt}/3)...`);
-          await session.page.waitForTimeout(500 * attempt);
+          await session.page.waitForTimeout(300);
         }
       }
     } else {
