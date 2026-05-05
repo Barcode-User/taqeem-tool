@@ -2290,10 +2290,12 @@ async function fillAssetPage(
     }
   }
 
+  // الكشف: يدعم "خط العرض"/"latitude" وأيضاً مجرد "العرض" في سياق الإحداثيات
   const latEl =
     byName("latitude")  ?? byName("lat")  ??
     byName("property_latitude") ?? byName("asset_latitude") ??
-    byLabel(/latitude|lat\b|خط.*عرض|عرض.*جغرافي/i);
+    byLabel(/latitude|lat\b|خط.*عرض|عرض.*جغرافي/i) ??
+    byLabel(/^العرض$|^\s*العرض\s*$/i);
   if (latEl && lat) {
     await fillAngular(session, buildSelector(latEl), lat, "خط العرض");
   } else if (!latEl) {
@@ -2302,10 +2304,12 @@ async function fillAssetPage(
     addLog(session, "⚠️ لا توجد قيمة لخط العرض في التقرير");
   }
 
+  // الكشف: يدعم "خط الطول"/"longitude" وأيضاً مجرد "الطول" في سياق الإحداثيات
   const lngEl =
     byName("longitude")  ?? byName("lng") ?? byName("lon") ??
     byName("property_longitude") ?? byName("asset_longitude") ??
-    byLabel(/longitude|lng\b|lon\b|خط.*طول|طول.*جغرافي/i);
+    byLabel(/longitude|lng\b|lon\b|خط.*طول|طول.*جغرافي/i) ??
+    byLabel(/^الطول$|^\s*الطول\s*$/i);
   if (lngEl && lng) {
     await fillAngular(session, buildSelector(lngEl), lng, "خط الطول");
   } else if (!lngEl) {
@@ -3313,29 +3317,41 @@ async function fillPage2(session: AutomationSession, report: any, els: any[], pd
   if (streetEl) await fillAngular(session, buildSelector(streetEl), report.street, "الشارع");
 
   // ── الإحداثيات ───────────────────────────────────────────────────────────
-  let lat: string | null = null;
-  let lng: string | null = null;
-  if (report.coordinates) {
+  // الأولوية: الحقول المباشرة (latitude/longitude) ثم coordinates المجمّع
+  let lat: string | null = report.latitude  != null ? String(report.latitude)  : null;
+  let lng: string | null = report.longitude != null ? String(report.longitude) : null;
+
+  if ((!lat || !lng) && report.coordinates) {
     const parts = String(report.coordinates)
       .trim()
       .split(/[,،\s]+/)
       .map((s: string) => s.trim())
       .filter((s: string) => /^-?\d+(\.\d+)?$/.test(s));
-    if (parts.length >= 2) { lat = parts[0]; lng = parts[1]; }
+    if (parts.length >= 2) { if (!lat) lat = parts[0]; if (!lng) lng = parts[1]; }
   }
-  // تصحيح الترتيب: خط الطول دائماً الرقم الأكبر
+
+  // تصحيح الترتيب: خط الطول (longitude) دائماً الرقم الأكبر في المملكة (~46°) وخط العرض الأصغر (~24°)
   if (lat && lng) {
     const latNum = parseFloat(lat);
     const lngNum = parseFloat(lng);
     if (!isNaN(latNum) && !isNaN(lngNum) && latNum > lngNum) {
-      addLog(session, `🔄 تصحيح الإحداثيات (ص2): تبديل lat(${lat}) ↔ lng(${lng})`);
+      addLog(session, `🔄 تصحيح الإحداثيات (ص2): تبديل lat(${lat}) ↔ lng(${lng}) — خط الطول يجب أن يكون الأكبر`);
       [lat, lng] = [lng, lat];
     }
   }
-  const lngEl = findEl(inputs, /longitude|long\b|lng\b|خط.*طول|طول.*جغرافي/i);
+
+  // الكشف: يدعم "خط الطول"/"خط العرض" و"longitude"/"latitude" وأيضاً مجرد "الطول"/"العرض" في سياق الإحداثيات
+  const lngEl =
+    findEl(inputs, /longitude|long\b|lng\b|خط.*طول|طول.*جغرافي/i) ??
+    findEl(inputs, /^الطول$|^\s*الطول\s*$/i);
   if (lngEl && lng) await fillAngular(session, buildSelector(lngEl), lng, "خط الطول");
-  const latEl = findEl(inputs, /latitude|lat\b|خط.*عرض|عرض.*جغرافي/i);
+  else if (!lngEl) addLog(session, "⚠️ (ص2) لم يُعثر على حقل «خط الطول»");
+
+  const latEl =
+    findEl(inputs, /latitude|lat\b|خط.*عرض|عرض.*جغرافي/i) ??
+    findEl(inputs, /^العرض$|^\s*العرض\s*$/i);
   if (latEl && lat) await fillAngular(session, buildSelector(latEl), lat, "خط العرض");
+  else if (!latEl) addLog(session, "⚠️ (ص2) لم يُعثر على حقل «خط العرض»");
 
   // محاولة رفع PDF في الصفحة 2 إن لم يرفع في الصفحة 1
   await uploadPdf(session, report, pdfState);
