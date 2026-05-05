@@ -281,8 +281,8 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     addLog(session, `📋 عدد حقول الصفحة 1: ${elsPage1.length}`);
 
     await fillFormPage(session, mergedReport, elsPage1, pdfState);
-    // انتظر قصير لتستقر Angular form validation قبل الحفظ
-    await page.waitForTimeout(200);
+    // انتظر Angular يستقر ويُفعّل التحقق قبل الحفظ
+    await page.waitForTimeout(700);
 
     // ── إعادة محاولة رفع PDF ──────────────────────────────────────────────
     if (!pdfState.pdfUploaded) {
@@ -357,8 +357,8 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
     addLog(session, `📋 عدد حقول الصفحة 2: ${elsPage2.length}`);
 
     await fillAssetPage(session, mergedReport, elsPage2);
-    // انتظر قصير لتستقر Angular form validation قبل الحفظ
-    await page.waitForTimeout(200);
+    // انتظر Angular يستقر بعد تعبئة كل حقول الصفحة 2 قبل الحفظ
+    await page.waitForTimeout(700);
     await screenshot(page, `p2_after_${reportId}`);
 
     // ── ضغط زر "continue" — حفظ الصفحة 2 ──────────────────────────────────
@@ -467,8 +467,8 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
       await page.waitForTimeout(120);
     }
 
-    // انتظر قصير لتستقر Angular form validation قبل الحفظ
-    await page.waitForTimeout(150);
+    // انتظر Angular يستقر بعد تعبئة كل حقول الصفحة 3 قبل الحفظ
+    await page.waitForTimeout(700);
     await screenshot(page, `p3_after_${reportId}`);
 
     // ── ضغط زر "حفظ وإغلاق" (الصفحة 3 تستخدم هذا الزر لا "حفظ واستمرار") ──
@@ -515,9 +515,9 @@ async function runAutomation(session: AutomationSession, reportId: number): Prom
 // انتظر استقرار Angular — أسرع بكثير من ثابت 2 ثانية
 async function waitForAngular(page: Page, extra = 800): Promise<void> {
   // أولاً: انتظر هدوء الشبكة (500ms بلا طلبات) — أقصى 3 ثوانٍ
-  await page.waitForLoadState("networkidle", { timeout: 2000 }).catch(() => {});
-  // ثانياً: انتظر إضافي قصير لاستقرار Angular zone.js بعد آخر استجابة
-  if (extra > 0) await page.waitForTimeout(Math.min(extra, 400));
+  await page.waitForLoadState("networkidle", { timeout: 3000 }).catch(() => {});
+  // ثانياً: انتظر إضافي لاستقرار Angular zone.js بعد آخر استجابة
+  if (extra > 0) await page.waitForTimeout(extra);
 }
 
 // ينتظر انتهاء الانتقال بين الصفحات
@@ -2371,7 +2371,8 @@ async function fillAssetPage(
   // القيمة الإجمالية. لكن TAQEEM يعرض جدول الطرق (تكلفة الإحلال / المقارنة...)
   // في صفوف منفصلة — يجب تعبئة حقل "النتيجة" في صف كل طريقة بشكل مستقل.
   // مثال: أسلوب التكلفة → صف "تكلفة الإحلال" → خانة النتيجة = costValue
-  await page.waitForTimeout(400); // دع Angular يُظهر جداول الطرق
+  // ⚠️ Angular يحتاج وقتاً بعد اختيار "أساسي" لعرض جدول الطرق — انتظر كافياً
+  await page.waitForTimeout(1500); // دع Angular يُظهر جداول الطرق كاملةً
   try {
     await fillValueByMethodLabel(session, report.costWay,   report.costValue,   "قيمة طريقة التكلفة");
   } catch (e: any) {
