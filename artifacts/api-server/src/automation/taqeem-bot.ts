@@ -2372,7 +2372,7 @@ async function fillAssetPage(
   // في صفوف منفصلة — يجب تعبئة حقل "النتيجة" في صف كل طريقة بشكل مستقل.
   // مثال: أسلوب التكلفة → صف "تكلفة الإحلال" → خانة النتيجة = costValue
   // ⚠️ Angular يحتاج وقتاً بعد اختيار "أساسي" لعرض جدول الطرق — انتظر كافياً
-  await page.waitForTimeout(1500); // دع Angular يُظهر جداول الطرق كاملةً
+  await session.page.waitForTimeout(1500); // دع Angular يُظهر جداول الطرق كاملةً
   try {
     await fillValueByMethodLabel(session, report.costWay,   report.costValue,   "قيمة طريقة التكلفة");
   } catch (e: any) {
