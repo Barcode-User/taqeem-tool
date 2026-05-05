@@ -2938,36 +2938,72 @@ async function fillUtilitiesCheckboxes(
     }, pat.source).catch(() => false);
   };
 
-  // ── التنفيذ الفعلي: اضغط كل مرفق مع تحقق وإعادة محاولة ──────────────────
-  for (const util of toCheck) {
-    let success = false;
+  // ── المرحلة 1: اضغط كل المرافق المطلوبة دفعةً واحدة (evaluate واحد) ────────
+  type BatchResult = { pattern: string; status: "clicked"|"already"|"not_found"; text?: string };
+  const batchResults: BatchResult[] = await session.page.evaluate(
+    ({ items }: { items: Array<{ pat: string; label: string }> }) => {
+      const n = (s: string) =>
+        s.replace(/[\u064B-\u065F\u0670]/g, "")
+         .replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي")
+         .toLowerCase().replace(/\s+/g, " ").trim();
 
-    for (let attempt = 1; attempt <= 4; attempt++) {
-      // تحقق أولاً إذا كان مُفعَّلاً بالفعل
-      const already = await isCheckedNow(util.cbText);
-      if (already) { addLog(session, `✅ مرفق "${util.label}": مُفعَّل`); success = true; break; }
+      return items.map(({ pat: patStr }) => {
+        const rx = new RegExp(patStr, "i");
+        // mat-checkbox
+        for (const matEl of Array.from(document.querySelectorAll("mat-checkbox"))) {
+          if (!rx.test(n(matEl.textContent ?? ""))) continue;
+          const inp = matEl.querySelector<HTMLInputElement>("input[type='checkbox']");
+          if (!inp) continue;
+          if (inp.checked) return { pattern: patStr, status: "already" as const };
+          inp.click();
+          inp.dispatchEvent(new Event("change", { bubbles: true }));
+          inp.dispatchEvent(new Event("input",  { bubbles: true }));
+          return { pattern: patStr, status: "clicked" as const, text: n(matEl.textContent ?? "").slice(0,30) };
+        }
+        // native checkbox fallback
+        for (const inp of Array.from(document.querySelectorAll<HTMLInputElement>("input[type='checkbox']"))) {
+          const lbl = n(inp.labels?.[0]?.textContent ?? inp.nextElementSibling?.textContent ?? "");
+          if (!rx.test(lbl)) continue;
+          if (inp.checked) return { pattern: patStr, status: "already" as const };
+          inp.click();
+          inp.dispatchEvent(new Event("change", { bubbles: true }));
+          return { pattern: patStr, status: "clicked" as const, text: lbl.slice(0,30) };
+        }
+        return { pattern: patStr, status: "not_found" as const };
+      });
+    },
+    { items: toCheck.map(u => ({ pat: u.cbText, label: u.label })) },
+  ).catch(() => toCheck.map(u => ({ pattern: u.cbText, status: "not_found" as const })));
 
-      // اضغط
-      await clickOneCheckbox(util.cbText, util.label);
+  // انتظر Angular يستقر مرة واحدة لكل الـ checkboxes
+  await session.page.waitForTimeout(150);
 
-      // انتظر Angular يستقر (أطول في المحاولات اللاحقة)
-      await session.page.waitForTimeout(350 * attempt);
+  // ── المرحلة 2: تحقق وretry للفاشلين فقط ──────────────────────────────────
+  for (let i = 0; i < toCheck.length; i++) {
+    const util = toCheck[i]!;
+    const r = batchResults[i];
 
-      // تحقق من النجاح
-      const nowChecked = await isCheckedNow(util.cbText);
-      if (nowChecked) {
-        addLog(session, `✅ مرفق "${util.label}": تم (محاولة ${attempt})`);
-        success = true;
-        break;
-      }
-
-      if (attempt < 4) addLog(session, `⏳ إعادة محاولة "${util.label}" (${attempt}/4)...`);
+    if (r?.status === "already") {
+      addLog(session, `✅ مرفق "${util.label}": مُفعَّل مسبقاً`);
+      continue;
     }
-
-    if (!success) addLog(session, `⚠️ مرفق "${util.label}": لم يتفعل بعد 4 محاولات`);
+    if (r?.status === "clicked") {
+      // تحقق سريع بعد الانتظار الجماعي أعلاه
+      const ok = await isCheckedNow(util.cbText);
+      if (ok) { addLog(session, `✅ مرفق "${util.label}": تم`); continue; }
+      // محاولة ثانية أخيرة
+      await clickOneCheckbox(util.cbText, util.label);
+      await session.page.waitForTimeout(200);
+      const ok2 = await isCheckedNow(util.cbText);
+      addLog(session, ok2
+        ? `✅ مرفق "${util.label}": تم (محاولة 2)`
+        : `⚠️ مرفق "${util.label}": لم يتفعل`);
+    } else {
+      addLog(session, `⚠️ مرفق "${util.label}": checkbox غير موجود في الصفحة`);
+    }
   }
 
-  await session.page.waitForTimeout(120);
+  await session.page.waitForTimeout(100);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
