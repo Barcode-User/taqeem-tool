@@ -122,7 +122,7 @@ async function startCertifySession(): Promise<void> {
           _certifyLog(`✅ تم اختيار القيمة "${optionValue}" من <select>`);
           filterDone = true;
         } else {
-          _certifyLog("⚠️ لم يُعثر على خيار 'غير مكتمل' داخل <select>");
+          _certifyLog("⚠️ لم يُعثر على خيار 'بانتظار الاعتماد' داخل <select>");
         }
       } catch (e: any) {
         _certifyLog(`⚠️ selectOption فشل: ${e.message}`);
@@ -167,7 +167,7 @@ async function startCertifySession(): Promise<void> {
             _certifyLog("✅ تم اختيار الخيار عبر Playwright locator");
             filterDone = true;
           } catch {
-            _certifyLog("⚠️ لم يُعثر على خيار 'غير مكتملة' في أي من الطرق");
+            _certifyLog("⚠️ لم يُعثر على خيار 'بانتظار الاعتماد' في أي من الطرق");
           }
         }
       } catch (e: any) {
@@ -219,7 +219,7 @@ async function startCertifySession(): Promise<void> {
     _certifyState.currentIndex = 0;
 
     if (numbers.length > 0) {
-      _certifyLog(`✅ وُجد ${numbers.length} تقرير غير مكتمل: ${numbers.slice(0, 5).join(", ")}${numbers.length > 5 ? "..." : ""}`);
+      _certifyLog(`✅ وُجد ${numbers.length} تقرير بانتظار الاعتماد: ${numbers.slice(0, 5).join(", ")}${numbers.length > 5 ? "..." : ""}`);
 
       // ── تاب (2): افتح أول تقرير في تاب منفصل (استعراض فقط) ───────────────
       const firstNumber = numbers[0];
@@ -232,7 +232,7 @@ async function startCertifySession(): Promise<void> {
       // حدّد checkbox الموافقة على السياسات تلقائياً
       await _checkPolicyCheckbox(_certifyReportPage);
     } else {
-      _certifyLog("⚠️ لم يُعثر على تقارير غير مكتملة في الجدول — ربما الصفحة فارغة أو الفلتر لم ينطبق");
+      _certifyLog("⚠️ لم يُعثر على تقارير بانتظار الاعتماد في الجدول — ربما الصفحة فارغة أو الفلتر لم ينطبق");
     }
 
     _certifyState.status = "ready";
