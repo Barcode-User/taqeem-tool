@@ -24,6 +24,8 @@ import { arSA } from "date-fns/locale";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
+import { useToast } from "@/hooks/use-toast";
 
 const statusMap: Record<string, { label: string, color: string }> = {
   pending:   { label: "قيد الانتظار", color: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400 border-yellow-200" },
@@ -63,6 +65,7 @@ type DsEntry = {
 
 export default function Dashboard() {
   const apiBase = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
+  const { toast } = useToast();
 
   const { data: reports, isLoading: reportsLoading, refetch: refetchReports } = useListReports({
     query: { staleTime: 5_000, refetchOnWindowFocus: true }
@@ -71,7 +74,6 @@ export default function Dashboard() {
     query: { staleTime: 60_000, refetchOnWindowFocus: false }
   });
 
-  // تحديث تلقائي كل 5 ثوانٍ عند وجود طلبات جارية أو في الطابور
   const hasActiveAutomation = reports?.some(r =>
     ["running", "waiting_otp", "queued"].includes((r as any).automationStatus ?? "")
   );
@@ -84,6 +86,10 @@ export default function Dashboard() {
   const [searchQuery,  setSearchQuery]  = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [dsMap, setDsMap] = useState<Record<number, DsEntry>>({});
+
+  // ── تحديد متعدد ──────────────────────────────────────────────────────────
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [retrying, setRetrying] = useState(false);
 
   useEffect(() => {
     fetch(`${apiBase}/api/datasystem`)
@@ -112,6 +118,62 @@ export default function Dashboard() {
     const matchesStatus = statusFilter === "all" || report.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
+
+  // التقارير الظاهرة التي يمكن تحديدها (الفاشلة فقط)
+  const selectableIds = (filteredReports ?? [])
+    .filter(r => (r as any).automationStatus === "failed")
+    .map(r => r.id!);
+
+  const allSelectableSelected =
+    selectableIds.length > 0 && selectableIds.every(id => selectedIds.has(id));
+
+  const toggleSelectAll = () => {
+    if (allSelectableSelected) {
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        selectableIds.forEach(id => next.delete(id));
+        return next;
+      });
+    } else {
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        selectableIds.forEach(id => next.add(id));
+        return next;
+      });
+    }
+  };
+
+  const toggleOne = (id: number) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const retrySelected = async () => {
+    if (selectedIds.size === 0) return;
+    setRetrying(true);
+    try {
+      const resp = await fetch(`${apiBase}/api/automation/retry-bulk`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: Array.from(selectedIds) }),
+      });
+      const data = await resp.json();
+      if (resp.ok) {
+        toast({ title: "تمت إعادة المحاولة", description: data.message });
+        setSelectedIds(new Set());
+        refetchReports();
+      } else {
+        toast({ variant: "destructive", title: "خطأ", description: data.error });
+      }
+    } catch {
+      toast({ variant: "destructive", title: "خطأ", description: "فشل الاتصال بالسيرفر" });
+    } finally {
+      setRetrying(false);
+    }
+  };
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
@@ -183,7 +245,8 @@ export default function Dashboard() {
           <CardDescription>التقارير التي تم معالجتها مؤخراً</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-col sm:flex-row gap-4 mb-6">
+          {/* شريط البحث والفلاتر */}
+          <div className="flex flex-col sm:flex-row gap-4 mb-4">
             <div className="relative flex-1 max-w-sm">
               <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
@@ -210,6 +273,32 @@ export default function Dashboard() {
             </div>
           </div>
 
+          {/* ── شريط الإجراءات الجماعية (يظهر عند اختيار تقارير) ── */}
+          {selectedIds.size > 0 && (
+            <div className="flex items-center gap-3 mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+              <span className="text-sm font-medium text-red-800">
+                تم تحديد {selectedIds.size} تقرير فاشل
+              </span>
+              <Button
+                size="sm"
+                onClick={retrySelected}
+                disabled={retrying}
+                className="gap-2 bg-red-600 hover:bg-red-700 text-white"
+              >
+                {retrying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
+                إعادة المحاولة للمحددة
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setSelectedIds(new Set())}
+                className="text-red-700 hover:text-red-900"
+              >
+                إلغاء التحديد
+              </Button>
+            </div>
+          )}
+
           {reportsLoading ? (
             <div className="space-y-4">
               {[1,2,3,4,5].map((i) => <Skeleton key={i} className="h-12 w-full" />)}
@@ -219,6 +308,17 @@ export default function Dashboard() {
               <Table>
                 <TableHeader className="bg-muted/50">
                   <TableRow>
+                    {/* عمود التحديد — يظهر فقط إذا وجدت تقارير فاشلة */}
+                    {selectableIds.length > 0 && (
+                      <TableHead className="w-10 text-right">
+                        <Checkbox
+                          checked={allSelectableSelected}
+                          onCheckedChange={toggleSelectAll}
+                          aria-label="تحديد الكل"
+                          title="تحديد جميع الفاشلة"
+                        />
+                      </TableHead>
+                    )}
                     <TableHead className="text-right">رقم التقرير</TableHead>
                     <TableHead className="text-right">اسم العميل</TableHead>
                     <TableHead className="text-right">نوع العقار</TableHead>
@@ -235,9 +335,26 @@ export default function Dashboard() {
                     const hasDs       = ds !== undefined;
                     const fs          = ds?.fieldScores ?? null;
                     const avgScore    = ds?.averageScore ?? null;
+                    const isFailed    = (report as any).automationStatus === "failed";
+                    const isSelected  = selectedIds.has(report.id!);
 
                     return (
-                      <TableRow key={report.id} className="cursor-pointer hover:bg-muted/50 transition-colors align-top">
+                      <TableRow
+                        key={report.id}
+                        className={`cursor-pointer hover:bg-muted/50 transition-colors align-top ${isSelected ? "bg-red-50" : ""}`}
+                      >
+                        {/* خانة التحديد — للتقارير الفاشلة فقط */}
+                        {selectableIds.length > 0 && (
+                          <TableCell className="w-10" onClick={e => e.stopPropagation()}>
+                            {isFailed && (
+                              <Checkbox
+                                checked={isSelected}
+                                onCheckedChange={() => toggleOne(report.id!)}
+                                aria-label={`تحديد تقرير ${report.reportNumber}`}
+                              />
+                            )}
+                          </TableCell>
+                        )}
 
                         {/* رقم التقرير */}
                         <TableCell className="font-medium">

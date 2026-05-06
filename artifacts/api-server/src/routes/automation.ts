@@ -357,6 +357,61 @@ router.post("/automation/retry/:reportId", async (req, res) => {
   }
 });
 
+// POST /api/automation/retry-bulk — إعادة المحاولة لمجموعة تقارير دفعة واحدة
+// Body: { ids: number[] }
+router.post("/automation/retry-bulk", async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      res.status(400).json({ error: "ids مطلوب ويجب أن يكون مصفوفة غير فارغة" });
+      return;
+    }
+
+    const results: { id: number; status: string; message: string }[] = [];
+
+    for (const rawId of ids) {
+      const reportId = parseInt(String(rawId), 10);
+      if (isNaN(reportId)) {
+        results.push({ id: rawId, status: "error", message: "ID غير صالح" });
+        continue;
+      }
+
+      try {
+        const report = await getReportById(reportId);
+        if (!report) {
+          results.push({ id: reportId, status: "error", message: "التقرير غير موجود" });
+          continue;
+        }
+
+        if (canStartNewSession(MAX_CONCURRENT) && results.filter(r => r.status === "started").length === 0) {
+          // أول تقرير — ابدأ مباشرة
+          await updateReport(reportId, { automationStatus: "idle", automationError: null });
+          const sessionId = await startAutomation(reportId);
+          results.push({ id: reportId, status: "started", message: `بدأ الرفع (جلسة: ${sessionId})` });
+        } else {
+          // الباقي في الطابور
+          await updateReport(reportId, { automationStatus: "queued", automationError: null });
+          results.push({ id: reportId, status: "queued", message: "أُضيف للطابور" });
+        }
+      } catch (err: any) {
+        results.push({ id: reportId, status: "error", message: err.message });
+      }
+    }
+
+    const started = results.filter(r => r.status === "started").length;
+    const queued  = results.filter(r => r.status === "queued").length;
+    const errors  = results.filter(r => r.status === "error").length;
+
+    res.json({
+      message: `تم: ${started} بدأ فوراً، ${queued} في الطابور، ${errors} أخطاء`,
+      results,
+    });
+  } catch (err: any) {
+    req.log.error({ err }, "Failed to retry bulk");
+    res.status(500).json({ error: err.message || "Internal server error" });
+  }
+});
+
 // GET /api/automation/queue — عرض الطلبات المعلقة في الطابور
 router.get("/automation/queue", async (_req, res) => {
   try {
