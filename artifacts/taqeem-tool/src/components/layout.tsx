@@ -59,7 +59,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   const pageTitle =
     isCertifier
-      ? (location === "/" ? "التقارير المعمدة" : "تفاصيل التقرير")
+      ? location === "/" ? "التقارير المعمدة"
+      : location === "/taqeem-session" ? "إعدادات جلسة تقييم"
+      : "تفاصيل التقرير"
       : location === "/"            ? "لوحة القيادة"
       : location === "/upload"      ? "رفع تقرير جديد"
       : location === "/datasystem"  ? "مقارنة بيانات النظام"
@@ -102,35 +104,33 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             );
           })}
 
-          {/* Session link — مدخل بيانات فقط */}
-          {!isCertifier && (
-            <Link href="/taqeem-session">
-              <div
-                className={`flex items-center px-4 py-3 text-sm font-medium rounded-md cursor-pointer transition-colors ${
-                  location === "/taqeem-session"
-                    ? "bg-primary/10 text-primary"
-                    : sessionStatus === "authenticated"
-                    ? "text-green-700 hover:bg-green-50"
-                    : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                }`}
-              >
-                {sessionStatus === "authenticated" ? (
-                  <ShieldCheck className="h-5 w-5 ml-3 text-green-600" />
-                ) : sessionStatus === "logging_in" || sessionStatus === "waiting_otp" ? (
-                  <Loader2 className="h-5 w-5 ml-3 animate-spin text-blue-500" />
-                ) : (
-                  <ShieldOff className="h-5 w-5 ml-3 text-muted-foreground" />
-                )}
-                <span>جلسة تقييم</span>
-                {sessionStatus === "authenticated" && (
-                  <span className="mr-auto text-xs bg-green-100 text-green-700 rounded px-1.5 py-0.5">مسجّل</span>
-                )}
-                {(sessionStatus === "logging_in" || sessionStatus === "waiting_otp") && (
-                  <span className="mr-auto text-xs bg-blue-100 text-blue-700 rounded px-1.5 py-0.5">جارٍ...</span>
-                )}
-              </div>
-            </Link>
-          )}
+          {/* Session link — كلا الدورين */}
+          <Link href="/taqeem-session">
+            <div
+              className={`flex items-center px-4 py-3 text-sm font-medium rounded-md cursor-pointer transition-colors ${
+                location === "/taqeem-session"
+                  ? isCertifier ? "bg-emerald-50 text-emerald-700" : "bg-primary/10 text-primary"
+                  : sessionStatus === "authenticated"
+                  ? "text-green-700 hover:bg-green-50"
+                  : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+              }`}
+            >
+              {sessionStatus === "authenticated" ? (
+                <ShieldCheck className="h-5 w-5 ml-3 text-green-600" />
+              ) : sessionStatus === "logging_in" || sessionStatus === "waiting_otp" ? (
+                <Loader2 className="h-5 w-5 ml-3 animate-spin text-blue-500" />
+              ) : (
+                <ShieldOff className="h-5 w-5 ml-3 text-muted-foreground" />
+              )}
+              <span>جلسة تقييم</span>
+              {sessionStatus === "authenticated" && (
+                <span className="mr-auto text-xs bg-green-100 text-green-700 rounded px-1.5 py-0.5">مسجّل</span>
+              )}
+              {(sessionStatus === "logging_in" || sessionStatus === "waiting_otp") && (
+                <span className="mr-auto text-xs bg-blue-100 text-blue-700 rounded px-1.5 py-0.5">جارٍ...</span>
+              )}
+            </div>
+          </Link>
         </nav>
 
         {/* Bottom: user info + switch role */}
