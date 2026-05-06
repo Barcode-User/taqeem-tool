@@ -105,15 +105,32 @@ async function startCertifySession(): Promise<void> {
 
     let filterDone = false;
 
+    // دالة مطابقة مرنة تتجاهل اختلاف الهمزة (إنتظار / انتظار / إعتماد / اعتماد)
+    function _matchWaiting(txt: string): boolean {
+      // نزيل الهمزات ونحوّل إلى حروف موحدة للمقارنة
+      const normalized = txt
+        .replace(/[أإآا]/g, "ا")
+        .replace(/[ةه]/g, "ه");
+      return normalized.includes("نتظار") && normalized.includes("عتماد");
+    }
+
     // ── الحالة 1: <select> عادي ─────────────────────────────────────────────
     if (filterTagName === "select") {
       try {
-        // اقرأ قيمة الخيار المطلوب أولاً
+        // سجّل جميع الخيارات المتاحة أولاً
+        const allOptions: string[] = await _certifyPage.evaluate(() => {
+          const sel = document.querySelector("#report-status-filter") as HTMLSelectElement;
+          if (!sel) return [];
+          return Array.from(sel.options).map(o => `[${o.value}] ${o.text}`);
+        });
+        _certifyLog(`📋 خيارات الفلتر: ${allOptions.join(" | ")}`);
+
         const optionValue: string | null = await _certifyPage.evaluate(() => {
           const sel = document.querySelector("#report-status-filter") as HTMLSelectElement;
           if (!sel) return null;
           for (const opt of Array.from(sel.options)) {
-            if (opt.text.includes("انتظار الاعتماد") || opt.text.includes("بانتظار الاعتماد")) return opt.value;
+            const n = opt.text.replace(/[أإآا]/g, "ا").replace(/[ةه]/g, "ه");
+            if (n.includes("نتظار") && n.includes("عتماد")) return opt.value;
           }
           return null;
         });
@@ -136,16 +153,30 @@ async function startCertifySession(): Promise<void> {
         _certifyLog("✅ نقر على الفلتر (فتح القائمة)");
         await _certifyPage.waitForTimeout(1500);
 
-        // ابحث عن الخيار في الـ overlay أو داخل العنصر
+        // سجّل جميع الخيارات المرئية في الـ overlay
+        const allOverlayOpts: string[] = await _certifyPage.evaluate(() => {
+          const selectors = ["mat-option", "li[role='option']", "[role='option']", ".ng-option"];
+          const found: string[] = [];
+          for (const sel of selectors) {
+            for (const el of Array.from(document.querySelectorAll(sel))) {
+              const t = (el.textContent || "").trim();
+              if (t) found.push(t);
+            }
+          }
+          return found;
+        });
+        if (allOverlayOpts.length > 0) {
+          _certifyLog(`📋 خيارات الـ overlay: ${allOverlayOpts.join(" | ")}`);
+        }
+
+        // ابحث عن الخيار مع تطبيع الهمزة
         const optClicked: string | null = await _certifyPage.evaluate(() => {
-          const selectors = [
-            "mat-option", "li[role='option']", "[role='option']",
-            ".ng-option", ".dropdown-item", ".select-option",
-          ];
+          const selectors = ["mat-option", "li[role='option']", "[role='option']", ".ng-option", ".dropdown-item"];
           for (const sel of selectors) {
             for (const el of Array.from(document.querySelectorAll(sel))) {
               const txt = (el.textContent || "").trim();
-              if (txt.includes("انتظار الاعتماد") || txt.includes("بانتظار الاعتماد")) {
+              const n = txt.replace(/[أإآا]/g, "ا").replace(/[ةه]/g, "ه");
+              if (n.includes("نتظار") && n.includes("عتماد")) {
                 (el as HTMLElement).click();
                 return txt;
               }
@@ -158,17 +189,7 @@ async function startCertifySession(): Promise<void> {
           _certifyLog(`✅ تم اختيار: "${optClicked}"`);
           filterDone = true;
         } else {
-          // آخر محاولة: Playwright locator بالنص
-          try {
-            await _certifyPage.locator("mat-option, [role='option']")
-              .filter({ hasText: /انتظار الاعتماد|بانتظار الاعتماد/ })
-              .first()
-              .click({ timeout: 5000 });
-            _certifyLog("✅ تم اختيار الخيار عبر Playwright locator");
-            filterDone = true;
-          } catch {
-            _certifyLog("⚠️ لم يُعثر على خيار 'بانتظار الاعتماد' في أي من الطرق");
-          }
+          _certifyLog("⚠️ لم يُعثر على خيار 'بانتظار الاعتماد' بعد فتح القائمة");
         }
       } catch (e: any) {
         _certifyLog(`⚠️ فشل النقر على الفلتر: ${e.message}`);
