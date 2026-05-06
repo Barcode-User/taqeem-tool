@@ -346,27 +346,39 @@ async function _approveAndExtract(): Promise<{
   if (!_certifyReportPage) throw new Error("لا يوجد تقرير مفتوح في التاب الثاني");
   const page = _certifyReportPage;
 
-  // 1) انقر زر "اعتماد التقرير" أو "إرسال التقرير"
-  _certifyLog("🖱️ البحث عن زر الاعتماد...");
-  const btnClicked = await page.evaluate(() => {
-    const btns = Array.from(document.querySelectorAll("button, [role='button'], input[type='submit']"));
-    for (const btn of btns) {
-      const txt = (btn.textContent || "").trim();
-      if (txt.includes("اعتماد") || txt.includes("إرسال التقرير") || txt.includes("ارسال التقرير")) {
-        (btn as HTMLElement).click();
-        return txt;
-      }
-    }
-    return null;
+  // 1) سجّل جميع الأزرار الموجودة على الصفحة للتشخيص
+  _certifyLog("🔍 قراءة قائمة الأزرار على صفحة التقرير...");
+  const allBtns: string[] = await page.evaluate(() => {
+    return Array.from(document.querySelectorAll("button, [role='button'], a.btn, input[type='submit']"))
+      .map(el => (el.textContent || "").trim())
+      .filter(t => t.length > 0);
   });
+  _certifyLog(`📋 الأزرار: ${allBtns.join(" | ")}`);
 
-  if (btnClicked) {
-    _certifyLog(`✅ تم النقر على: "${btnClicked}"`);
-  } else {
-    _certifyLog("⚠️ لم يُعثر على زر الاعتماد — محاولة بـ Playwright locator");
+  // 2) انقر زر الاعتماد بـ Playwright native (يعمل مع Angular)
+  _certifyLog("🖱️ محاولة النقر على زر الاعتماد...");
+  const btnTexts = ["إرسال التقرير", "ارسال التقرير", "اعتماد التقرير", "اعتماد", "إرسال", "تأكيد", "Submit"];
+  let btnClicked = false;
+
+  for (const txt of btnTexts) {
     try {
-      await page.locator("button").filter({ hasText: /اعتماد|إرسال التقرير|ارسال/ }).first().click({ timeout: 8000 });
-      _certifyLog("✅ تم النقر عبر Playwright locator");
+      const loc = page.locator(`button, [role='button']`).filter({ hasText: txt });
+      const count = await loc.count();
+      if (count > 0) {
+        await loc.first().click({ timeout: 8000 });
+        _certifyLog(`✅ تم النقر على: "${txt}"`);
+        btnClicked = true;
+        break;
+      }
+    } catch {}
+  }
+
+  if (!btnClicked) {
+    _certifyLog("⚠️ لم يُعثر على زر الاعتماد بالنصوص المعروفة — محاولة بـ regex");
+    try {
+      await page.locator("button").filter({ hasText: /إرسال|اعتماد|ارسال|تأكيد/ }).first().click({ timeout: 8000 });
+      _certifyLog("✅ تم النقر عبر regex");
+      btnClicked = true;
     } catch (e: any) {
       _certifyLog(`⚠️ فشل النقر: ${e.message}`);
     }
