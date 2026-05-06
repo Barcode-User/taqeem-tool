@@ -14,8 +14,8 @@ echo.
 
 REM ─── تحديث من GitHub ─────────────────────────────────
 echo [تحديث] جاري مزامنة الكود مع GitHub...
-git fetch origin main 2>nul
-git reset --hard origin/main 2>nul
+git fetch origin main
+git reset --hard origin/main
 echo.
 
 REM ─── إلغاء متغيرات قواعد البيانات القديمة ───────────
@@ -54,11 +54,26 @@ REM ─── إعدادات عامة ──────────────
 set PORT=8080
 set NODE_ENV=production
 
+REM ─── تثبيت المكتبات ──────────────────────────────────
+echo [build] جاري تثبيت المكتبات...
+call pnpm install --frozen-lockfile 2>nul || call pnpm install
+echo.
+
+REM ─── بناء الخادم دائماً ───────────────────────────────
+echo [build] جاري بناء الخادم من المصدر...
+call pnpm --filter @workspace/api-server run build
+if %ERRORLEVEL% NEQ 0 (
+    echo [خطأ] فشل بناء الخادم.
+    pause
+    exit /b 1
+)
+echo [build] تم بناء الخادم بنجاح.
+echo.
+
 REM ─── تثبيت Playwright إن لم يكن موجوداً ─────────────
 if not exist "artifacts\api-server\node_modules\playwright-core" (
-    echo [0/2] تثبيت مكتبة Playwright...
+    echo [playwright] تثبيت مكتبة Playwright...
 
-    REM إنشاء مجلد مؤقت بـ package.json نظيف
     if exist "tmp-pw-install" rmdir /S /Q tmp-pw-install
     mkdir tmp-pw-install
     (
@@ -69,7 +84,6 @@ if not exist "artifacts\api-server\node_modules\playwright-core" (
         echo }
     ) > tmp-pw-install\package.json
 
-    REM --no-workspaces يمنع npm من قراءة إعدادات workspace في المشروع
     call npm install playwright playwright-core --prefix tmp-pw-install --legacy-peer-deps --no-workspaces --silent
     if %ERRORLEVEL% NEQ 0 (
         echo [خطأ] فشل تثبيت Playwright.
@@ -78,7 +92,6 @@ if not exist "artifacts\api-server\node_modules\playwright-core" (
         exit /b 1
     )
 
-    REM نسخ المكتبات إلى المكان الصحيح
     if not exist "artifacts\api-server\node_modules" mkdir artifacts\api-server\node_modules
     robocopy tmp-pw-install\node_modules artifacts\api-server\node_modules /E /NFL /NDL /NJH /NJS /nc /ns /np >nul
     rmdir /S /Q tmp-pw-install 2>nul
@@ -86,7 +99,7 @@ if not exist "artifacts\api-server\node_modules\playwright-core" (
 )
 
 if not exist "%LOCALAPPDATA%\ms-playwright" (
-    echo [0/2] تثبيت متصفح Playwright...
+    echo [playwright] تثبيت متصفح Chromium...
     cd artifacts\api-server
     call npx playwright install chromium --no-workspaces 2>nul
     cd ..\..
@@ -94,14 +107,14 @@ if not exist "%LOCALAPPDATA%\ms-playwright" (
 
 REM ─── التحقق من الملفات المبنية ───────────────────────
 if not exist "artifacts\api-server\dist\index.mjs" (
-    echo [خطأ] الخادم غير موجود - تأكد من اتصال الإنترنت وأعد تشغيل start.bat
+    echo [خطأ] الخادم غير موجود بعد البناء.
     pause
     exit /b 1
 )
 echo [1/2] الخادم جاهز.
 
 if not exist "artifacts\taqeem-tool\dist\public\index.html" (
-    echo [خطأ] الواجهة غير موجودة - تأكد من اتصال الإنترنت وأعد تشغيل start.bat
+    echo [خطأ] الواجهة غير موجودة.
     pause
     exit /b 1
 )
