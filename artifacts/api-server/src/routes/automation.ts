@@ -257,50 +257,50 @@ async function startCertifySession(): Promise<void> {
 // ── تحديد checkbox الموافقة على السياسات ───────────────────────────────────
 async function _checkPolicyCheckbox(page: any): Promise<void> {
   try {
-    // انتظر قليلاً لتحميل الصفحة
     await page.waitForTimeout(2000);
+    _certifyLog("🔍 البحث عن checkbox الموافقة...");
 
-    // ابحث عن checkbox غير محدد بجانب نص "السياسات"
-    const checked = await page.evaluate(() => {
-      // ابحث عن كل checkbox في الصفحة
-      const checkboxes = Array.from(document.querySelectorAll(
-        "input[type='checkbox'], mat-checkbox, .mat-checkbox"
-      ));
-      for (const cb of checkboxes) {
-        // تحقق من النص المجاور
-        const label = cb.closest("label") ||
-                      document.querySelector(`label[for='${(cb as HTMLInputElement).id}']`) ||
-                      cb.parentElement;
-        const labelText = (label?.textContent || cb.parentElement?.textContent || "").trim();
-        if (labelText.includes("أقر بأن") || labelText.includes("المعلومات المدخلة") || labelText.includes("ملخص التقرير صحيحة")) {
-          // إذا لم يكن محدداً، انقر عليه
-          const isChecked = (cb as HTMLInputElement).checked ||
-                            cb.classList.contains("mat-checkbox-checked") ||
-                            cb.getAttribute("aria-checked") === "true";
-          if (!isChecked) {
-            (cb as HTMLElement).click();
-            return `clicked:${labelText.substring(0, 50)}`;
-          }
-          return `already_checked:${labelText.substring(0, 50)}`;
-        }
-      }
-      // آخر محاولة: ابحث عن label يحتوي على النص ثم انقر عليه
-      const labels = Array.from(document.querySelectorAll("label, .checkbox-label, span"));
-      for (const lbl of labels) {
-        const txt = (lbl.textContent || "").trim();
-        if (txt.includes("أقر بأن") || txt.includes("ملخص التقرير صحيحة")) {
-          (lbl as HTMLElement).click();
-          return `label_clicked:${txt.substring(0, 60)}`;
-        }
-      }
-      return null;
-    });
+    // Strategy 1: input[type=checkbox] بجانب نص "أقر بأن"
+    const strategies = [
+      // checkbox داخل label يحتوي النص
+      () => page.locator("label").filter({ hasText: /أقر بأن|المعلومات المدخلة|ملخص التقرير صحيحة/ }).locator("input[type='checkbox']").first(),
+      // checkbox مستقل + label[for=id]
+      () => page.locator("input[type='checkbox']").filter({ has: page.locator("xpath=..//label[contains(text(),'أقر')]") }).first(),
+      // mat-checkbox
+      () => page.locator("mat-checkbox").filter({ hasText: /أقر بأن|المعلومات المدخلة/ }).first(),
+      // أي checkbox في الصفحة (fallback)
+      () => page.locator("input[type='checkbox']").first(),
+    ];
 
-    if (checked) {
-      _certifyLog(`☑️ Checkbox الموافقة: ${checked}`);
-    } else {
-      _certifyLog("⚠️ لم يُعثر على checkbox الموافقة على السياسات");
+    for (let i = 0; i < strategies.length; i++) {
+      try {
+        const loc = strategies[i]();
+        const count = await loc.count();
+        if (count === 0) continue;
+
+        const isChecked = await loc.isChecked().catch(() => false);
+        if (isChecked) {
+          _certifyLog(`☑️ Checkbox مُحدَّد مسبقاً (strategy ${i + 1})`);
+          return;
+        }
+        await loc.scrollIntoViewIfNeeded({ timeout: 3000 });
+        await loc.check({ timeout: 6000 });
+        _certifyLog(`☑️ تم تحديد checkbox (strategy ${i + 1})`);
+        return;
+      } catch { /* جرّب التالي */ }
     }
+
+    // Strategy fallback: انقر على الـ label مباشرة
+    try {
+      const labelLoc = page.locator("label, span").filter({ hasText: /أقر بأن|المعلومات المدخلة/ }).first();
+      if (await labelLoc.count() > 0) {
+        await labelLoc.click({ timeout: 6000 });
+        _certifyLog("☑️ تم النقر على label الموافقة (fallback)");
+        return;
+      }
+    } catch {}
+
+    _certifyLog("⚠️ لم يُعثر على checkbox الموافقة على السياسات");
   } catch (e: any) {
     _certifyLog(`⚠️ خطأ في تحديد checkbox: ${e.message}`);
   }
