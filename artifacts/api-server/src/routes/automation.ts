@@ -38,22 +38,24 @@ const upload = multer({ storage: diskStorage, limits: { fileSize: 20 * 1024 * 10
 // SESSION MANAGEMENT
 // ─────────────────────────────────────────────────────────────────────────────
 
-// GET /api/automation/session-status
-router.get("/automation/session-status", async (_req, res) => {
-  const status = getLoginStatus();
-  const pendingCount = await hasPendingQueue().catch(() => 0);
+// GET /api/automation/session-status?role=entry|certifier
+router.get("/automation/session-status", async (req, res) => {
+  const role = req.query.role === "certifier" ? "certifier" : "entry";
+  const status = getLoginStatus(role);
+  const pendingCount = role === "entry" ? await hasPendingQueue().catch(() => 0) : 0;
   res.json({ ...status, pendingQueueCount: pendingCount });
 });
 
-// POST /api/automation/login
+// POST /api/automation/login  { username, password, role? }
 router.post("/automation/login", async (req, res) => {
   try {
-    const { username, password } = req.body;
+    const { username, password, role: rawRole } = req.body;
+    const role = rawRole === "certifier" ? "certifier" : "entry";
     if (!username || !password) {
       res.status(400).json({ error: "username and password are required" });
       return;
     }
-    const loginId = await startLogin(String(username), String(password));
+    const loginId = await startLogin(String(username), String(password), role);
     res.json({ loginId, message: "بدأت عملية تسجيل الدخول — انتظر رمز OTP" });
   } catch (err: any) {
     req.log.error({ err }, "Failed to start login");
@@ -61,24 +63,26 @@ router.post("/automation/login", async (req, res) => {
   }
 });
 
-// POST /api/automation/login-otp
+// POST /api/automation/login-otp  { loginId, otp, role? }
 router.post("/automation/login-otp", (req, res) => {
-  const { loginId, otp } = req.body;
+  const { loginId, otp, role: rawRole } = req.body;
+  const role = rawRole === "certifier" ? "certifier" : "entry";
   if (!loginId || !otp) {
     res.status(400).json({ error: "loginId and otp are required" });
     return;
   }
-  const ok = submitLoginOtp(String(loginId), String(otp));
+  const ok = submitLoginOtp(String(loginId), String(otp), role);
   if (!ok) {
     res.status(400).json({ error: "جلسة تسجيل الدخول غير موجودة أو انتهت" });
     return;
   }
-  res.json({ message: "تم إرسال OTP — جارٍ إكمال تسجيل الدخول وسيبدأ معالجة الطابور تلقائياً..." });
+  res.json({ message: "تم إرسال OTP — جارٍ إكمال تسجيل الدخول..." });
 });
 
-// POST /api/automation/logout
-router.post("/automation/logout", async (_req, res) => {
-  await logout();
+// POST /api/automation/logout  { role? }
+router.post("/automation/logout", async (req, res) => {
+  const role = req.body?.role === "certifier" ? "certifier" : "entry";
+  await logout(role);
   res.json({ message: "تم تسجيل الخروج وحذف الجلسة." });
 });
 
