@@ -6,9 +6,11 @@ import * as path from "path";
 import { execSync } from "child_process";
 import { getReportsByAutomationStatus, updateReport } from "@workspace/db";
 
+export type RoleKey = "entry" | "certifier";
+
 /**
  * تُحوّل جميع تقارير "pending" إلى "queued" ثم تُشغّل معالج الطابور.
- * تُستدعى تلقائياً بعد كل تسجيل دخول ناجح.
+ * تُستدعى فقط بعد تسجيل دخول ناجح لدور "مدخل البيانات".
  */
 async function queuePendingAndProcess(): Promise<void> {
   try {
@@ -39,8 +41,6 @@ function getChromiumExecutable(): string | undefined {
 }
 
 const UPLOADS_DIR = path.join(process.cwd(), "uploads");
-const STORAGE_STATE_FILE = path.join(UPLOADS_DIR, "taqeem-session.json");
-const SESSION_META_FILE = path.join(UPLOADS_DIR, "taqeem-session.meta.json");
 const SESSION_MAX_AGE_MS = 10 * 60 * 60 * 1000; // 10 hours
 
 if (!fs.existsSync(UPLOADS_DIR)) {
@@ -71,39 +71,74 @@ type ActiveLoginFlow = {
   loggedInAt?: Date;
 };
 
-let activeFlow: ActiveLoginFlow | null = null;
-let sharedBrowser: Browser | null = null;
-let sharedContext: BrowserContext | null = null;
+// ─── حالة الجلسة لكل دور ─────────────────────────────────────────────────────
+type RoleState = {
+  activeFlow: ActiveLoginFlow | null;
+  sharedBrowser: Browser | null;
+  sharedContext: BrowserContext | null;
+  storageStateFile: string;
+  sessionMetaFile: string;
+};
 
-function loadMeta(): SessionMeta | null {
+const roleState: Record<RoleKey, RoleState> = {
+  entry: {
+    activeFlow: null,
+    sharedBrowser: null,
+    sharedContext: null,
+    storageStateFile: path.join(UPLOADS_DIR, "taqeem-session.json"),
+    sessionMetaFile: path.join(UPLOADS_DIR, "taqeem-session.meta.json"),
+  },
+  certifier: {
+    activeFlow: null,
+    sharedBrowser: null,
+    sharedContext: null,
+    storageStateFile: path.join(UPLOADS_DIR, "taqeem-session-certifier.json"),
+    sessionMetaFile: path.join(UPLOADS_DIR, "taqeem-session-certifier.meta.json"),
+  },
+};
+
+// ─── دوال مساعدة للملفات ─────────────────────────────────────────────────────
+
+function loadMeta(role: RoleKey): SessionMeta | null {
+  const s = roleState[role];
   try {
-    if (fs.existsSync(SESSION_META_FILE) && fs.existsSync(STORAGE_STATE_FILE)) {
-      const meta: SessionMeta = JSON.parse(fs.readFileSync(SESSION_META_FILE, "utf-8"));
+    if (fs.existsSync(s.sessionMetaFile) && fs.existsSync(s.storageStateFile)) {
+      const meta: SessionMeta = JSON.parse(fs.readFileSync(s.sessionMetaFile, "utf-8"));
       const age = Date.now() - new Date(meta.loggedInAt).getTime();
       if (age < SESSION_MAX_AGE_MS) return meta;
-      clearSavedState();
+      clearSavedState(role);
     }
   } catch {}
   return null;
 }
 
-function saveMeta(username: string) {
+function saveMeta(role: RoleKey, username: string) {
+  const s = roleState[role];
   const meta: SessionMeta = { loggedInAt: new Date().toISOString(), username };
-  fs.writeFileSync(SESSION_META_FILE, JSON.stringify(meta), "utf-8");
+  fs.writeFileSync(s.sessionMetaFile, JSON.stringify(meta), "utf-8");
 }
 
-function clearSavedState() {
-  try { fs.unlinkSync(STORAGE_STATE_FILE); } catch {}
-  try { fs.unlinkSync(SESSION_META_FILE); } catch {}
+function clearSavedState(role: RoleKey) {
+  const s = roleState[role];
+  try { fs.unlinkSync(s.storageStateFile); } catch {}
+  try { fs.unlinkSync(s.sessionMetaFile); } catch {}
 }
 
-function addFlowLog(msg: string) {
-  if (!activeFlow) return;
-  activeFlow.logs.push(`[${new Date().toISOString()}] ${msg}`);
-  console.log(`[TaqeemLogin] ${msg}`);
+function addFlowLog(role: RoleKey, msg: string) {
+  const s = roleState[role];
+  if (!s.activeFlow) return;
+  s.activeFlow.logs.push(`[${new Date().toISOString()}] ${msg}`);
+  console.log(`[TaqeemLogin:${role}] ${msg}`);
 }
 
-export function getLoginStatus(): {
+function setSharedContext(role: RoleKey, browser: Browser, context: BrowserContext) {
+  roleState[role].sharedBrowser = browser;
+  roleState[role].sharedContext = context;
+}
+
+// ─── الدوال المُصدَّرة ────────────────────────────────────────────────────────
+
+export function getLoginStatus(role: RoleKey = "entry"): {
   status: LoginStatus;
   username?: string;
   loggedInAt?: string;
@@ -112,17 +147,18 @@ export function getLoginStatus(): {
   error?: string;
   sessionExpiresAt?: string;
 } {
-  if (activeFlow) {
+  const s = roleState[role];
+  if (s.activeFlow) {
     return {
-      status: activeFlow.status,
-      username: activeFlow.username,
-      loggedInAt: activeFlow.loggedInAt?.toISOString(),
-      loginId: activeFlow.loginId,
-      logs: [...activeFlow.logs],
-      error: activeFlow.error,
+      status: s.activeFlow.status,
+      username: s.activeFlow.username,
+      loggedInAt: s.activeFlow.loggedInAt?.toISOString(),
+      loginId: s.activeFlow.loginId,
+      logs: [...s.activeFlow.logs],
+      error: s.activeFlow.error,
     };
   }
-  const meta = loadMeta();
+  const meta = loadMeta(role);
   if (meta) {
     const expiresAt = new Date(new Date(meta.loggedInAt).getTime() + SESSION_MAX_AGE_MS);
     return {
@@ -136,20 +172,19 @@ export function getLoginStatus(): {
   return { status: "not_logged_in", logs: [] };
 }
 
-export async function startLogin(username: string, password: string): Promise<string> {
-  if (activeFlow?.browser) {
-    try { await activeFlow.browser.close(); } catch {}
+export async function startLogin(username: string, password: string, role: RoleKey = "entry"): Promise<string> {
+  const s = roleState[role];
+  if (s.activeFlow?.browser) {
+    try { await s.activeFlow.browser.close(); } catch {}
   }
-  activeFlow = null;
+  s.activeFlow = null;
 
   const loginId = randomUUID();
 
   const chromiumExec = getChromiumExecutable();
-  // على Replit: headless=true، على الجهاز المحلي: headless=false (لرؤية المتصفح)
   const isReplit = !!process.env.REPL_ID || !!process.env.REPLIT_ID;
   const headlessMode = isReplit ? true : false;
 
-  // محاولة استخدام Chrome الحقيقي أولاً (يتجاوز Cloudflare أفضل من Chromium)
   let browser: import("playwright").Browser | null = null;
   if (!isReplit) {
     try {
@@ -163,9 +198,9 @@ export async function startLogin(username: string, password: string): Promise<st
           "--no-default-browser-check",
         ],
       });
-      console.log("[TaqeemLogin] Using real Chrome channel");
+      console.log(`[TaqeemLogin:${role}] Using real Chrome channel`);
     } catch (e) {
-      console.log(`[TaqeemLogin] Chrome channel not available: ${e} — falling back`);
+      console.log(`[TaqeemLogin:${role}] Chrome channel not available: ${e} — falling back`);
       browser = null;
     }
   }
@@ -180,25 +215,21 @@ export async function startLogin(username: string, password: string): Promise<st
       args: chromiumArgs,
       ...(chromiumExec ? { executablePath: chromiumExec } : {}),
     });
-    console.log(`[TaqeemLogin] Using Chromium: ${chromiumExec ?? "playwright-default"} | headless: ${headlessMode}`);
   }
 
-  const storageState = fs.existsSync(STORAGE_STATE_FILE)
-    ? (STORAGE_STATE_FILE as any)
-    : undefined;
+  const storageStateFile = s.storageStateFile;
+  const storageState = fs.existsSync(storageStateFile) ? (storageStateFile as any) : undefined;
 
   const context = await browser.newContext({
     locale: "ar-SA",
     timezoneId: "Asia/Riyadh",
     viewport: { width: 1280, height: 900 },
-    // لا نضع userAgent مزيف مع Chrome الحقيقي — Cloudflare يكتشفه
     ...(isReplit ? {
       userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     } : {}),
     ...(storageState ? { storageState } : {}),
   });
 
-  // إخفاء علامات الأتمتة من الـ JavaScript
   await context.addInitScript(() => {
     Object.defineProperty(navigator, "webdriver", { get: () => undefined });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -206,7 +237,7 @@ export async function startLogin(username: string, password: string): Promise<st
     (globalThis as any).window.chrome = { runtime: {} };
   });
 
-  activeFlow = {
+  s.activeFlow = {
     loginId,
     browser,
     context,
@@ -216,24 +247,25 @@ export async function startLogin(username: string, password: string): Promise<st
     logs: [],
   };
 
-  runLoginFlow(activeFlow, username, password).catch((err) => {
-    if (activeFlow?.loginId === loginId) {
-      activeFlow.status = "failed";
-      activeFlow.error = err.message;
-      addFlowLog(`❌ فشل: ${err.message}`);
+  runLoginFlow(role, s.activeFlow, username, password).catch((err) => {
+    if (s.activeFlow?.loginId === loginId) {
+      s.activeFlow.status = "failed";
+      s.activeFlow.error = err.message;
+      addFlowLog(role, `❌ فشل: ${err.message}`);
     }
   });
 
   return loginId;
 }
 
-async function runLoginFlow(flow: ActiveLoginFlow, username: string, password: string) {
+async function runLoginFlow(role: RoleKey, flow: ActiveLoginFlow, username: string, password: string) {
+  const s = roleState[role];
   const TAQEEM_URL = "https://qima.taqeem.gov.sa";
   const SSO_HOST = "sso.taqeem.gov.sa";
   const page = await flow.context.newPage();
 
   try {
-    addFlowLog("الانتقال إلى صفحة تسجيل الدخول...");
+    addFlowLog(role, "الانتقال إلى صفحة تسجيل الدخول...");
 
     try {
       await page.goto(`${TAQEEM_URL}/membership/login`, {
@@ -241,7 +273,7 @@ async function runLoginFlow(flow: ActiveLoginFlow, username: string, password: s
         timeout: 60000,
       });
     } catch (navErr: any) {
-      addFlowLog(`❌ فشل الانتقال للموقع: ${navErr.message}`);
+      addFlowLog(role, `❌ فشل الانتقال للموقع: ${navErr.message}`);
       throw new Error(
         `لا يمكن الوصول إلى ${TAQEEM_URL} — تأكد من اتصالك بالإنترنت وأن الموقع متاح من جهازك. ` +
         `(ملاحظة: الأتمتة يجب أن تشتغل من جهازك المحلي، وليس من Replit)`
@@ -251,44 +283,39 @@ async function runLoginFlow(flow: ActiveLoginFlow, username: string, password: s
     await page.waitForTimeout(2000);
 
     const currentUrlAfterNav = page.url();
-    addFlowLog(`الصفحة الحالية: ${currentUrlAfterNav}`);
+    addFlowLog(role, `الصفحة الحالية: ${currentUrlAfterNav}`);
 
-    // تحقق سريع إذا كانت الصفحة فارغة أو تحتوي على خطأ شبكة
     if (currentUrlAfterNav === "about:blank" || currentUrlAfterNav === `${TAQEEM_URL}/membership/login`) {
       const bodyText = await page.innerText("body").catch(() => "");
-      addFlowLog(`محتوى الصفحة (أول 200 حرف): ${bodyText.slice(0, 200)}`);
+      addFlowLog(role, `محتوى الصفحة (أول 200 حرف): ${bodyText.slice(0, 200)}`);
     }
 
-    // إذا لم نصل إلى SSO ولم نبقَ في /login — نحن مسجلون مسبقاً
     const currentUrl = page.url();
     if (!currentUrl.includes(SSO_HOST) && !currentUrl.includes("/login")) {
-      addFlowLog("تم استعادة الجلسة السابقة — لا حاجة لإعادة تسجيل الدخول.");
+      addFlowLog(role, "تم استعادة الجلسة السابقة — لا حاجة لإعادة تسجيل الدخول.");
       await page.close();
       flow.status = "authenticated";
       flow.loggedInAt = new Date();
-      await flow.context.storageState({ path: STORAGE_STATE_FILE });
-      saveMeta(username);
-      setSharedContext(flow.browser, flow.context);
+      await flow.context.storageState({ path: s.storageStateFile });
+      saveMeta(role, username);
+      setSharedContext(role, flow.browser, flow.context);
+      if (role === "entry") queuePendingAndProcess();
       return;
     }
 
-    // ─── إدخال بيانات الدخول على Keycloak ───────────────────────────
-    addFlowLog("إدخال بيانات الدخول على Keycloak SSO...");
+    addFlowLog(role, "إدخال بيانات الدخول على Keycloak SSO...");
 
-    // انتظار تحميل الصفحة بالكامل
     await page.waitForLoadState("load", { timeout: 30000 }).catch(() => {});
     await page.waitForTimeout(2000);
 
     const pageTitle = await page.title().catch(() => "غير معروف");
-    addFlowLog(`عنوان الصفحة: ${pageTitle}`);
+    addFlowLog(role, `عنوان الصفحة: ${pageTitle}`);
 
-    // حفظ لقطة شاشة للتشخيص
     try {
-      await page.screenshot({ path: "uploads/login-debug.png" });
-      addFlowLog("تم حفظ لقطة الشاشة في uploads/login-debug.png");
+      await page.screenshot({ path: `uploads/login-debug-${role}.png` });
+      addFlowLog(role, `تم حفظ لقطة الشاشة في uploads/login-debug-${role}.png`);
     } catch {}
 
-    // محاولة إيجاد حقل المستخدم بعدة محددات
     const usernameSelectors = [
       '#username',
       'input[name="username"]',
@@ -305,28 +332,26 @@ async function runLoginFlow(flow: ActiveLoginFlow, username: string, password: s
       try {
         await page.waitForSelector(sel, { timeout: 5000 });
         usernameField = sel;
-        addFlowLog(`تم العثور على حقل المستخدم: ${sel}`);
+        addFlowLog(role, `تم العثور على حقل المستخدم: ${sel}`);
         break;
       } catch {}
     }
 
     if (!usernameField) {
       const allInputs = await page.$$eval('input', els => els.map(e => ({ type: e.type, name: e.name, id: e.id, placeholder: e.placeholder })));
-      addFlowLog(`❌ الحقول المتاحة في الصفحة: ${JSON.stringify(allInputs)}`);
+      addFlowLog(role, `❌ الحقول المتاحة في الصفحة: ${JSON.stringify(allInputs)}`);
       throw new Error("لم يتم العثور على حقل اسم المستخدم في صفحة تسجيل الدخول");
     }
 
     await page.fill(usernameField, username);
     await page.fill('#password, input[name="password"], input[type="password"]', password);
 
-    addFlowLog("النقر على زر تسجيل الدخول...");
+    addFlowLog(role, "النقر على زر تسجيل الدخول...");
     await page.click('#kc-login, input[type="submit"], button[type="submit"]');
 
-    // انتظار حتى تستقر الصفحة بعد الانتقالات المتسلسلة (Keycloak → callback → TAQEEM)
     await page.waitForLoadState("domcontentloaded", { timeout: 30000 }).catch(() => {});
     await page.waitForTimeout(3000);
 
-    // انتظار إضافي لاستقرار الـ redirects
     let stableUrl = page.url();
     for (let i = 0; i < 5; i++) {
       await page.waitForTimeout(1000);
@@ -335,20 +360,16 @@ async function runLoginFlow(flow: ActiveLoginFlow, username: string, password: s
       stableUrl = newUrl;
     }
 
-    addFlowLog(`بعد تسجيل الدخول — الصفحة: ${stableUrl}`);
+    addFlowLog(role, `بعد تسجيل الدخول — الصفحة: ${stableUrl}`);
 
-    // ─── التحقق من صفحة OTP أو اختيار الطريقة ──────────────────────
-    // التحقق بالـ hostname وليس الـ URL كاملاً (لتفادي الـ iss parameter المشفّر)
     let afterLoginHostname = "";
     try { afterLoginHostname = new URL(stableUrl).hostname; } catch {}
     const isOnSSOHost = afterLoginHostname === SSO_HOST;
-    const isOnOtpPage = isOnSSOHost && /otp|verify|تحقق|confirm|channel|method|authenticate|login-actions/i.test(stableUrl);
 
     if (isOnSSOHost) {
-      addFlowLog("ظهرت صفحة التحقق الثنائي...");
+      addFlowLog(role, "ظهرت صفحة التحقق الثنائي...");
       flow.status = "waiting_otp";
 
-      // ─── اختيار البريد الإلكتروني إذا ظهرت صفحة الاختيار ──────────
       const emailSelectors = [
         'input[type="radio"][value*="email" i]',
         'input[type="radio"][value*="mail" i]',
@@ -370,7 +391,7 @@ async function runLoginFlow(flow: ActiveLoginFlow, username: string, password: s
           if (el) {
             await el.click();
             selectedEmail = true;
-            addFlowLog("تم اختيار البريد الإلكتروني لاستقبال OTP ✅");
+            addFlowLog(role, "تم اختيار البريد الإلكتروني لاستقبال OTP ✅");
             await page.waitForTimeout(1000);
             break;
           }
@@ -383,46 +404,41 @@ async function runLoginFlow(flow: ActiveLoginFlow, username: string, password: s
             'input[type="submit"], button[type="submit"], button:has-text("تأكيد"), button:has-text("التالي"), button:has-text("إرسال"), button:has-text("Continue")',
             { timeout: 5000 }
           );
-          addFlowLog("تم النقر على زر إرسال OTP...");
+          addFlowLog(role, "تم النقر على زر إرسال OTP...");
           await page.waitForLoadState("domcontentloaded", { timeout: 15000 }).catch(() => {});
         } catch {}
       } else {
-        addFlowLog("لم يتم العثور على خيار البريد الإلكتروني — المتابعة مباشرة لإدخال OTP...");
+        addFlowLog(role, "لم يتم العثور على خيار البريد الإلكتروني — المتابعة مباشرة لإدخال OTP...");
       }
 
-      addFlowLog("في انتظار إدخال رمز OTP من البريد الإلكتروني...");
+      addFlowLog(role, "في انتظار إدخال رمز OTP من البريد الإلكتروني...");
     } else {
-      // لا يوجد OTP — تسجيل الدخول مكتمل مباشرة
-      addFlowLog("تسجيل الدخول اكتمل بدون OTP ✅");
+      addFlowLog(role, "تسجيل الدخول اكتمل بدون OTP ✅");
       await page.close();
       flow.status = "authenticated";
       flow.loggedInAt = new Date();
-      await flow.context.storageState({ path: STORAGE_STATE_FILE });
-      saveMeta(username);
-      setSharedContext(flow.browser, flow.context);
-      queuePendingAndProcess();
+      await flow.context.storageState({ path: s.storageStateFile });
+      saveMeta(role, username);
+      setSharedContext(role, flow.browser, flow.context);
+      if (role === "entry") queuePendingAndProcess();
       return;
     }
 
-    // ─── انتظار إدخال OTP ────────────────────────────────────────────
     const otp = await new Promise<string>((resolve) => {
       flow.otpResolver = resolve;
     });
 
-    addFlowLog("تم استلام OTP — جارٍ إدخاله...");
+    addFlowLog(role, "تم استلام OTP — جارٍ إدخاله...");
     flow.status = "logging_in";
 
-    // تحقق إذا كانت الصفحة لا تزال على SSO أم انتقلت للرئيسية بالفعل
     const currentPageUrl = page.url();
     let currentHostname = "";
     try { currentHostname = new URL(currentPageUrl).hostname; } catch {}
-    addFlowLog(`الصفحة عند إدخال OTP: ${currentPageUrl}`);
+    addFlowLog(role, `الصفحة عند إدخال OTP: ${currentPageUrl}`);
 
     if (currentHostname !== SSO_HOST) {
-      // الصفحة انتقلت للرئيسية — تسجيل الدخول مكتمل بدون حاجة لإدخال OTP
-      addFlowLog("الصفحة انتقلت للرئيسية — تسجيل الدخول مكتمل ✅");
+      addFlowLog(role, "الصفحة انتقلت للرئيسية — تسجيل الدخول مكتمل ✅");
     } else {
-      // لا تزال على SSO — أدخل الـ OTP
       const otpSelector = 'input[name="otp"], input[id="otp"], input[autocomplete="one-time-code"], input[maxlength="6"], input[type="number"], input[type="text"]';
       await page.waitForSelector(otpSelector, { timeout: 10000 });
       await page.fill(otpSelector, otp);
@@ -430,56 +446,46 @@ async function runLoginFlow(flow: ActiveLoginFlow, username: string, password: s
       await page.waitForLoadState("domcontentloaded", { timeout: 30000 });
     }
 
-    addFlowLog("تم تسجيل الدخول بنجاح ✅");
-    addFlowLog("جارٍ حفظ الجلسة للاستخدام طوال اليوم...");
+    addFlowLog(role, "تم تسجيل الدخول بنجاح ✅");
+    addFlowLog(role, "جارٍ حفظ الجلسة للاستخدام طوال اليوم...");
 
     await page.close();
     flow.status = "authenticated";
     flow.loggedInAt = new Date();
 
-    await flow.context.storageState({ path: STORAGE_STATE_FILE });
-    saveMeta(username);
-    setSharedContext(flow.browser, flow.context);
+    await flow.context.storageState({ path: s.storageStateFile });
+    saveMeta(role, username);
+    setSharedContext(role, flow.browser, flow.context);
 
-    addFlowLog("✅ الجلسة محفوظة — يمكنك الآن رفع أي عدد من التقارير بدون إعادة تسجيل الدخول.");
-    queuePendingAndProcess();
+    addFlowLog(role, "✅ الجلسة محفوظة — يمكنك الآن رفع أي عدد من التقارير بدون إعادة تسجيل الدخول.");
+    if (role === "entry") queuePendingAndProcess();
   } catch (err: any) {
     try { await page.close(); } catch {}
     throw err;
   }
 }
 
-function setSharedContext(browser: Browser, context: BrowserContext) {
-  sharedBrowser = browser;
-  sharedContext = context;
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
-// سياق معزول لكل عملية أتمتة — مستقل تماماً عن السياق المشترك
-// يستخدم ملف المصادقة المحفوظ (cookies) دون المساس بالجلسة الرئيسية
+// سياق معزول لعمليات الأتمتة — يستخدم دائماً جلسة مدخل البيانات
 // ─────────────────────────────────────────────────────────────────────────────
 export async function createIsolatedAutomationContext(): Promise<{
   context: BrowserContext;
   cleanup: () => Promise<void>;
 } | null> {
-  // تحقق من وجود جلسة محفوظة
-  const meta = loadMeta();
-  if (!meta || !fs.existsSync(STORAGE_STATE_FILE)) {
-    return null; // لا توجد جلسة — يجب تسجيل الدخول أولاً
+  const s = roleState["entry"];
+  const meta = loadMeta("entry");
+  if (!meta || !fs.existsSync(s.storageStateFile)) {
+    return null;
   }
 
-  // نستخدم نفس المتصفح المشترك (إن كان متاحاً) لتوفير الموارد
-  // أو نُنشئ متصفحاً جديداً خفياً مخصصاً للأتمتة
   const isReplit = !!process.env.REPL_ID || !!process.env.REPLIT_ID;
   let automationBrowser: Browser;
-  let ownsBrowser = false; // هل نحن من أنشأ المتصفح (ونحتاج إغلاقه)؟
+  let ownsBrowser = false;
 
-  if (sharedBrowser) {
-    // استخدم نفس المتصفح — فقط أنشئ context جديد معزول
-    automationBrowser = sharedBrowser;
+  if (s.sharedBrowser) {
+    automationBrowser = s.sharedBrowser;
     ownsBrowser = false;
   } else {
-    // لا يوجد متصفح مشترك — أنشئ واحداً مخصصاً للأتمتة
     const chromiumExec = getChromiumExecutable();
     let newBrowser: Browser | null = null;
 
@@ -513,25 +519,22 @@ export async function createIsolatedAutomationContext(): Promise<{
     ownsBrowser = true;
   }
 
-  // إنشاء context جديد معزول بملف المصادقة المحفوظ
   const isolatedContext = await automationBrowser.newContext({
     locale: "ar-SA",
     timezoneId: "Asia/Riyadh",
     viewport: { width: 1280, height: 900 },
-    storageState: STORAGE_STATE_FILE as any,
+    storageState: s.storageStateFile as any,
     ...(isReplit ? {
       userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     } : {}),
   });
 
-  // إخفاء علامات الأتمتة
   await isolatedContext.addInitScript(() => {
     Object.defineProperty(navigator, "webdriver", { get: () => undefined });
     (globalThis as any).window ??= {};
     (globalThis as any).window.chrome = { runtime: {} };
   });
 
-  // دالة التنظيف: تُغلق السياق المعزول فقط (لا تمس الجلسة الرئيسية)
   const cleanup = async () => {
     try { await isolatedContext.close(); } catch {}
     if (ownsBrowser) {
@@ -542,38 +545,30 @@ export async function createIsolatedAutomationContext(): Promise<{
   return { context: isolatedContext, cleanup };
 }
 
-export function submitLoginOtp(loginId: string, otp: string): boolean {
-  if (!activeFlow || activeFlow.loginId !== loginId) return false;
-  if (!activeFlow.otpResolver) return false;
-  activeFlow.otpResolver(otp);
-  activeFlow.otpResolver = null;
+export function submitLoginOtp(loginId: string, otp: string, role: RoleKey = "entry"): boolean {
+  const s = roleState[role];
+  if (!s.activeFlow || s.activeFlow.loginId !== loginId) return false;
+  if (!s.activeFlow.otpResolver) return false;
+  s.activeFlow.otpResolver(otp);
+  s.activeFlow.otpResolver = null;
   return true;
 }
 
 export async function getAuthenticatedContext(): Promise<BrowserContext | null> {
-  // 1. Use in-memory shared context if available
-  if (sharedContext) {
-    try {
-      // Quick health check — try creating a page and closing it
-      // (skipped for performance; rely on navigation errors instead)
-      return sharedContext;
-    } catch {
-      sharedContext = null;
-    }
+  const s = roleState["entry"];
+
+  if (s.sharedContext) {
+    return s.sharedContext;
   }
 
-  // 2. Try restoring from saved state file
-  const meta = loadMeta();
-  if (meta && fs.existsSync(STORAGE_STATE_FILE)) {
+  const meta = loadMeta("entry");
+  if (meta && fs.existsSync(s.storageStateFile)) {
     const chromiumExec = getChromiumExecutable();
     const isReplit = !!process.env.REPL_ID || !!process.env.REPLIT_ID;
 
-    // على Windows: نفتح المتصفح بشكل مرئي حتى يرى المستخدم ما يحدث
-    // على Replit: نشغّله مخفياً مع إعدادات Linux
     let restoredBrowser: import("playwright").Browser | null = null;
 
     if (!isReplit) {
-      // جرّب Chrome الحقيقي أولاً على Windows
       try {
         restoredBrowser = await chromium.launch({
           headless: false,
@@ -607,17 +602,16 @@ export async function getAuthenticatedContext(): Promise<BrowserContext | null> 
       locale: "ar-SA",
       timezoneId: "Asia/Riyadh",
       viewport: { width: 1280, height: 900 },
-      storageState: STORAGE_STATE_FILE as any,
+      storageState: s.storageStateFile as any,
       ...(isReplit ? {
         userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
       } : {}),
     });
 
-    setSharedContext(browser, context);
+    setSharedContext("entry", browser, context);
 
-    // Restore flow metadata so status endpoint reflects logged-in state
-    if (!activeFlow) {
-      activeFlow = {
+    if (!s.activeFlow) {
+      s.activeFlow = {
         loginId: "restored",
         browser,
         context,
@@ -635,13 +629,14 @@ export async function getAuthenticatedContext(): Promise<BrowserContext | null> 
   return null;
 }
 
-export async function logout(): Promise<void> {
-  if (sharedBrowser) {
-    try { await sharedBrowser.close(); } catch {}
+export async function logout(role: RoleKey = "entry"): Promise<void> {
+  const s = roleState[role];
+  if (s.sharedBrowser) {
+    try { await s.sharedBrowser.close(); } catch {}
   }
-  sharedBrowser = null;
-  sharedContext = null;
-  activeFlow = null;
-  clearSavedState();
-  console.log("[TaqeemLogin] تم تسجيل الخروج وحذف الجلسة.");
+  s.sharedBrowser = null;
+  s.sharedContext = null;
+  s.activeFlow = null;
+  clearSavedState(role);
+  console.log(`[TaqeemLogin:${role}] تم تسجيل الخروج وحذف الجلسة.`);
 }
