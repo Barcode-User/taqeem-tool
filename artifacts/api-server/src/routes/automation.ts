@@ -93,7 +93,7 @@ async function startCertifySession(): Promise<void> {
     }
     _certifyLog(`📄 الصفحة: ${_certifyPage.url()}`);
 
-    // ── اختر "التقارير الغير مكتملة" من فلتر report-status-filter ────────────
+    // ── اختر "تقارير بانتظار الاعتماد" من فلتر report-status-filter ─────────
     _certifyLog("🔍 البحث عن عنصر #report-status-filter...");
 
     // اكتشف نوع العنصر أولاً
@@ -113,7 +113,7 @@ async function startCertifySession(): Promise<void> {
           const sel = document.querySelector("#report-status-filter") as HTMLSelectElement;
           if (!sel) return null;
           for (const opt of Array.from(sel.options)) {
-            if (opt.text.includes("غير مكتمل")) return opt.value;
+            if (opt.text.includes("انتظار الاعتماد") || opt.text.includes("بانتظار الاعتماد")) return opt.value;
           }
           return null;
         });
@@ -145,7 +145,7 @@ async function startCertifySession(): Promise<void> {
           for (const sel of selectors) {
             for (const el of Array.from(document.querySelectorAll(sel))) {
               const txt = (el.textContent || "").trim();
-              if (txt.includes("غير مكتمل")) {
+              if (txt.includes("انتظار الاعتماد") || txt.includes("بانتظار الاعتماد")) {
                 (el as HTMLElement).click();
                 return txt;
               }
@@ -161,7 +161,7 @@ async function startCertifySession(): Promise<void> {
           // آخر محاولة: Playwright locator بالنص
           try {
             await _certifyPage.locator("mat-option, [role='option']")
-              .filter({ hasText: /غير مكتمل/ })
+              .filter({ hasText: /انتظار الاعتماد|بانتظار الاعتماد/ })
               .first()
               .click({ timeout: 5000 });
             _certifyLog("✅ تم اختيار الخيار عبر Playwright locator");
@@ -266,7 +266,7 @@ async function _checkPolicyCheckbox(page: any): Promise<void> {
                       document.querySelector(`label[for='${(cb as HTMLInputElement).id}']`) ||
                       cb.parentElement;
         const labelText = (label?.textContent || cb.parentElement?.textContent || "").trim();
-        if (labelText.includes("السياسات") || labelText.includes("اللوائح") || labelText.includes("أوافق")) {
+        if (labelText.includes("أقر بأن") || labelText.includes("المعلومات المدخلة") || labelText.includes("ملخص التقرير صحيحة")) {
           // إذا لم يكن محدداً، انقر عليه
           const isChecked = (cb as HTMLInputElement).checked ||
                             cb.classList.contains("mat-checkbox-checked") ||
@@ -282,9 +282,9 @@ async function _checkPolicyCheckbox(page: any): Promise<void> {
       const labels = Array.from(document.querySelectorAll("label, .checkbox-label, span"));
       for (const lbl of labels) {
         const txt = (lbl.textContent || "").trim();
-        if (txt.includes("السياسات") && txt.includes("أوافق")) {
+        if (txt.includes("أقر بأن") || txt.includes("ملخص التقرير صحيحة")) {
           (lbl as HTMLElement).click();
-          return `label_clicked:${txt.substring(0, 50)}`;
+          return `label_clicked:${txt.substring(0, 60)}`;
         }
       }
       return null;
