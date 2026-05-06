@@ -27,9 +27,17 @@ type SessionStatus = {
   error?: string;
 };
 
+const ROLE_KEY = "taqeem_role";
+
+function getCurrentRole(): "entry" | "certifier" {
+  const v = localStorage.getItem(ROLE_KEY);
+  return v === "certifier" ? "certifier" : "entry";
+}
+
 export default function TaqeemSessionPage() {
   const { toast } = useToast();
   const apiBase = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
+  const role = getCurrentRole();
 
   const [session, setSession] = useState<SessionStatus>({ status: "not_logged_in", logs: [] });
   const [username, setUsername] = useState("");
@@ -40,16 +48,12 @@ export default function TaqeemSessionPage() {
 
   const fetchStatus = async () => {
     try {
-      const resp = await fetch(`${apiBase}/api/automation/session-status`);
+      const resp = await fetch(`${apiBase}/api/automation/session-status?role=${role}`);
       if (resp.ok) {
         const data: SessionStatus = await resp.json();
         setSession(data);
-
         if (data.status === "authenticated" || data.status === "failed" || data.status === "not_logged_in") {
-          if (pollRef.current) {
-            clearInterval(pollRef.current);
-            pollRef.current = null;
-          }
+          if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
           setLoading(false);
         }
       }
@@ -58,9 +62,7 @@ export default function TaqeemSessionPage() {
 
   useEffect(() => {
     fetchStatus();
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, []);
 
   const startLogin = async () => {
@@ -70,7 +72,7 @@ export default function TaqeemSessionPage() {
       const resp = await fetch(`${apiBase}/api/automation/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username, password, role }),
       });
       const data = await resp.json();
       if (resp.ok) {
@@ -92,15 +94,13 @@ export default function TaqeemSessionPage() {
       const resp = await fetch(`${apiBase}/api/automation/login-otp`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ loginId: session.loginId, otp }),
+        body: JSON.stringify({ loginId: session.loginId, otp, role }),
       });
       const data = await resp.json();
       if (resp.ok) {
         setOtp("");
         toast({ title: "تم إرسال OTP", description: "جارٍ إكمال تسجيل الدخول..." });
-        if (!pollRef.current) {
-          pollRef.current = setInterval(fetchStatus, 2000);
-        }
+        if (!pollRef.current) pollRef.current = setInterval(fetchStatus, 2000);
       } else {
         toast({ variant: "destructive", title: "خطأ", description: data.error });
       }
@@ -109,7 +109,11 @@ export default function TaqeemSessionPage() {
 
   const handleLogout = async () => {
     try {
-      await fetch(`${apiBase}/api/automation/logout`, { method: "POST" });
+      await fetch(`${apiBase}/api/automation/logout`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role }),
+      });
       setSession({ status: "not_logged_in", logs: [] });
       setUsername("");
       setPassword("");
@@ -121,21 +125,35 @@ export default function TaqeemSessionPage() {
 
   const formatExpiry = (iso?: string) => {
     if (!iso) return "";
-    const d = new Date(iso);
-    return d.toLocaleString("ar-SA", { hour: "2-digit", minute: "2-digit", day: "numeric", month: "short" });
+    return new Date(iso).toLocaleString("ar-SA", { hour: "2-digit", minute: "2-digit", day: "numeric", month: "short" });
   };
 
+  const isCertifier = role === "certifier";
   const isAuthenticated = session.status === "authenticated";
   const isLoggingIn = session.status === "logging_in" || session.status === "waiting_otp" || loading;
 
+  const sessionLabel = isCertifier
+    ? "جلسة معمد البيانات — لتعميد التقارير على منصة تقييم"
+    : "جلسة مدخل البيانات — لرفع التقارير على منصة تقييم";
+
+  const afterLoginNote = isCertifier
+    ? "يمكنك الآن تعميد التقارير على منصة تقييم."
+    : "يمكنك الآن رفع أي عدد من التقارير بدون إعادة تسجيل الدخول.";
+
   return (
     <div className="max-w-xl mx-auto space-y-6">
+      {/* Role badge */}
+      <div className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border ${isCertifier ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-blue-50 border-blue-200 text-blue-800"}`}>
+        <ShieldCheck className="h-4 w-4 shrink-0" />
+        {sessionLabel}
+      </div>
+
       {/* Status Card */}
       <Card>
         <CardHeader className="bg-muted/40 border-b pb-3">
           <CardTitle className="text-base flex items-center gap-2">
-            <ShieldCheck className="h-5 w-5 text-primary" />
-            حالة جلسة منصة تقييم
+            <ShieldCheck className={`h-5 w-5 ${isCertifier ? "text-emerald-600" : "text-primary"}`} />
+            حالة الجلسة
           </CardTitle>
         </CardHeader>
         <CardContent className="pt-6">
@@ -145,9 +163,7 @@ export default function TaqeemSessionPage() {
                 <Check className="h-5 w-5 shrink-0 mt-0.5" />
                 <div>
                   <p className="font-semibold">مسجّل الدخول ✅</p>
-                  {session.username && (
-                    <p className="text-sm mt-1 opacity-80">المستخدم: {session.username}</p>
-                  )}
+                  {session.username && <p className="text-sm mt-1 opacity-80">المستخدم: {session.username}</p>}
                   {session.loggedInAt && (
                     <p className="text-xs mt-1 opacity-70 flex items-center gap-1">
                       <Clock className="h-3 w-3" />
@@ -160,9 +176,7 @@ export default function TaqeemSessionPage() {
                       الجلسة صالحة حتى: {formatExpiry(session.sessionExpiresAt)}
                     </p>
                   )}
-                  <p className="text-sm mt-2 font-medium">
-                    يمكنك الآن رفع أي عدد من التقارير بدون إعادة تسجيل الدخول.
-                  </p>
+                  <p className="text-sm mt-2 font-medium">{afterLoginNote}</p>
                 </div>
               </div>
               <Button variant="outline" onClick={handleLogout} className="gap-2 text-red-600 border-red-200 hover:bg-red-50">
@@ -178,9 +192,7 @@ export default function TaqeemSessionPage() {
                   {session.status === "waiting_otp" ? "في انتظار رمز OTP..." : "جارٍ تسجيل الدخول..."}
                 </p>
                 {session.status === "waiting_otp" && (
-                  <p className="text-sm mt-1 opacity-80">
-                    تم إرسال رمز التحقق لهاتفك — أدخله في النافذة أدناه
-                  </p>
+                  <p className="text-sm mt-1 opacity-80">تم إرسال رمز التحقق لهاتفك — أدخله في النافذة أدناه</p>
                 )}
               </div>
             </div>
@@ -194,7 +206,7 @@ export default function TaqeemSessionPage() {
             </div>
           ) : (
             <div className="rounded-lg bg-muted border p-4 text-muted-foreground text-sm">
-              <p>غير مسجّل الدخول. سجّل دخولك مرة واحدة لترفع جميع التقارير طوال اليوم.</p>
+              <p>غير مسجّل الدخول. سجّل دخولك مرة واحدة لتستخدم منصة تقييم طوال اليوم.</p>
             </div>
           )}
         </CardContent>
@@ -205,7 +217,7 @@ export default function TaqeemSessionPage() {
         <Card>
           <CardHeader className="bg-muted/40 border-b pb-3">
             <CardTitle className="text-base flex items-center gap-2">
-              <LogIn className="h-5 w-5 text-primary" />
+              <LogIn className={`h-5 w-5 ${isCertifier ? "text-emerald-600" : "text-primary"}`} />
               تسجيل الدخول لمنصة تقييم
             </CardTitle>
           </CardHeader>
@@ -231,12 +243,12 @@ export default function TaqeemSessionPage() {
               />
             </div>
             <p className="text-xs text-muted-foreground bg-amber-50 border border-amber-200 rounded p-2">
-              💡 ستُطلب منك مرة واحدة فقط. بعد تسجيل الدخول، تُحفظ الجلسة لمدة 10 ساعات ويمكنك رفع أي عدد من التقارير بدون إعادة الإدخال.
+              💡 ستُطلب منك مرة واحدة فقط. بعد تسجيل الدخول، تُحفظ الجلسة لمدة 10 ساعات.
             </p>
             <Button
               onClick={startLogin}
               disabled={!username || !password}
-              className="w-full gap-2"
+              className={`w-full gap-2 ${isCertifier ? "bg-emerald-600 hover:bg-emerald-700" : ""}`}
             >
               <LogIn className="h-4 w-4" />
               تسجيل الدخول
@@ -245,7 +257,7 @@ export default function TaqeemSessionPage() {
         </Card>
       )}
 
-      {/* ─── بطاقة OTP المضمّنة ─────────────────────────────────────────── */}
+      {/* OTP Card */}
       {session.status === "waiting_otp" && (
         <Card className="border-2 border-yellow-400 shadow-lg">
           <CardHeader className="bg-yellow-50 border-b border-yellow-200 pb-3">
@@ -273,11 +285,7 @@ export default function TaqeemSessionPage() {
                 autoFocus
               />
             </div>
-            <Button
-              onClick={submitOtp}
-              disabled={otp.length < 4}
-              className="w-full gap-2 h-11 text-base"
-            >
+            <Button onClick={submitOtp} disabled={otp.length < 4} className="w-full gap-2 h-11 text-base">
               <Check className="h-5 w-5" />
               تأكيد رمز OTP
             </Button>
@@ -296,9 +304,7 @@ export default function TaqeemSessionPage() {
           </CardHeader>
           <CardContent className="pt-4">
             <div className="bg-slate-950 text-green-400 rounded-lg p-4 font-mono text-xs space-y-1 max-h-48 overflow-y-auto" dir="ltr">
-              {session.logs.map((log, i) => (
-                <div key={i}>{log}</div>
-              ))}
+              {session.logs.map((log, i) => <div key={i}>{log}</div>)}
             </div>
           </CardContent>
         </Card>
