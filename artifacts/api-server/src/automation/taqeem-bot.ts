@@ -1044,10 +1044,21 @@ function _norm(s){
     .replace(/\\u0629/g,'\\u0647')
     .replace(/\\s+/g,' ').trim();
 }
+function _stripPfx(s){
+  return s.replace(/^(\\u0645\\u0646\\u0637\\u0642\\u0647|\\u0645\\u062D\\u0627\\u0641\\u0638\\u0647|\\u0627\\u0645\\u0627\\u0631\\u0647|\\u0645\\u062F\\u064A\\u0646\\u0647)\\s+/,'')
+          .replace(/^\\u0627\\u0644/,'');
+}
 function _matches(a,b){
   var na=_norm(a), nb=_norm(b);
+  if(na===nb) return true;
   var sa=na.replace(/^\\u0627\\u0644/,''), sb=nb.replace(/^\\u0627\\u0644/,'');
-  return na===nb||na.includes(nb)||nb.includes(na)||sa===sb||sa.includes(sb)||sb.includes(sa);
+  if(sa===sb) return true;
+  var pa=_stripPfx(na), pb=_stripPfx(nb);
+  if(pa===pb||pa===sb||pb===sa) return true;
+  if(na.length>4&&nb.length>4&&(na.includes(nb)||nb.includes(na))) return true;
+  if(sa.length>4&&sb.length>4&&(sa.includes(sb)||sb.includes(sa))) return true;
+  if(pa.length>4&&pb.length>4&&(pa.includes(pb)||pb.includes(pa))) return true;
+  return false;
 }
 `;
 
@@ -1680,6 +1691,33 @@ async function fillFormPage(
 
 // تعبئة native select بالـ name مباشرة (بالنص أو بالقيمة)
 // fallback: خيار احتياطي يُختار إذا لم تُوجد قيمة value
+/**
+ * ينتظر ديناميكياً حتى تُحمَّل خيارات قائمة المدن بعد اختيار المنطقة
+ * يجمع بين: networkidle + ظهور خيارات > 1 في القائمة
+ */
+async function waitForCityOptions(page: Page, citySel: string | null): Promise<void> {
+  // انتظر هدوء الشبكة أولاً (يعني الـ cascade API انتهى)
+  await page.waitForLoadState("networkidle", { timeout: 4000 }).catch(() => {});
+
+  if (citySel) {
+    // انتظر ظهور خيارات فعلية (> 1) في القائمة
+    await page.waitForFunction(
+      (sel: string) => {
+        const el = document.querySelector<HTMLSelectElement>(sel);
+        if (!el) return false;
+        if (el.tagName === "SELECT") return el.options.length > 1;
+        // mat-select: نتحقق من الخيارات المتاحة عبر ng-reflect
+        return el.querySelectorAll("mat-option,.mat-option").length > 0;
+      },
+      citySel,
+      { timeout: 3000 },
+    ).catch(() => {});
+  }
+
+  // هامش إضافي لاستقرار Angular بعد التحميل
+  await page.waitForTimeout(300);
+}
+
 async function selectNativeByName(
   session: AutomationSession,
   name: string,
@@ -2266,8 +2304,8 @@ async function fillAssetPage(
       }
       if (attempt < 4) addLog(session, `⏳ إعادة محاولة اختيار المنطقة (${attempt}/4)...`);
     }
-    // انتظر تحميل المدن بعد اختيار المنطقة (كاسكاد API)
-    await session.page.waitForTimeout(300);
+    // انتظر تحميل المدن بعد اختيار المنطقة (كاسكاد API) — انتظار ديناميكي
+    await waitForCityOptions(session.page, null);
   } else if (!regionEl) {
     addLog(session, "⚠️ لم يُعثر على «المنطقة»");
   }
@@ -2275,9 +2313,26 @@ async function fillAssetPage(
   // ── المدينة ───────────────────────────────────────────────────────────────
   const cityEl = byName("city_id") ?? byLabel(/city|مدينة/i);
   if (cityEl) {
-    await (cityEl.isMat
-      ? selectAngular(session, buildSelector(cityEl), report.city, "المدينة", true)
-      : selectNativeByName(session, cityEl.name || "", report.city, "المدينة"));
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      await (cityEl.isMat
+        ? selectAngular(session, buildSelector(cityEl), report.city, "المدينة", true)
+        : selectNativeByName(session, cityEl.name || "", report.city, "المدينة"));
+      const chosen = await session.page.evaluate((sel: string) => {
+        const el = document.querySelector<HTMLSelectElement>(sel);
+        if (!el) return "";
+        if (el.tagName === "SELECT") return el.value || "";
+        return el.getAttribute("ng-reflect-value") ||
+          el.querySelector(".mat-mdc-select-value-text span,.mat-select-value-text span")?.textContent?.trim() || "";
+      }, buildSelector(cityEl)).catch(() => "");
+      if (chosen && chosen !== "" && chosen !== "null") {
+        addLog(session, `✅ المدينة محددة (محاولة ${attempt}): "${chosen}"`);
+        break;
+      }
+      if (attempt < 3) {
+        addLog(session, `⏳ إعادة محاولة اختيار المدينة (${attempt}/3)...`);
+        await session.page.waitForTimeout(500);
+      }
+    }
     await session.page.waitForTimeout(200);
   } else addLog(session, "⚠️ لم يُعثر على «المدينة»");
 
@@ -3287,8 +3342,8 @@ async function fillPage2(session: AutomationSession, report: any, els: any[], pd
       }
       if (attempt < 3) addLog(session, `⏳ إعادة محاولة اختيار المنطقة (${attempt}/3)...`);
     }
-    // انتظر تحميل المدن بعد اختيار المنطقة
-    await session.page.waitForTimeout(300);
+    // انتظر تحميل المدن بعد اختيار المنطقة — انتظار ديناميكي
+    await waitForCityOptions(session.page, null);
   } else if (!regionEl) {
     addLog(session, `⚠️ لم يُعثر على حقل «المنطقة»`);
   }
@@ -3297,7 +3352,7 @@ async function fillPage2(session: AutomationSession, report: any, els: any[], pd
   // cityEl من المسح الأوّلي قد يكون قديماً — المدن تُحمَّل ديناميكياً بعد المنطقة
   if (report.city) {
     // انتظر إضافياً لتستقر قائمة المدن في Angular
-    await session.page.waitForTimeout(150);
+    await session.page.waitForTimeout(200);
 
     // مسح حي للعنصر من DOM مباشرة
     const liveCitySelector = await session.page.evaluate(() => {
