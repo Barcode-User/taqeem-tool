@@ -25,7 +25,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const check = async () => {
       try {
-        const resp = await fetch(`${apiBase}/api/automation/session-status`);
+        const resp = await fetch(`${apiBase}/api/automation/session-status?role=${role}`);
         if (resp.ok) {
           const data = await resp.json();
           setSessionStatus(data.status);
@@ -36,7 +36,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     check();
     const interval = setInterval(check, 30000);
     return () => clearInterval(interval);
-  }, [apiBase]);
+  }, [apiBase, role]);
 
   const handleSwitchRole = () => {
     localStorage.removeItem(ROLE_KEY);
