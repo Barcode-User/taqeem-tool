@@ -94,44 +94,88 @@ async function startCertifySession(): Promise<void> {
     _certifyLog(`📄 الصفحة: ${_certifyPage.url()}`);
 
     // ── اختر "التقارير الغير مكتملة" من فلتر report-status-filter ────────────
-    _certifyLog("🔍 فتح قائمة الفلتر report-status-filter...");
-    try {
-      // انقر على عنصر الفلتر لفتح القائمة المنسدلة
-      await _certifyPage.click("#report-status-filter", { timeout: 10000 });
-      _certifyLog("✅ تم فتح قائمة الفلتر");
-      await _certifyPage.waitForTimeout(1500);
-    } catch {
-      // حاول بدون # (قد يكون class أو name)
-      try {
-        await _certifyPage.click("[id='report-status-filter']", { timeout: 5000 });
-        _certifyLog("✅ تم فتح قائمة الفلتر (بديل)");
-        await _certifyPage.waitForTimeout(1500);
-      } catch {
-        _certifyLog("⚠️ لم يُعثر على report-status-filter — محاولة المتابعة");
-      }
-    }
+    _certifyLog("🔍 البحث عن عنصر #report-status-filter...");
 
-    // ── اختر الخيار "غير مكتملة" ─────────────────────────────────────────────
-    _certifyLog("🔍 اختيار خيار 'التقارير الغير مكتملة'...");
-    const optionClicked = await _certifyPage.evaluate(() => {
-      const candidates = Array.from(document.querySelectorAll(
-        "mat-option, option, li[role='option'], [role='option'], .ng-option, .dropdown-item"
-      ));
-      for (const el of candidates) {
-        const txt = (el.textContent || "").trim();
-        if (txt.includes("غير مكتمل")) {
-          (el as HTMLElement).click();
-          return txt;
-        }
-      }
-      return null;
+    // اكتشف نوع العنصر أولاً
+    const filterTagName: string = await _certifyPage.evaluate(() => {
+      const el = document.querySelector("#report-status-filter, [id='report-status-filter']");
+      return el ? el.tagName.toLowerCase() : "not_found";
     });
+    _certifyLog(`🔎 نوع عنصر الفلتر: ${filterTagName}`);
 
-    if (optionClicked) {
-      _certifyLog(`✅ تم اختيار: "${optionClicked}"`);
-    } else {
-      _certifyLog("⚠️ لم يُعثر على خيار 'غير مكتملة' في القائمة");
+    let filterDone = false;
+
+    // ── الحالة 1: <select> عادي ─────────────────────────────────────────────
+    if (filterTagName === "select") {
+      try {
+        // اقرأ قيمة الخيار المطلوب أولاً
+        const optionValue: string | null = await _certifyPage.evaluate(() => {
+          const sel = document.querySelector("#report-status-filter") as HTMLSelectElement;
+          if (!sel) return null;
+          for (const opt of Array.from(sel.options)) {
+            if (opt.text.includes("غير مكتمل")) return opt.value;
+          }
+          return null;
+        });
+        if (optionValue !== null) {
+          await _certifyPage.selectOption("#report-status-filter", { value: optionValue });
+          _certifyLog(`✅ تم اختيار القيمة "${optionValue}" من <select>`);
+          filterDone = true;
+        } else {
+          _certifyLog("⚠️ لم يُعثر على خيار 'غير مكتمل' داخل <select>");
+        }
+      } catch (e: any) {
+        _certifyLog(`⚠️ selectOption فشل: ${e.message}`);
+      }
     }
+
+    // ── الحالة 2: Angular mat-select أو ng-select ────────────────────────────
+    if (!filterDone) {
+      try {
+        await _certifyPage.click("#report-status-filter", { timeout: 8000 });
+        _certifyLog("✅ نقر على الفلتر (فتح القائمة)");
+        await _certifyPage.waitForTimeout(1500);
+
+        // ابحث عن الخيار في الـ overlay أو داخل العنصر
+        const optClicked: string | null = await _certifyPage.evaluate(() => {
+          const selectors = [
+            "mat-option", "li[role='option']", "[role='option']",
+            ".ng-option", ".dropdown-item", ".select-option",
+          ];
+          for (const sel of selectors) {
+            for (const el of Array.from(document.querySelectorAll(sel))) {
+              const txt = (el.textContent || "").trim();
+              if (txt.includes("غير مكتمل")) {
+                (el as HTMLElement).click();
+                return txt;
+              }
+            }
+          }
+          return null;
+        });
+
+        if (optClicked) {
+          _certifyLog(`✅ تم اختيار: "${optClicked}"`);
+          filterDone = true;
+        } else {
+          // آخر محاولة: Playwright locator بالنص
+          try {
+            await _certifyPage.locator("mat-option, [role='option']")
+              .filter({ hasText: /غير مكتمل/ })
+              .first()
+              .click({ timeout: 5000 });
+            _certifyLog("✅ تم اختيار الخيار عبر Playwright locator");
+            filterDone = true;
+          } catch {
+            _certifyLog("⚠️ لم يُعثر على خيار 'غير مكتملة' في أي من الطرق");
+          }
+        }
+      } catch (e: any) {
+        _certifyLog(`⚠️ فشل النقر على الفلتر: ${e.message}`);
+      }
+    }
+
+    await _certifyPage.waitForTimeout(1000);
 
     // ── انتظر ظهور التقارير في الجدول ────────────────────────────────────────
     _certifyLog("⏳ انتظار ظهور التقارير في الجدول...");
