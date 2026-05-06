@@ -229,6 +229,8 @@ async function startCertifySession(): Promise<void> {
       await _certifyReportPage.goto(firstUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
       _certifyState.openedReport = firstNumber;
       _certifyLog(`✅ تم فتح التقرير ${firstNumber} (1 من ${numbers.length}) في تاب منفصل`);
+      // حدّد checkbox الموافقة على السياسات تلقائياً
+      await _checkPolicyCheckbox(_certifyReportPage);
     } else {
       _certifyLog("⚠️ لم يُعثر على تقارير غير مكتملة في الجدول — ربما الصفحة فارغة أو الفلتر لم ينطبق");
     }
@@ -243,6 +245,58 @@ async function startCertifySession(): Promise<void> {
     if (_certifyCleanup) { try { await _certifyCleanup(); } catch {} _certifyCleanup = null; }
     _certifyPage = null;
     _certifyReportPage = null;
+  }
+}
+
+// ── تحديد checkbox الموافقة على السياسات ───────────────────────────────────
+async function _checkPolicyCheckbox(page: any): Promise<void> {
+  try {
+    // انتظر قليلاً لتحميل الصفحة
+    await page.waitForTimeout(2000);
+
+    // ابحث عن checkbox غير محدد بجانب نص "السياسات"
+    const checked = await page.evaluate(() => {
+      // ابحث عن كل checkbox في الصفحة
+      const checkboxes = Array.from(document.querySelectorAll(
+        "input[type='checkbox'], mat-checkbox, .mat-checkbox"
+      ));
+      for (const cb of checkboxes) {
+        // تحقق من النص المجاور
+        const label = cb.closest("label") ||
+                      document.querySelector(`label[for='${(cb as HTMLInputElement).id}']`) ||
+                      cb.parentElement;
+        const labelText = (label?.textContent || cb.parentElement?.textContent || "").trim();
+        if (labelText.includes("السياسات") || labelText.includes("اللوائح") || labelText.includes("أوافق")) {
+          // إذا لم يكن محدداً، انقر عليه
+          const isChecked = (cb as HTMLInputElement).checked ||
+                            cb.classList.contains("mat-checkbox-checked") ||
+                            cb.getAttribute("aria-checked") === "true";
+          if (!isChecked) {
+            (cb as HTMLElement).click();
+            return `clicked:${labelText.substring(0, 50)}`;
+          }
+          return `already_checked:${labelText.substring(0, 50)}`;
+        }
+      }
+      // آخر محاولة: ابحث عن label يحتوي على النص ثم انقر عليه
+      const labels = Array.from(document.querySelectorAll("label, .checkbox-label, span"));
+      for (const lbl of labels) {
+        const txt = (lbl.textContent || "").trim();
+        if (txt.includes("السياسات") && txt.includes("أوافق")) {
+          (lbl as HTMLElement).click();
+          return `label_clicked:${txt.substring(0, 50)}`;
+        }
+      }
+      return null;
+    });
+
+    if (checked) {
+      _certifyLog(`☑️ Checkbox الموافقة: ${checked}`);
+    } else {
+      _certifyLog("⚠️ لم يُعثر على checkbox الموافقة على السياسات");
+    }
+  } catch (e: any) {
+    _certifyLog(`⚠️ خطأ في تحديد checkbox: ${e.message}`);
   }
 }
 
@@ -262,6 +316,8 @@ async function openCertifyReport(reportNumber: string): Promise<void> {
   const idx = _certifyState.reportNumbers.indexOf(reportNumber);
   if (idx !== -1) _certifyState.currentIndex = idx;
   _certifyLog(`✅ التقرير ${reportNumber} مفتوح (${_certifyState.currentIndex + 1} من ${_certifyState.reportNumbers.length})`);
+  // حدّد checkbox الموافقة تلقائياً
+  await _checkPolicyCheckbox(_certifyReportPage);
 }
 
 async function nextCertifyReport(): Promise<{ reportNumber: string; index: number; total: number } | null> {
