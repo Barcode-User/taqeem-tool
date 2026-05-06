@@ -17,7 +17,7 @@ import {
   logout,
   getAuthenticatedContext,
 } from "../automation/taqeem-session-store";
-import { hasPendingQueue, MAX_CONCURRENT } from "../automation/queue-processor";
+import { hasPendingQueue, MAX_CONCURRENT, processQueue } from "../automation/queue-processor";
 
 const router = Router();
 
@@ -383,29 +383,26 @@ router.post("/automation/retry-bulk", async (req, res) => {
           continue;
         }
 
-        if (canStartNewSession(MAX_CONCURRENT) && results.filter(r => r.status === "started").length === 0) {
-          // أول تقرير — ابدأ مباشرة
-          await updateReport(reportId, { automationStatus: "idle", automationError: null });
-          const sessionId = await startAutomation(reportId);
-          results.push({ id: reportId, status: "started", message: `بدأ الرفع (جلسة: ${sessionId})` });
-        } else {
-          // الباقي في الطابور
-          await updateReport(reportId, { automationStatus: "queued", automationError: null });
-          results.push({ id: reportId, status: "queued", message: "أُضيف للطابور" });
-        }
+        // كل التقارير تذهب للطابور — processQueue ستشغّل الأول فوراً والباقي بالترتيب
+        await updateReport(reportId, { automationStatus: "queued", automationError: null });
+        results.push({ id: reportId, status: "queued", message: "أُضيف للطابور" });
       } catch (err: any) {
         results.push({ id: reportId, status: "error", message: err.message });
       }
     }
 
-    const started = results.filter(r => r.status === "started").length;
     const queued  = results.filter(r => r.status === "queued").length;
     const errors  = results.filter(r => r.status === "error").length;
 
     res.json({
-      message: `تم: ${started} بدأ فوراً، ${queued} في الطابور، ${errors} أخطاء`,
+      message: `تم إضافة ${queued} تقرير للطابور — سيُعالَج واحداً بعد الآخر تلقائياً`,
       results,
     });
+
+    // ابدأ معالجة الطابور في الخلفية (بدون await — لا نعيق الـ response)
+    processQueue().catch(err =>
+      req.log.error({ err }, "processQueue error after retry-bulk")
+    );
   } catch (err: any) {
     req.log.error({ err }, "Failed to retry bulk");
     res.status(500).json({ error: err.message || "Internal server error" });
