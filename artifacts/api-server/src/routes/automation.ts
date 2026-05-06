@@ -359,31 +359,60 @@ async function _approveAndExtract(): Promise<{
   _certifyLog("🖱️ محاولة النقر على زر الاعتماد (input#confirm)...");
   let btnClicked = false;
 
-  const submitSelectors = [
-    "#confirm",
-    "input[name='confirm']",
-    "input[type='submit'][value='اعتماد التقرير']",
-    "input[type='submit']",
-    "button[type='submit']",
-    "button, [role='button']",
-  ];
+  // انتظر قليلاً بعد تحديد checkbox لتمكين الزر
+  await page.waitForTimeout(1500);
 
-  for (const sel of submitSelectors) {
-    try {
-      const loc = page.locator(sel).first();
-      const count = await page.locator(sel).count();
-      if (count > 0) {
-        // scroll into view + wait visible
-        await loc.scrollIntoViewIfNeeded({ timeout: 4000 });
-        await loc.waitFor({ state: "visible", timeout: 5000 });
-        await loc.click({ timeout: 8000 });
-        _certifyLog(`✅ تم النقر على: "${sel}"`);
-        btnClicked = true;
-        break;
-      }
-    } catch (e: any) {
-      _certifyLog(`↪️ ${sel} فشل: ${(e as Error).message?.slice(0, 80)}`);
+  // محاولة 1: force click على #confirm
+  try {
+    const loc = page.locator("#confirm").first();
+    if (await loc.count() > 0) {
+      await loc.scrollIntoViewIfNeeded({ timeout: 3000 });
+      await loc.click({ force: true, timeout: 8000 });
+      _certifyLog("✅ تم النقر على #confirm (force)");
+      btnClicked = true;
     }
+  } catch (e: any) {
+    _certifyLog(`↪️ force click على #confirm فشل: ${(e as Error).message?.slice(0, 100)}`);
+  }
+
+  // محاولة 2: dispatchEvent click عبر evaluate
+  if (!btnClicked) {
+    try {
+      const result = await page.evaluate(() => {
+        const el = document.getElementById("confirm") as HTMLInputElement | null
+          || document.querySelector("input[name='confirm']") as HTMLInputElement | null
+          || document.querySelector("input[type='submit']") as HTMLInputElement | null;
+        if (!el) return "not_found";
+        el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+        return `dispatched:${el.value}`;
+      });
+      _certifyLog(`✅ dispatchEvent: ${result}`);
+      btnClicked = result !== "not_found";
+    } catch (e: any) {
+      _certifyLog(`↪️ dispatchEvent فشل: ${(e as Error).message?.slice(0, 100)}`);
+    }
+  }
+
+  // محاولة 3: إرسال النموذج مباشرة بـ form.submit()
+  if (!btnClicked) {
+    try {
+      const result = await page.evaluate(() => {
+        const btn = document.getElementById("confirm") as HTMLInputElement | null
+          || document.querySelector("input[type='submit']") as HTMLInputElement | null;
+        const form = btn?.form || document.querySelector("form");
+        if (!form) return "no_form";
+        (form as HTMLFormElement).submit();
+        return "form_submitted";
+      });
+      _certifyLog(`✅ form.submit(): ${result}`);
+      btnClicked = result === "form_submitted";
+    } catch (e: any) {
+      _certifyLog(`↪️ form.submit فشل: ${(e as Error).message?.slice(0, 100)}`);
+    }
+  }
+
+  if (!btnClicked) {
+    _certifyLog("❌ فشلت جميع محاولات النقر على زر الاعتماد");
   }
 
   // 2) انتظر ظهور الشهادة (QR أو "شهادة التسجيل")
