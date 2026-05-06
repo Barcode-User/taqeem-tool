@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link } from "wouter";
 import { useListReports } from "@workspace/api-client-react";
 import {
@@ -11,12 +11,24 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { CheckCircle2, Search, FileText, Eye } from "lucide-react";
+import {
+  CheckCircle2, Search, FileText, Eye,
+  PlayCircle, StopCircle, Loader2, AlertCircle, Terminal,
+} from "lucide-react";
 import { format } from "date-fns";
 import { arSA } from "date-fns/locale";
+import { useToast } from "@/hooks/use-toast";
+
+type CertifyStatus = "idle" | "running" | "ready" | "failed";
+type CertifyState = { status: CertifyStatus; error?: string; logs: string[] };
 
 export default function CertifiedReports() {
   const [searchQuery, setSearchQuery] = useState("");
+  const { toast } = useToast();
+  const apiBase = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
+
+  const [certify, setCertify] = useState<CertifyState>({ status: "idle", logs: [] });
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const { data: allReports, isLoading } = useListReports({
     query: { staleTime: 30_000, refetchOnWindowFocus: true },
@@ -38,8 +50,122 @@ export default function CertifiedReports() {
     );
   });
 
+  const fetchCertifyStatus = async () => {
+    try {
+      const resp = await fetch(`${apiBase}/api/automation/certify/status`);
+      if (resp.ok) {
+        const data: CertifyState = await resp.json();
+        setCertify(data);
+        if (data.status === "ready" || data.status === "failed" || data.status === "idle") {
+          if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+        }
+      }
+    } catch {}
+  };
+
+  useEffect(() => {
+    fetchCertifyStatus();
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, []);
+
+  const handleStartCertify = async () => {
+    try {
+      const resp = await fetch(`${apiBase}/api/automation/certify/start`, { method: "POST" });
+      const data = await resp.json();
+      if (resp.ok) {
+        toast({ title: "جارٍ فتح المتصفح...", description: "ستظهر نافذة Chrome تلقائياً" });
+        setCertify({ status: "running", logs: [] });
+        pollRef.current = setInterval(fetchCertifyStatus, 2000);
+      } else {
+        toast({ variant: "destructive", title: "خطأ", description: data.error });
+      }
+    } catch {
+      toast({ variant: "destructive", title: "خطأ في الاتصال", description: "تعذر الاتصال بالخادم" });
+    }
+  };
+
+  const handleStopCertify = async () => {
+    try {
+      await fetch(`${apiBase}/api/automation/certify/stop`, { method: "POST" });
+      setCertify({ status: "idle", logs: [] });
+      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+      toast({ title: "تم إغلاق المتصفح" });
+    } catch {}
+  };
+
+  const isRunning = certify.status === "running";
+  const isReady = certify.status === "ready";
+
   return (
     <div className="space-y-6">
+
+      {/* ─── بطاقة التعميد ─────────────────────────────────────────────────── */}
+      <Card className={`border-2 ${isReady ? "border-emerald-400 shadow-md" : isRunning ? "border-blue-300" : "border-border"}`}>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-3">
+              <div className={`h-9 w-9 rounded-full flex items-center justify-center ${isReady ? "bg-emerald-100" : "bg-slate-100"}`}>
+                <PlayCircle className={`h-5 w-5 ${isReady ? "text-emerald-600" : "text-slate-500"}`} />
+              </div>
+              <div>
+                <CardTitle className="text-base">بداية التعميد</CardTitle>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  {isReady
+                    ? "✅ المتصفح مفتوح — يمكنك التعميد الآن"
+                    : isRunning
+                    ? "جارٍ فتح المتصفح وتحميل الصفحة..."
+                    : certify.status === "failed"
+                    ? "فشل فتح المتصفح"
+                    : "يفتح منصة تقييم بجلسة معمد البيانات ويعرض التقارير"}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {(isRunning || isReady) && (
+                <Button variant="outline" size="sm" onClick={handleStopCertify} className="gap-2 text-red-600 border-red-200 hover:bg-red-50">
+                  <StopCircle className="h-4 w-4" />
+                  إغلاق
+                </Button>
+              )}
+              <Button
+                onClick={handleStartCertify}
+                disabled={isRunning}
+                className={`gap-2 ${isReady ? "bg-emerald-600 hover:bg-emerald-700" : ""}`}
+              >
+                {isRunning ? (
+                  <><Loader2 className="h-4 w-4 animate-spin" /> جارٍ التحميل...</>
+                ) : isReady ? (
+                  <><PlayCircle className="h-4 w-4" /> إعادة الفتح</>
+                ) : (
+                  <><PlayCircle className="h-4 w-4" /> بداية التعميد</>
+                )}
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+
+        {/* خطأ */}
+        {certify.status === "failed" && certify.error && (
+          <CardContent className="pt-0">
+            <div className="rounded-lg bg-red-50 border border-red-200 text-red-800 p-3 text-sm flex items-start gap-2">
+              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+              <span>{certify.error}</span>
+            </div>
+          </CardContent>
+        )}
+
+        {/* سجل العمليات */}
+        {certify.logs.length > 0 && (
+          <CardContent className="pt-0">
+            <div className="rounded-lg bg-slate-950 text-green-400 font-mono text-xs p-3 space-y-0.5 max-h-32 overflow-y-auto" dir="ltr">
+              {certify.logs.map((l, i) => <div key={i}>{l}</div>)}
+            </div>
+          </CardContent>
+        )}
+      </Card>
+
+      {/* ─── قائمة التقارير المعمدة ─────────────────────────────────────────── */}
       <Card>
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
@@ -75,9 +201,7 @@ export default function CertifiedReports() {
 
           {isLoading ? (
             <div className="space-y-3">
-              {[...Array(5)].map((_, i) => (
-                <Skeleton key={i} className="h-12 w-full rounded-md" />
-              ))}
+              {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-12 w-full rounded-md" />)}
             </div>
           ) : filtered?.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-3">
@@ -105,9 +229,7 @@ export default function CertifiedReports() {
                       <TableCell className="font-mono text-sm font-medium text-primary">
                         {report.reportNumber || "—"}
                       </TableCell>
-                      <TableCell className="font-medium">
-                        {report.clientName || "—"}
-                      </TableCell>
+                      <TableCell className="font-medium">{report.clientName || "—"}</TableCell>
                       <TableCell>{report.propertyType || "—"}</TableCell>
                       <TableCell className="text-sm text-muted-foreground">
                         {[report.region, report.city].filter(Boolean).join(" / ") || "—"}
