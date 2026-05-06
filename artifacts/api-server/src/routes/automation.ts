@@ -355,32 +355,34 @@ async function _approveAndExtract(): Promise<{
   });
   _certifyLog(`📋 الأزرار: ${allBtns.join(" | ")}`);
 
-  // 2) انقر زر الاعتماد بـ Playwright native (يعمل مع Angular)
-  _certifyLog("🖱️ محاولة النقر على زر الاعتماد...");
-  const btnTexts = ["إرسال التقرير", "ارسال التقرير", "اعتماد التقرير", "اعتماد", "إرسال", "تأكيد", "Submit"];
+  // 2) انقر زر الاعتماد — input[type=submit]#confirm
+  _certifyLog("🖱️ محاولة النقر على زر الاعتماد (input#confirm)...");
   let btnClicked = false;
 
-  for (const txt of btnTexts) {
+  const submitSelectors = [
+    "#confirm",
+    "input[name='confirm']",
+    "input[type='submit'][value='اعتماد التقرير']",
+    "input[type='submit']",
+    "button[type='submit']",
+    "button, [role='button']",
+  ];
+
+  for (const sel of submitSelectors) {
     try {
-      const loc = page.locator(`button, [role='button']`).filter({ hasText: txt });
-      const count = await loc.count();
+      const loc = page.locator(sel).first();
+      const count = await page.locator(sel).count();
       if (count > 0) {
-        await loc.first().click({ timeout: 8000 });
-        _certifyLog(`✅ تم النقر على: "${txt}"`);
+        // scroll into view + wait visible
+        await loc.scrollIntoViewIfNeeded({ timeout: 4000 });
+        await loc.waitFor({ state: "visible", timeout: 5000 });
+        await loc.click({ timeout: 8000 });
+        _certifyLog(`✅ تم النقر على: "${sel}"`);
         btnClicked = true;
         break;
       }
-    } catch {}
-  }
-
-  if (!btnClicked) {
-    _certifyLog("⚠️ لم يُعثر على زر الاعتماد بالنصوص المعروفة — محاولة بـ regex");
-    try {
-      await page.locator("button").filter({ hasText: /إرسال|اعتماد|ارسال|تأكيد/ }).first().click({ timeout: 8000 });
-      _certifyLog("✅ تم النقر عبر regex");
-      btnClicked = true;
     } catch (e: any) {
-      _certifyLog(`⚠️ فشل النقر: ${e.message}`);
+      _certifyLog(`↪️ ${sel} فشل: ${(e as Error).message?.slice(0, 80)}`);
     }
   }
 
