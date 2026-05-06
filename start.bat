@@ -54,6 +54,14 @@ REM ─── إعدادات عامة ──────────────
 set PORT=8080
 set NODE_ENV=production
 
+REM ─── إيقاف أي خادم قديم على نفس المنفذ ─────────────
+echo [إيقاف] إيقاف أي خادم سابق على المنفذ 8080...
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":8080 " 2^>nul') do (
+    taskkill /F /PID %%a >nul 2>&1
+)
+timeout /t 2 /nobreak >nul
+echo.
+
 REM ─── تثبيت المكتبات ──────────────────────────────────
 echo [build] جاري تثبيت المكتبات...
 call pnpm install --frozen-lockfile 2>nul || call pnpm install
