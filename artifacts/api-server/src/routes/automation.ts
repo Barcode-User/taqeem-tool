@@ -38,7 +38,8 @@ type CertifyState = {
 };
 
 let _certifyState: CertifyState = { status: "idle", logs: [], reportNumbers: [], currentIndex: 0 };
-let _certifyPage: any = null;
+let _certifyPage: any = null;      // صفحة قائمة التقارير
+let _certifyReportPage: any = null; // التاب الثاني للتقرير المفتوح
 let _certifyCleanup: (() => Promise<void>) | null = null;
 
 function _certifyLog(msg: string) {
@@ -54,7 +55,7 @@ async function startCertifySession(): Promise<void> {
   if (_certifyState.status === "running") return;
   if (_certifyCleanup) { try { await _certifyCleanup(); } catch {} _certifyCleanup = null; }
 
-  _certifyState = { status: "running", logs: [], reportNumbers: [] };
+  _certifyState = { status: "running", logs: [], reportNumbers: [], currentIndex: 0 };
   _certifyLog("بدء جلسة التعميد...");
 
   try {
@@ -69,7 +70,8 @@ async function startCertifySession(): Promise<void> {
     _certifyCleanup = session.cleanup;
     const context = session.context;
 
-    _certifyLog("فتح صفحة التقارير...");
+    // ── تاب (1): قائمة التقارير ──────────────────────────────────────────────
+    _certifyLog("📂 فتح صفحة قائمة التقارير...");
     _certifyPage = await context.newPage();
 
     try {
@@ -83,30 +85,89 @@ async function startCertifySession(): Promise<void> {
       return;
     }
 
-    // انتظر تحميل الجدول
-    await _certifyPage.waitForTimeout(3000);
-    _certifyLog(`الصفحة المحملة: ${_certifyPage.url()}`);
+    // ── انتظر 20 ثانية ليكتمل تحميل الصفحة ──────────────────────────────────
+    _certifyLog("⏳ انتظار 20 ثانية لاكتمال تحميل الصفحة...");
+    for (let i = 20; i > 0; i--) {
+      _certifyLog(`⏳ ${i} ثانية...`);
+      await _certifyPage.waitForTimeout(1000);
+    }
+    _certifyLog(`📄 الصفحة: ${_certifyPage.url()}`);
 
-    // استخرج أرقام التقارير من عمود "الرقم" في الجدول
+    // ── اختر "غير مكتملة" من فلتر الحالة ─────────────────────────────────────
+    _certifyLog("🔍 البحث عن فلتر الحالة (غير مكتملة)...");
+    const filterApplied = await _certifyPage.evaluate(() => {
+      // ابحث عن عنصر select/dropdown يحتوي على "غير مكتملة" أو "مكتمل"
+      const selects = Array.from(document.querySelectorAll("select, mat-select, ng-select"));
+      for (const sel of selects) {
+        const opts = Array.from(sel.querySelectorAll("option, mat-option, ng-option"));
+        for (const opt of opts) {
+          if ((opt.textContent || "").includes("غير مكتمل")) {
+            (opt as HTMLElement).click();
+            return `clicked_option:${(opt.textContent || "").trim()}`;
+          }
+        }
+      }
+      // حاول البحث عن زر أو رابط يحمل النص
+      const allClickable = Array.from(document.querySelectorAll("button, a, li, mat-option, [role='option']"));
+      for (const el of allClickable) {
+        if ((el.textContent || "").trim().includes("غير مكتمل")) {
+          (el as HTMLElement).click();
+          return `clicked_text:${(el.textContent || "").trim()}`;
+        }
+      }
+      return "not_found";
+    }).catch(() => "error");
+
+    _certifyLog(`فلتر الحالة: ${filterApplied}`);
+
+    // إذا لم نجد الفلتر مباشرة، حاول النقر على dropdown الحالة أولاً ثم الخيار
+    if (filterApplied === "not_found" || filterApplied === "error") {
+      _certifyLog("⚠️ محاولة فتح dropdown الحالة أولاً...");
+      try {
+        // انقر على أي عنصر يبدو أنه فلتر حالة
+        const clicked = await _certifyPage.evaluate(() => {
+          const triggers = Array.from(document.querySelectorAll(
+            "mat-select, ng-select, select, [placeholder*='حالة'], [placeholder*='الحالة'], [aria-label*='حالة']"
+          ));
+          if (triggers.length > 0) { (triggers[0] as HTMLElement).click(); return true; }
+          return false;
+        });
+        if (clicked) {
+          await _certifyPage.waitForTimeout(1000);
+          // الآن انقر على "غير مكتملة"
+          await _certifyPage.evaluate(() => {
+            const opts = Array.from(document.querySelectorAll(
+              "mat-option, .ng-option, li[role='option'], [role='option']"
+            ));
+            for (const opt of opts) {
+              if ((opt.textContent || "").includes("غير مكتمل")) {
+                (opt as HTMLElement).click();
+                return;
+              }
+            }
+          });
+          _certifyLog("✅ تم اختيار 'غير مكتملة' من القائمة المنسدلة");
+        }
+      } catch {}
+    }
+
+    // انتظر تحديث الجدول بعد الفلتر
+    await _certifyPage.waitForTimeout(3000);
+
+    // ── استخرج أرقام التقارير من الجدول المُفلتر ─────────────────────────────
+    _certifyLog("📋 قراءة أرقام التقارير من الجدول...");
     const numbers: string[] = await _certifyPage.evaluate(() => {
       const results: string[] = [];
-      // ابحث عن روابط تحتوي على أرقام في الجدول
       const links = document.querySelectorAll("table a, td a, .mat-cell a, [class*='cell'] a");
       for (const link of Array.from(links)) {
         const text = (link.textContent || "").trim();
-        // الأرقام المتوقعة من 6-7 خانات
-        if (/^\d{6,8}$/.test(text)) {
-          if (!results.includes(text)) results.push(text);
-        }
+        if (/^\d{6,8}$/.test(text) && !results.includes(text)) results.push(text);
       }
-      // إذا لم نجد روابط، ابحث في الخلايا مباشرة
       if (results.length === 0) {
         const cells = document.querySelectorAll("td, .mat-cell");
         for (const cell of Array.from(cells)) {
           const text = (cell.textContent || "").trim();
-          if (/^\d{6,8}$/.test(text)) {
-            if (!results.includes(text)) results.push(text);
-          }
+          if (/^\d{6,8}$/.test(text) && !results.includes(text)) results.push(text);
         }
       }
       return results;
@@ -116,20 +177,22 @@ async function startCertifySession(): Promise<void> {
     _certifyState.currentIndex = 0;
 
     if (numbers.length > 0) {
-      _certifyLog(`✅ وُجد ${numbers.length} تقرير: ${numbers.slice(0, 5).join(", ")}${numbers.length > 5 ? "..." : ""}`);
-      // فتح التقرير الأول تلقائياً
+      _certifyLog(`✅ وُجد ${numbers.length} تقرير غير مكتمل: ${numbers.slice(0, 5).join(", ")}${numbers.length > 5 ? "..." : ""}`);
+
+      // ── تاب (2): افتح أول تقرير في تاب منفصل (استعراض فقط) ───────────────
       const firstNumber = numbers[0];
       const firstUrl = `${CERTIFY_REPORT_BASE}/${firstNumber}?office=${CERTIFY_OFFICE}`;
-      _certifyLog(`🔗 فتح التقرير الأول تلقائياً: ${firstNumber}`);
-      await _certifyPage.goto(firstUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+      _certifyLog(`🔗 فتح التقرير ${firstNumber} في تاب ثانٍ...`);
+      _certifyReportPage = await context.newPage();
+      await _certifyReportPage.goto(firstUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
       _certifyState.openedReport = firstNumber;
-      _certifyLog(`✅ تم فتح التقرير ${firstNumber} (1 من ${numbers.length})`);
+      _certifyLog(`✅ تم فتح التقرير ${firstNumber} (1 من ${numbers.length}) في تاب منفصل`);
     } else {
-      _certifyLog("⚠️ لم يُعثر على أرقام تقارير في الجدول — ربما الصفحة فارغة أو لم تتحمّل بعد");
+      _certifyLog("⚠️ لم يُعثر على تقارير غير مكتملة في الجدول — ربما الصفحة فارغة أو الفلتر لم ينطبق");
     }
 
     _certifyState.status = "ready";
-    _certifyLog("✅ جاهز — استخدم زر التالي للانتقال للتقرير القادم");
+    _certifyLog("✅ جاهز — التاب الأول: قائمة التقارير | التاب الثاني: التقرير المفتوح");
 
   } catch (err: any) {
     _certifyState.status = "failed";
@@ -137,18 +200,26 @@ async function startCertifySession(): Promise<void> {
     _certifyLog("❌ خطأ: " + err.message);
     if (_certifyCleanup) { try { await _certifyCleanup(); } catch {} _certifyCleanup = null; }
     _certifyPage = null;
+    _certifyReportPage = null;
   }
 }
 
+// يفتح التقرير في التاب الثاني (يبقي التاب الأول على قائمة التقارير)
 async function openCertifyReport(reportNumber: string): Promise<void> {
   if (!_certifyPage) throw new Error("المتصفح غير مفتوح — شغّل بداية التعميد أولاً");
+  const context = _certifyPage.context();
   const url = `${CERTIFY_REPORT_BASE}/${reportNumber}?office=${CERTIFY_OFFICE}`;
-  _certifyLog(`🔗 فتح تقرير رقم ${reportNumber}...`);
-  await _certifyPage.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+  _certifyLog(`🔗 فتح تقرير رقم ${reportNumber} في التاب الثاني...`);
+  // أغلق التاب القديم إن وُجد وافتح واحداً جديداً
+  if (_certifyReportPage) {
+    try { await _certifyReportPage.close(); } catch {}
+  }
+  _certifyReportPage = await context.newPage();
+  await _certifyReportPage.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
   _certifyState.openedReport = reportNumber;
   const idx = _certifyState.reportNumbers.indexOf(reportNumber);
   if (idx !== -1) _certifyState.currentIndex = idx;
-  _certifyLog(`✅ تم فتح التقرير ${reportNumber} (${_certifyState.currentIndex + 1} من ${_certifyState.reportNumbers.length})`);
+  _certifyLog(`✅ التقرير ${reportNumber} مفتوح (${_certifyState.currentIndex + 1} من ${_certifyState.reportNumbers.length})`);
 }
 
 async function nextCertifyReport(): Promise<{ reportNumber: string; index: number; total: number } | null> {
@@ -165,6 +236,7 @@ async function nextCertifyReport(): Promise<{ reportNumber: string; index: numbe
 }
 
 async function stopCertifySession(): Promise<void> {
+  if (_certifyReportPage) { try { await _certifyReportPage.close(); } catch {} _certifyReportPage = null; }
   if (_certifyCleanup) { try { await _certifyCleanup(); } catch {} _certifyCleanup = null; }
   _certifyState = { status: "idle", logs: [], reportNumbers: [], currentIndex: 0 };
   _certifyPage = null;
