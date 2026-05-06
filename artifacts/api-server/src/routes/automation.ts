@@ -33,10 +33,11 @@ type CertifyState = {
   error?: string;
   logs: string[];
   reportNumbers: string[];
+  currentIndex: number;
   openedReport?: string;
 };
 
-let _certifyState: CertifyState = { status: "idle", logs: [], reportNumbers: [] };
+let _certifyState: CertifyState = { status: "idle", logs: [], reportNumbers: [], currentIndex: 0 };
 let _certifyPage: any = null;
 let _certifyCleanup: (() => Promise<void>) | null = null;
 
@@ -112,15 +113,23 @@ async function startCertifySession(): Promise<void> {
     }).catch(() => [] as string[]);
 
     _certifyState.reportNumbers = numbers;
+    _certifyState.currentIndex = 0;
 
     if (numbers.length > 0) {
       _certifyLog(`✅ وُجد ${numbers.length} تقرير: ${numbers.slice(0, 5).join(", ")}${numbers.length > 5 ? "..." : ""}`);
+      // فتح التقرير الأول تلقائياً
+      const firstNumber = numbers[0];
+      const firstUrl = `${CERTIFY_REPORT_BASE}/${firstNumber}?office=${CERTIFY_OFFICE}`;
+      _certifyLog(`🔗 فتح التقرير الأول تلقائياً: ${firstNumber}`);
+      await _certifyPage.goto(firstUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+      _certifyState.openedReport = firstNumber;
+      _certifyLog(`✅ تم فتح التقرير ${firstNumber} (1 من ${numbers.length})`);
     } else {
       _certifyLog("⚠️ لم يُعثر على أرقام تقارير في الجدول — ربما الصفحة فارغة أو لم تتحمّل بعد");
     }
 
     _certifyState.status = "ready";
-    _certifyLog("✅ جاهز — اختر رقم تقرير لفتحه");
+    _certifyLog("✅ جاهز — استخدم زر التالي للانتقال للتقرير القادم");
 
   } catch (err: any) {
     _certifyState.status = "failed";
@@ -132,19 +141,32 @@ async function startCertifySession(): Promise<void> {
 }
 
 async function openCertifyReport(reportNumber: string): Promise<void> {
-  if (!_certifyPage) {
-    throw new Error("المتصفح غير مفتوح — شغّل بداية التعميد أولاً");
-  }
+  if (!_certifyPage) throw new Error("المتصفح غير مفتوح — شغّل بداية التعميد أولاً");
   const url = `${CERTIFY_REPORT_BASE}/${reportNumber}?office=${CERTIFY_OFFICE}`;
-  _certifyLog(`فتح تقرير رقم ${reportNumber}...`);
+  _certifyLog(`🔗 فتح تقرير رقم ${reportNumber}...`);
   await _certifyPage.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
   _certifyState.openedReport = reportNumber;
-  _certifyLog(`✅ تم فتح التقرير ${reportNumber}`);
+  const idx = _certifyState.reportNumbers.indexOf(reportNumber);
+  if (idx !== -1) _certifyState.currentIndex = idx;
+  _certifyLog(`✅ تم فتح التقرير ${reportNumber} (${_certifyState.currentIndex + 1} من ${_certifyState.reportNumbers.length})`);
+}
+
+async function nextCertifyReport(): Promise<{ reportNumber: string; index: number; total: number } | null> {
+  if (!_certifyPage) throw new Error("المتصفح غير مفتوح — شغّل بداية التعميد أولاً");
+  const nextIndex = _certifyState.currentIndex + 1;
+  if (nextIndex >= _certifyState.reportNumbers.length) {
+    _certifyLog("⚠️ لا توجد تقارير إضافية في هذه الصفحة");
+    return null;
+  }
+  const reportNumber = _certifyState.reportNumbers[nextIndex];
+  _certifyState.currentIndex = nextIndex;
+  await openCertifyReport(reportNumber);
+  return { reportNumber, index: nextIndex + 1, total: _certifyState.reportNumbers.length };
 }
 
 async function stopCertifySession(): Promise<void> {
   if (_certifyCleanup) { try { await _certifyCleanup(); } catch {} _certifyCleanup = null; }
-  _certifyState = { status: "idle", logs: [], reportNumbers: [] };
+  _certifyState = { status: "idle", logs: [], reportNumbers: [], currentIndex: 0 };
   _certifyPage = null;
 }
 
@@ -252,6 +274,20 @@ router.post("/automation/certify/open", async (req, res) => {
   try {
     await openCertifyReport(String(reportNumber));
     res.json({ message: `تم فتح التقرير ${reportNumber}` });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/automation/certify/next  — انتقل للتقرير التالي تلقائياً
+router.post("/automation/certify/next", async (_req, res) => {
+  try {
+    const result = await nextCertifyReport();
+    if (!result) {
+      res.json({ done: true, message: "انتهت جميع التقارير في هذه الصفحة" });
+    } else {
+      res.json({ done: false, ...result });
+    }
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
