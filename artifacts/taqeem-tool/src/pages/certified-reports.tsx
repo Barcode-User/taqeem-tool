@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
   CheckCircle2, Search, FileText, Eye,
-  PlayCircle, StopCircle, Loader2, AlertCircle, RefreshCw, ChevronLeft,
+  PlayCircle, StopCircle, Loader2, AlertCircle, RefreshCw, ChevronLeft, Stamp,
 } from "lucide-react";
 import { format } from "date-fns";
 import { arSA } from "date-fns/locale";
@@ -34,6 +34,8 @@ export default function CertifiedReports() {
     status: "idle", logs: [], reportNumbers: [], currentIndex: 0,
   });
   const [loadingNext, setLoadingNext] = useState(false);
+  const [loadingApprove, setLoadingApprove] = useState(false);
+  const [lastApproveResult, setLastApproveResult] = useState<{ dcNumber: string; finalValue: string; reportNumber: string } | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -105,6 +107,25 @@ export default function CertifiedReports() {
       if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
       toast({ title: "تم إغلاق المتصفح" });
     } catch {}
+  };
+
+  const handleApproveReport = async () => {
+    setLoadingApprove(true);
+    try {
+      const resp = await fetch(`${apiBase}/api/automation/certify/approve`, { method: "POST" });
+      const data = await resp.json();
+      if (resp.ok && data.success) {
+        setLastApproveResult({ dcNumber: data.dcNumber, finalValue: data.finalValue, reportNumber: data.reportNumber });
+        toast({ title: "✅ تم اعتماد التقرير وإرسال البيانات", description: `DC: ${data.dcNumber} | القيمة: ${data.finalValue}` });
+        await fetchCertifyStatus();
+      } else {
+        toast({ variant: "destructive", title: "خطأ في الاعتماد", description: data.error });
+      }
+    } catch {
+      toast({ variant: "destructive", title: "خطأ في الاتصال" });
+    } finally {
+      setLoadingApprove(false);
+    }
   };
 
   const handleNextReport = async () => {
@@ -184,6 +205,17 @@ export default function CertifiedReports() {
             </div>
 
             <div className="flex items-center gap-2 flex-wrap">
+              {isReady && certify.openedReport && (
+                <Button
+                  onClick={handleApproveReport}
+                  disabled={loadingApprove}
+                  className="gap-2 font-medium bg-emerald-700 hover:bg-emerald-800 text-white"
+                >
+                  {loadingApprove
+                    ? <><Loader2 className="h-4 w-4 animate-spin" /> جارٍ الاعتماد...</>
+                    : <><Stamp className="h-4 w-4" /> اعتماد التقرير</>}
+                </Button>
+              )}
               {isReady && total > 0 && (
                 <Button
                   onClick={handleNextReport}
