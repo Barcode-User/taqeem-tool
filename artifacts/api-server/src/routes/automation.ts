@@ -339,6 +339,137 @@ async function nextCertifyReport(): Promise<{ reportNumber: string; index: numbe
   return { reportNumber, index: nextIndex + 1, total: _certifyState.reportNumbers.length };
 }
 
+// ── اعتماد التقرير: ضغط الزر + استخراج البيانات + إرسال للـ API ───────────
+async function _approveAndExtract(): Promise<{
+  dcNumber: string; finalValue: string; reportNumber: string; qrBase64: string;
+}> {
+  if (!_certifyReportPage) throw new Error("لا يوجد تقرير مفتوح في التاب الثاني");
+  const page = _certifyReportPage;
+
+  // 1) انقر زر "اعتماد التقرير" أو "إرسال التقرير"
+  _certifyLog("🖱️ البحث عن زر الاعتماد...");
+  const btnClicked = await page.evaluate(() => {
+    const btns = Array.from(document.querySelectorAll("button, [role='button'], input[type='submit']"));
+    for (const btn of btns) {
+      const txt = (btn.textContent || "").trim();
+      if (txt.includes("اعتماد") || txt.includes("إرسال التقرير") || txt.includes("ارسال التقرير")) {
+        (btn as HTMLElement).click();
+        return txt;
+      }
+    }
+    return null;
+  });
+
+  if (btnClicked) {
+    _certifyLog(`✅ تم النقر على: "${btnClicked}"`);
+  } else {
+    _certifyLog("⚠️ لم يُعثر على زر الاعتماد — محاولة بـ Playwright locator");
+    try {
+      await page.locator("button").filter({ hasText: /اعتماد|إرسال التقرير|ارسال/ }).first().click({ timeout: 8000 });
+      _certifyLog("✅ تم النقر عبر Playwright locator");
+    } catch (e: any) {
+      _certifyLog(`⚠️ فشل النقر: ${e.message}`);
+    }
+  }
+
+  // 2) انتظر ظهور الشهادة (QR أو "شهادة التسجيل")
+  _certifyLog("⏳ انتظار ظهور الشهادة والـ QR...");
+  try {
+    await page.waitForFunction(() => {
+      const imgs = Array.from(document.querySelectorAll("img, canvas, svg"));
+      const hasQR = imgs.some(el => {
+        const src = (el as HTMLImageElement).src || "";
+        const cls = el.className || "";
+        return src.includes("qr") || cls.toLowerCase().includes("qr") ||
+               el.closest("[class*='qr']") !== null || el.closest("[id*='qr']") !== null;
+      });
+      const hasCertBtn = Array.from(document.querySelectorAll("button, a")).some(
+        el => (el.textContent || "").includes("شهادة")
+      );
+      return hasQR || hasCertBtn;
+    }, { timeout: 60000 });
+    _certifyLog("✅ ظهرت الشهادة");
+  } catch {
+    _certifyLog("⚠️ لم تظهر الشهادة خلال 60 ثانية — سيُحاوَل استخراج البيانات");
+  }
+  await page.waitForTimeout(2000);
+
+  // 3) استخرج رقم DC والقيمة النهائية من الصفحة
+  _certifyLog("📋 استخراج بيانات الشهادة...");
+  const extracted: { dcNumber: string; finalValue: string } = await page.evaluate(() => {
+    const fullText = document.body.innerText || "";
+    // رقم DC: DC متبوع بأرقام
+    const dcMatch = fullText.match(/DC\d+/i);
+    const dcNumber = dcMatch ? dcMatch[0].toUpperCase() : "";
+    // القيمة النهائية
+    const valMatch = fullText.match(/الر[أا]ي النهائي.*?[:：]\s*([\d,،٬]+)/);
+    const finalValue = valMatch ? valMatch[1].replace(/[,،٬]/g, "") : "";
+    return { dcNumber, finalValue };
+  });
+  _certifyLog(`📌 رقم DC: ${extracted.dcNumber || "(لم يُعثر)"} | القيمة: ${extracted.finalValue || "(لم تُعثر)"}`);
+
+  // 4) قص صورة QR
+  _certifyLog("📸 التقاط صورة QR...");
+  let qrBase64 = "";
+  try {
+    // حاول إيجاد صورة QR
+    const qrElem = await page.$("img[src*='qr'], img[alt*='qr'], img[alt*='QR'], canvas[id*='qr'], [class*='qr'] img, [id*='qr'] img");
+    if (qrElem) {
+      const qrBuf = await qrElem.screenshot({ type: "png" });
+      qrBase64 = qrBuf.toString("base64");
+      _certifyLog(`✅ تم التقاط QR (${qrBase64.length} char)`);
+    } else {
+      // خذ لقطة شاشة للمنطقة السفلية من الصفحة حيث يظهر QR
+      _certifyLog("⚠️ لم يُعثر على عنصر QR محدد — لقطة شاشة للصفحة كاملة");
+      const fullBuf = await page.screenshot({ type: "png", fullPage: false });
+      qrBase64 = fullBuf.toString("base64");
+    }
+  } catch (e: any) {
+    _certifyLog(`⚠️ خطأ في لقطة QR: ${e.message}`);
+  }
+
+  // 5) أرسل للـ API
+  const reportNumber = _certifyState.openedReport ?? "";
+  const submittedAt = new Date().toISOString();
+  _certifyLog("📡 إرسال البيانات لـ QrInformationApi...");
+  try {
+    const { default: nodeFetch, FormData: NodeFormData } = await import("node-fetch") as any;
+    const formData = new NodeFormData();
+    formData.append("reportCode",          extracted.dcNumber);
+    formData.append("taqeemReportNumber",  reportNumber);
+    formData.append("taqeemSubmittedAt",   submittedAt);
+    formData.append("qrCodeBase64",        qrBase64);
+    formData.append("finalValue",          extracted.finalValue);
+
+    const resp = await nodeFetch("http://localhost:8080/External/QrInformationApi", {
+      method: "POST",
+      body: formData,
+    });
+    if (resp.ok) {
+      _certifyLog(`✅ QrInformationApi: ${resp.status} ${resp.statusText}`);
+    } else {
+      const body = await resp.text().catch(() => "");
+      _certifyLog(`⚠️ QrInformationApi: ${resp.status} — ${body.slice(0, 200)}`);
+    }
+  } catch (e: any) {
+    // node-fetch قد لا يكون متاحاً — استخدم fetch المدمج
+    try {
+      const formData = new FormData();
+      formData.append("reportCode",         extracted.dcNumber);
+      formData.append("taqeemReportNumber", reportNumber);
+      formData.append("taqeemSubmittedAt",  submittedAt);
+      formData.append("qrCodeBase64",       qrBase64);
+      formData.append("finalValue",         extracted.finalValue);
+      const resp = await fetch("http://localhost:8080/External/QrInformationApi", { method: "POST", body: formData });
+      _certifyLog(`✅ QrInformationApi (native fetch): ${resp.status}`);
+    } catch (e2: any) {
+      _certifyLog(`⚠️ QrInformationApi فشل: ${e2.message}`);
+    }
+  }
+
+  return { dcNumber: extracted.dcNumber, finalValue: extracted.finalValue, reportNumber, qrBase64 };
+}
+
 async function stopCertifySession(): Promise<void> {
   if (_certifyReportPage) { try { await _certifyReportPage.close(); } catch {} _certifyReportPage = null; }
   if (_certifyCleanup) { try { await _certifyCleanup(); } catch {} _certifyCleanup = null; }
@@ -464,6 +595,16 @@ router.post("/automation/certify/next", async (_req, res) => {
     } else {
       res.json({ done: false, ...result });
     }
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/automation/certify/approve  — اعتماد التقرير الحالي واستخراج البيانات وإرسالها
+router.post("/automation/certify/approve", async (_req, res) => {
+  try {
+    const result = await _approveAndExtract();
+    res.json({ success: true, ...result, qrBase64: result.qrBase64 ? `data:image/png;base64,${result.qrBase64}` : "" });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
