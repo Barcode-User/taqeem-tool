@@ -466,6 +466,71 @@ async function runLoginFlow(role: RoleKey, flow: ActiveLoginFlow, username: stri
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// سياق معزول لدور معيّن (entry أو certifier)
+// ─────────────────────────────────────────────────────────────────────────────
+export async function createIsolatedContextForRole(role: RoleKey): Promise<{
+  context: BrowserContext;
+  cleanup: () => Promise<void>;
+} | null> {
+  const s = roleState[role];
+  const meta = loadMeta(role);
+  if (!meta || !fs.existsSync(s.storageStateFile)) return null;
+
+  const isReplit = !!process.env.REPL_ID || !!process.env.REPLIT_ID;
+  let automationBrowser: Browser;
+  let ownsBrowser = false;
+
+  if (s.sharedBrowser) {
+    automationBrowser = s.sharedBrowser;
+    ownsBrowser = false;
+  } else {
+    const chromiumExec = getChromiumExecutable();
+    let newBrowser: Browser | null = null;
+    if (!isReplit) {
+      try {
+        newBrowser = await chromium.launch({
+          headless: false,
+          channel: "chrome",
+          slowMo: 30,
+          args: ["--disable-blink-features=AutomationControlled", "--no-first-run", "--no-default-browser-check"],
+        });
+      } catch { newBrowser = null; }
+    }
+    if (!newBrowser) {
+      newBrowser = await chromium.launch({
+        headless: isReplit,
+        slowMo: isReplit ? 0 : 80,
+        args: isReplit
+          ? ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
+          : ["--disable-blink-features=AutomationControlled", "--no-first-run"],
+        ...(chromiumExec ? { executablePath: chromiumExec } : {}),
+      });
+    }
+    automationBrowser = newBrowser;
+    ownsBrowser = true;
+  }
+
+  const ctx = await automationBrowser.newContext({
+    locale: "ar-SA",
+    timezoneId: "Asia/Riyadh",
+    viewport: { width: 1280, height: 900 },
+    storageState: s.storageStateFile as any,
+    ...(isReplit ? { userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" } : {}),
+  });
+  await ctx.addInitScript(() => {
+    Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+    (globalThis as any).window ??= {};
+    (globalThis as any).window.chrome = { runtime: {} };
+  });
+
+  const cleanup = async () => {
+    try { await ctx.close(); } catch {}
+    if (ownsBrowser) { try { await automationBrowser.close(); } catch {} }
+  };
+  return { context: ctx, cleanup };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // سياق معزول لعمليات الأتمتة — يستخدم دائماً جلسة مدخل البيانات
 // ─────────────────────────────────────────────────────────────────────────────
 export async function createIsolatedAutomationContext(): Promise<{
