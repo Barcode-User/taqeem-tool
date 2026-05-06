@@ -24,11 +24,20 @@ import { hasPendingQueue, MAX_CONCURRENT, processQueue } from "../automation/que
 // CERTIFY BOT STATE — مدمج مباشرة لتجنب مشاكل الاستيراد على Windows
 // ─────────────────────────────────────────────────────────────────────────────
 const CERTIFY_REPORTS_URL = "https://qima.taqeem.gov.sa/membership/reports/sector/1";
+const CERTIFY_REPORT_BASE = "https://qima.taqeem.gov.sa/report";
+const CERTIFY_OFFICE = "13";
 
 type CertifyStatus = "idle" | "running" | "ready" | "failed";
-type CertifyState = { status: CertifyStatus; error?: string; logs: string[] };
+type CertifyState = {
+  status: CertifyStatus;
+  error?: string;
+  logs: string[];
+  reportNumbers: string[];
+  openedReport?: string;
+};
 
-let _certifyState: CertifyState = { status: "idle", logs: [] };
+let _certifyState: CertifyState = { status: "idle", logs: [], reportNumbers: [] };
+let _certifyPage: any = null;
 let _certifyCleanup: (() => Promise<void>) | null = null;
 
 function _certifyLog(msg: string) {
@@ -44,7 +53,7 @@ async function startCertifySession(): Promise<void> {
   if (_certifyState.status === "running") return;
   if (_certifyCleanup) { try { await _certifyCleanup(); } catch {} _certifyCleanup = null; }
 
-  _certifyState = { status: "running", logs: [] };
+  _certifyState = { status: "running", logs: [], reportNumbers: [] };
   _certifyLog("بدء جلسة التعميد...");
 
   try {
@@ -60,33 +69,83 @@ async function startCertifySession(): Promise<void> {
     const context = session.context;
 
     _certifyLog("فتح صفحة التقارير...");
-    const page = await context.newPage();
+    _certifyPage = await context.newPage();
 
     try {
-      await page.goto(CERTIFY_REPORTS_URL, { waitUntil: "domcontentloaded", timeout: 60000 });
+      await _certifyPage.goto(CERTIFY_REPORTS_URL, { waitUntil: "domcontentloaded", timeout: 60000 });
     } catch (navErr: any) {
       _certifyState.status = "failed";
       _certifyState.error = `لا يمكن الوصول للموقع — تأكد أن الأتمتة تعمل على جهازك المحلي. (${navErr.message})`;
       _certifyLog("❌ " + _certifyState.error);
       if (_certifyCleanup) { try { await _certifyCleanup(); } catch {} _certifyCleanup = null; }
+      _certifyPage = null;
       return;
     }
 
-    await page.waitForTimeout(2000);
-    _certifyLog(`✅ الصفحة جاهزة: ${page.url()}`);
+    // انتظر تحميل الجدول
+    await _certifyPage.waitForTimeout(3000);
+    _certifyLog(`الصفحة المحملة: ${_certifyPage.url()}`);
+
+    // استخرج أرقام التقارير من عمود "الرقم" في الجدول
+    const numbers: string[] = await _certifyPage.evaluate(() => {
+      const results: string[] = [];
+      // ابحث عن روابط تحتوي على أرقام في الجدول
+      const links = document.querySelectorAll("table a, td a, .mat-cell a, [class*='cell'] a");
+      for (const link of Array.from(links)) {
+        const text = (link.textContent || "").trim();
+        // الأرقام المتوقعة من 6-7 خانات
+        if (/^\d{6,8}$/.test(text)) {
+          if (!results.includes(text)) results.push(text);
+        }
+      }
+      // إذا لم نجد روابط، ابحث في الخلايا مباشرة
+      if (results.length === 0) {
+        const cells = document.querySelectorAll("td, .mat-cell");
+        for (const cell of Array.from(cells)) {
+          const text = (cell.textContent || "").trim();
+          if (/^\d{6,8}$/.test(text)) {
+            if (!results.includes(text)) results.push(text);
+          }
+        }
+      }
+      return results;
+    }).catch(() => [] as string[]);
+
+    _certifyState.reportNumbers = numbers;
+
+    if (numbers.length > 0) {
+      _certifyLog(`✅ وُجد ${numbers.length} تقرير: ${numbers.slice(0, 5).join(", ")}${numbers.length > 5 ? "..." : ""}`);
+    } else {
+      _certifyLog("⚠️ لم يُعثر على أرقام تقارير في الجدول — ربما الصفحة فارغة أو لم تتحمّل بعد");
+    }
+
     _certifyState.status = "ready";
+    _certifyLog("✅ جاهز — اختر رقم تقرير لفتحه");
 
   } catch (err: any) {
     _certifyState.status = "failed";
     _certifyState.error = err.message;
     _certifyLog("❌ خطأ: " + err.message);
     if (_certifyCleanup) { try { await _certifyCleanup(); } catch {} _certifyCleanup = null; }
+    _certifyPage = null;
   }
+}
+
+async function openCertifyReport(reportNumber: string): Promise<void> {
+  if (!_certifyPage) {
+    throw new Error("المتصفح غير مفتوح — شغّل بداية التعميد أولاً");
+  }
+  const url = `${CERTIFY_REPORT_BASE}/${reportNumber}?office=${CERTIFY_OFFICE}`;
+  _certifyLog(`فتح تقرير رقم ${reportNumber}...`);
+  await _certifyPage.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+  _certifyState.openedReport = reportNumber;
+  _certifyLog(`✅ تم فتح التقرير ${reportNumber}`);
 }
 
 async function stopCertifySession(): Promise<void> {
   if (_certifyCleanup) { try { await _certifyCleanup(); } catch {} _certifyCleanup = null; }
-  _certifyState = { status: "idle", logs: [] };
+  _certifyState = { status: "idle", logs: [], reportNumbers: [] };
+  _certifyPage = null;
 }
 
 const router = Router();
@@ -181,6 +240,51 @@ router.post("/automation/certify/start", async (_req, res) => {
 router.post("/automation/certify/stop", async (_req, res) => {
   await stopCertifySession();
   res.json({ message: "تم إغلاق جلسة التعميد." });
+});
+
+// POST /api/automation/certify/open  { reportNumber }
+router.post("/automation/certify/open", async (req, res) => {
+  const { reportNumber } = req.body ?? {};
+  if (!reportNumber) {
+    res.status(400).json({ error: "reportNumber مطلوب" });
+    return;
+  }
+  try {
+    await openCertifyReport(String(reportNumber));
+    res.json({ message: `تم فتح التقرير ${reportNumber}` });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/automation/certify/refresh  — إعادة قراءة أرقام التقارير من الصفحة الحالية
+router.post("/automation/certify/refresh", async (_req, res) => {
+  if (!_certifyPage) {
+    res.status(400).json({ error: "المتصفح غير مفتوح" });
+    return;
+  }
+  try {
+    const numbers: string[] = await _certifyPage.evaluate(() => {
+      const results: string[] = [];
+      const links = document.querySelectorAll("table a, td a, .mat-cell a, [class*='cell'] a");
+      for (const link of Array.from(links)) {
+        const text = (link.textContent || "").trim();
+        if (/^\d{6,8}$/.test(text) && !results.includes(text)) results.push(text);
+      }
+      if (results.length === 0) {
+        const cells = document.querySelectorAll("td, .mat-cell");
+        for (const cell of Array.from(cells)) {
+          const text = (cell.textContent || "").trim();
+          if (/^\d{6,8}$/.test(text) && !results.includes(text)) results.push(text);
+        }
+      }
+      return results;
+    }).catch(() => [] as string[]);
+    _certifyState.reportNumbers = numbers;
+    res.json({ reportNumbers: numbers, count: numbers.length });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
