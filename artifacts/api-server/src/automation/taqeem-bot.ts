@@ -3025,108 +3025,132 @@ async function fillUtilitiesCheckboxes(
     return;
   }
 
-  const norm = (s: string) =>
-    s.replace(/[\u064B-\u065F\u0670]/g, "")
-     .replace(/[أإآ]/g, "ا")
-     .replace(/ة/g, "ه")
-     .replace(/ى/g, "ي")
-     .toLowerCase()
-     .replace(/\s+/g, " ").trim();
-
-  const utilsNorm = norm(String(report.utilities));
-  addLog(session, `🔧 المرافق — نص التقرير: "${String(report.utilities).slice(0, 120)}"`);
-
-  const utilMap = [
-    { keywords: /كهرباء|electricity|electric|power|إنارة|انارة|إضاءة|اضاءة|lighting/i, cbText: "كهرباء", label: "كهرباء" },
-    { keywords: /مياه|مياة|ماء|water|drinking/i,                                        cbText: "مياه",    label: "مياه"    },
-    { keywords: /صرف\s*صحي|sewage|sewer/i,                                               cbText: "صرف",     label: "صرف صحي" },
-    { keywords: /غاز|gas/i,                                                               cbText: "غاز",     label: "غاز"     },
-    { keywords: /طرق|رئيسي|road|access|سفلت|اسفلت|رصف|تعبيد|asphalt|pavement/i,        cbText: "طرق",     label: "طرق"     },
-  ];
-
-  const toCheck = utilMap.filter(u => u.keywords.test(utilsNorm));
-  for (const u of utilMap)
-    addLog(session, `  ↪ "${u.label}": ${u.keywords.test(utilsNorm) ? "✔ مطلوب" : "— لا حاجة"}`);
-  if (toCheck.length === 0) { addLog(session, "ℹ️ لا توجد مرافق مطابقة"); return; }
-
   const { page } = session;
+  const utilitiesText = String(report.utilities);
+  addLog(session, `🔧 المرافق — نص التقرير: "${utilitiesText.slice(0, 150)}"`);
 
-  // ── سجّل كل نصوص mat-checkbox الموجودة في DOM الآن (debug) ──────────────
-  const domLabels: string[] = await page.evaluate(() =>
-    Array.from(document.querySelectorAll("mat-checkbox"))
-      .map(el => (el.textContent ?? "").replace(/\s+/g, " ").trim())
-  ).catch(() => []);
-  addLog(session, `🔍 mat-checkboxes في الصفحة (${domLabels.length}): ${domLabels.join(" | ")}`);
+  // ── تحليل DOM ومطابقة ديناميكية داخل المتصفح ────────────────────────────
+  // نمرر نص المرافق كاملاً ونترك المتصفح يطابق كل checkbox بنفسه
+  type CbInfo = { text: string; shouldCheck: boolean; isChecked: boolean };
+  const analysis: CbInfo[] = await page.evaluate((utxt: string) => {
+    function normAr(s: string): string {
+      return (s || "")
+        .replace(/[\u064B-\u065F\u0670\u0640]/g, "")
+        .replace(/[\u0623\u0625\u0622\u0671]/g, "\u0627")
+        .replace(/[\u064A\u0649\u06CC]/g, "\u064A")
+        .replace(/\u0629/g, "\u0647")
+        .replace(/\s+/g, " ").trim().toLowerCase();
+    }
+    function fuzzy(a: string, b: string): boolean {
+      const na = normAr(a), nb = normAr(b);
+      if (na === nb) return true;
+      const sa = na.replace(/^\u0627\u0644/, ""), sb = nb.replace(/^\u0627\u0644/, "");
+      if (sa === sb) return true;
+      if (na.length > 2 && nb.length > 2 && (na.includes(nb) || nb.includes(na))) return true;
+      if (sa.length > 2 && sb.length > 2 && (sa.includes(sb) || sb.includes(sa))) return true;
+      return false;
+    }
 
-  // ── دالة الانتظار حتى يستقر Angular Zone ────────────────────────────────
-  const waitForAngular = async () => {
+    // قسّم نص المرافق إلى عناصر (فاصلة / سطر / و)
+    const items = utxt.split(/[,،\/\n]+/).map((s) => s.trim()).filter(Boolean);
+
+    const results: CbInfo[] = [];
+    const checkboxes = Array.from(document.querySelectorAll("mat-checkbox"));
+    for (const cb of checkboxes) {
+      const text = (cb.textContent ?? "").replace(/\s+/g, " ").trim();
+      if (!text) continue;
+      const inp = cb.querySelector<HTMLInputElement>("input[type='checkbox']");
+      const isChecked = inp ? inp.checked : false;
+      const shouldCheck = items.some((item) => fuzzy(item, text));
+      results.push({ text, shouldCheck, isChecked });
+    }
+    return results;
+  }, utilitiesText).catch(() => [] as CbInfo[]);
+
+  addLog(session,
+    `🔍 mat-checkboxes في الصفحة (${analysis.length}): ${analysis.map(c => c.text).join(" | ")}`
+  );
+
+  const toCheck = analysis.filter(c => c.shouldCheck && !c.isChecked);
+  const alreadyOn = analysis.filter(c => c.shouldCheck && c.isChecked);
+
+  if (alreadyOn.length > 0)
+    addLog(session, `✅ مُفعَّلة مسبقاً: ${alreadyOn.map(c => c.text).join(", ")}`);
+  if (toCheck.length === 0) {
+    addLog(session, "ℹ️ لا توجد مرافق تحتاج تفعيلاً");
+    return;
+  }
+  addLog(session, `🔘 للتفعيل (${toCheck.length}): ${toCheck.map(c => c.text).join(", ")}`);
+
+  // ── انتظار استقرار Angular ─────────────────────────────────────────────
+  const waitStable = async () => {
     await page.waitForFunction(() => {
       const w = window as any;
-      if (typeof w.getAllAngularTestabilities === "function") {
+      if (typeof w.getAllAngularTestabilities === "function")
         return w.getAllAngularTestabilities().every((t: any) => t.isStable());
-      }
-      return true; // إذا لم يكن Angular موجوداً — لا انتظار
+      return true;
     }, { timeout: 3000 }).catch(() => {});
-    // ضمان إضافي: 150ms حتى يُكمل Angular أي async pipes
-    await page.waitForTimeout(150);
+    await page.waitForTimeout(120);
   };
 
-  // ── انقر على كل مرفق مطلوب ──────────────────────────────────────────────
+  // ── تفعيل كل checkbox بالنقر على label (Angular-safe) ───────────────────
   for (const util of toCheck) {
-    const rx = new RegExp(util.cbText, "i");
+    const rx = new RegExp(
+      util.text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").slice(0, 30),
+      "i"
+    );
+    await waitStable();
 
-    // ── انتظر Angular أولاً قبل البحث ──────────────────────────────────────
-    await waitForAngular();
-
-    // ── استهدف mat-checkbox بنص مطابق — lazy re-query بعد كل re-render ─────
     const matCb = page.locator("mat-checkbox").filter({ hasText: rx }).first();
-    const found = await matCb.count().catch(() => 0);
-
-    if (found === 0) {
-      addLog(session, `⚠️ مرفق "${util.label}": mat-checkbox غير موجود في DOM — تجاوز`);
+    if (await matCb.count().catch(() => 0) === 0) {
+      addLog(session, `⚠️ "${util.text}": لم يُعثر عليه — تجاوز`);
       continue;
     }
 
-    // تحقق هل هو مُفعَّل مسبقاً
-    const inp = matCb.locator("input[type='checkbox']");
-    const already = await inp.isChecked().catch(() => false);
-    if (already) {
-      addLog(session, `✅ مرفق "${util.label}": مُفعَّل مسبقاً`);
-      continue;
-    }
-
-    // ── استراتيجية النقر: label داخل mat-checkbox (ما يُطلّق Angular صحيحاً) ─
-    // Angular Material يستمع للـ click على label لا على input المخفي
     let success = false;
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    for (let attempt = 1; attempt <= 3 && !success; attempt++) {
       try {
-        // حاول label أولاً — هذا يُطلّق Angular change detection بشكل صحيح
+        // محاولة 1: نقر label (Angular-safe)
         const lbl = matCb.locator("label").first();
-        const lblCount = await lbl.count().catch(() => 0);
-        if (lblCount > 0) {
+        if (await lbl.count().catch(() => 0) > 0) {
+          await lbl.scrollIntoViewIfNeeded().catch(() => {});
           await lbl.click({ timeout: 2000 });
         } else {
-          // إذا لم يوجد label: انقر mat-checkbox نفسه
+          await matCb.scrollIntoViewIfNeeded().catch(() => {});
           await matCb.click({ timeout: 2000 });
         }
-
-        // انتظر Angular Zone يستقر
-        await waitForAngular();
-
-        success = await inp.isChecked().catch(() => false);
-        if (success) break;
-
-        addLog(session, `⏳ إعادة محاولة "${util.label}" (${attempt}/3) — لم يتفعل بعد`);
-        await page.waitForTimeout(200);
-      } catch (e: any) {
-        addLog(session, `⚠️ "${util.label}": click فشل (${attempt}/3) — ${e.message?.slice(0, 60)}`);
-        await page.waitForTimeout(200);
+        await waitStable();
+        success = await matCb.locator("input[type='checkbox']").isChecked().catch(() => false);
+      } catch {
+        // محاولة 2: dispatchEvent مباشرة على input
+        try {
+          await page.evaluate((txt: string) => {
+            function normAr(s: string) {
+              return (s||"").replace(/[\u064B-\u065F\u0670\u0640]/g,"")
+                .replace(/[\u0623\u0625\u0622\u0671]/g,"\u0627")
+                .replace(/[\u064A\u0649]/g,"\u064A")
+                .replace(/\u0629/g,"\u0647")
+                .replace(/\s+/g," ").trim().toLowerCase();
+            }
+            const nt = normAr(txt);
+            const cbs = Array.from(document.querySelectorAll("mat-checkbox"));
+            const cb = cbs.find(c => normAr((c.textContent||"").replace(/\s+/g," ").trim()).includes(nt.slice(0,8)));
+            const inp = cb?.querySelector<HTMLInputElement>("input[type='checkbox']");
+            if (inp && !inp.checked) {
+              inp.click();
+              inp.dispatchEvent(new Event("change", { bubbles: true }));
+            }
+          }, util.text);
+          await waitStable();
+          success = await matCb.locator("input[type='checkbox']").isChecked().catch(() => false);
+        } catch { /* تجاوز */ }
       }
+      if (!success && attempt < 3) await page.waitForTimeout(300);
     }
 
     addLog(session, success
-      ? `✅ مرفق "${util.label}": تم تفعيله`
-      : `❌ مرفق "${util.label}": فشل التفعيل — قد يكون معطلاً في الصفحة`);
+      ? `✅ "${util.text}": تم تفعيله`
+      : `❌ "${util.text}": فشل التفعيل`);
   }
 
   await page.waitForTimeout(200);
