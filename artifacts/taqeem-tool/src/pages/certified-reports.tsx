@@ -1,19 +1,15 @@
 import { useState, useEffect, useRef } from "react";
 import { Link } from "wouter";
 import { useListReports } from "@workspace/api-client-react";
-import {
-  Card, CardContent, CardHeader, CardTitle,
-} from "@/components/ui/card";
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from "@/components/ui/table";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
   CheckCircle2, Search, FileText, Eye,
-  PlayCircle, StopCircle, Loader2, AlertCircle, RefreshCw, ExternalLink,
+  PlayCircle, StopCircle, Loader2, AlertCircle, RefreshCw, ChevronLeft,
 } from "lucide-react";
 import { format } from "date-fns";
 import { arSA } from "date-fns/locale";
@@ -25,6 +21,7 @@ type CertifyState = {
   error?: string;
   logs: string[];
   reportNumbers: string[];
+  currentIndex: number;
   openedReport?: string;
 };
 
@@ -34,9 +31,9 @@ export default function CertifiedReports() {
   const apiBase = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
 
   const [certify, setCertify] = useState<CertifyState>({
-    status: "idle", logs: [], reportNumbers: [],
+    status: "idle", logs: [], reportNumbers: [], currentIndex: 0,
   });
-  const [openingReport, setOpeningReport] = useState<string | null>(null);
+  const [loadingNext, setLoadingNext] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -44,10 +41,7 @@ export default function CertifiedReports() {
     query: { staleTime: 30_000, refetchOnWindowFocus: true },
   });
 
-  const reports = allReports?.filter(
-    (r) => (r as any).automationStatus === "completed",
-  );
-
+  const reports = allReports?.filter((r) => (r as any).automationStatus === "completed");
   const filtered = reports?.filter((r) => {
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
@@ -88,14 +82,13 @@ export default function CertifiedReports() {
       const text = await resp.text();
       let data: any = {};
       try { data = JSON.parse(text); } catch {}
-
       if (resp.status === 404) {
         toast({ variant: "destructive", title: "الخادم قديم", description: "نفّذ start.bat لتحديث الخادم" });
         return;
       }
       if (resp.ok) {
-        toast({ title: "جارٍ فتح المتصفح...", description: "ستظهر نافذة Chrome تلقائياً" });
-        setCertify({ status: "running", logs: [], reportNumbers: [] });
+        toast({ title: "جارٍ فتح المتصفح...", description: "الروبوت يقرأ التقارير ويفتح الأول تلقائياً" });
+        setCertify({ status: "running", logs: [], reportNumbers: [], currentIndex: 0 });
         pollRef.current = setInterval(fetchCertifyStatus, 2000);
       } else {
         toast({ variant: "destructive", title: "خطأ", description: data.error ?? text });
@@ -108,10 +101,32 @@ export default function CertifiedReports() {
   const handleStopCertify = async () => {
     try {
       await fetch(`${apiBase}/api/automation/certify/stop`, { method: "POST" });
-      setCertify({ status: "idle", logs: [], reportNumbers: [] });
+      setCertify({ status: "idle", logs: [], reportNumbers: [], currentIndex: 0 });
       if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
       toast({ title: "تم إغلاق المتصفح" });
     } catch {}
+  };
+
+  const handleNextReport = async () => {
+    setLoadingNext(true);
+    try {
+      const resp = await fetch(`${apiBase}/api/automation/certify/next`, { method: "POST" });
+      const data = await resp.json();
+      if (resp.ok) {
+        if (data.done) {
+          toast({ title: "✅ انتهت جميع التقارير", description: "لا توجد تقارير إضافية في هذه الصفحة" });
+        } else {
+          toast({ title: `📄 تم فتح التقرير ${data.reportNumber}`, description: `${data.index} من ${data.total}` });
+          setCertify(prev => ({ ...prev, openedReport: data.reportNumber, currentIndex: data.index - 1 }));
+        }
+      } else {
+        toast({ variant: "destructive", title: "خطأ", description: data.error });
+      }
+    } catch {
+      toast({ variant: "destructive", title: "خطأ في الاتصال" });
+    } finally {
+      setLoadingNext(false);
+    }
   };
 
   const handleRefreshNumbers = async () => {
@@ -120,40 +135,26 @@ export default function CertifiedReports() {
       const resp = await fetch(`${apiBase}/api/automation/certify/refresh`, { method: "POST" });
       if (resp.ok) {
         const data = await resp.json();
-        setCertify(prev => ({ ...prev, reportNumbers: data.reportNumbers }));
-        toast({ title: `تم التحديث`, description: `${data.count} تقرير في الصفحة` });
+        setCertify(prev => ({ ...prev, reportNumbers: data.reportNumbers, currentIndex: 0 }));
+        toast({ title: "تم التحديث", description: `${data.count} تقرير — سيفتح الروبوت الأول` });
+        // افتح التقرير الأول من القائمة الجديدة تلقائياً
+        if (data.reportNumbers?.length > 0) {
+          await fetch(`${apiBase}/api/automation/certify/open`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ reportNumber: data.reportNumbers[0] }),
+          });
+          setCertify(prev => ({ ...prev, openedReport: data.reportNumbers[0] }));
+        }
       }
-    } catch {
-      toast({ variant: "destructive", title: "خطأ في التحديث" });
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
-  const handleOpenReport = async (reportNumber: string) => {
-    setOpeningReport(reportNumber);
-    try {
-      const resp = await fetch(`${apiBase}/api/automation/certify/open`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reportNumber }),
-      });
-      const data = await resp.json();
-      if (resp.ok) {
-        setCertify(prev => ({ ...prev, openedReport: reportNumber }));
-        toast({ title: `✅ تم فتح التقرير ${reportNumber}`, description: "انظر نافذة المتصفح" });
-      } else {
-        toast({ variant: "destructive", title: "خطأ", description: data.error });
-      }
-    } catch {
-      toast({ variant: "destructive", title: "خطأ في الاتصال" });
-    } finally {
-      setOpeningReport(null);
-    }
+    } catch {} finally { setRefreshing(false); }
   };
 
   const isRunning = certify.status === "running";
   const isReady = certify.status === "ready";
+  const total = certify.reportNumbers.length;
+  const current = certify.currentIndex + 1;
+  const hasNext = certify.currentIndex < total - 1;
 
   return (
     <div className="space-y-6">
@@ -167,24 +168,40 @@ export default function CertifiedReports() {
                 <PlayCircle className={`h-5 w-5 ${isReady ? "text-emerald-600" : "text-slate-500"}`} />
               </div>
               <div>
-                <CardTitle className="text-base">بداية التعميد</CardTitle>
+                <CardTitle className="text-base">التعميد التلقائي</CardTitle>
                 <p className="text-sm text-muted-foreground mt-0.5">
-                  {isReady
-                    ? `✅ المتصفح مفتوح — ${certify.reportNumbers.length > 0 ? `${certify.reportNumbers.length} تقرير متاح` : "لا توجد تقارير في الصفحة"}`
-                    : isRunning
+                  {isRunning
                     ? "جارٍ فتح المتصفح وقراءة التقارير..."
+                    : isReady && total > 0
+                    ? `التقرير ${current} من ${total} — رقم ${certify.openedReport ?? "—"}`
+                    : isReady
+                    ? "لا توجد تقارير في الصفحة"
                     : certify.status === "failed"
                     ? "فشل فتح المتصفح"
-                    : "يفتح منصة تقييم بجلسة معمد البيانات ويعرض التقارير"}
+                    : "يفتح منصة تقييم ويعمّد التقارير تلقائياً"}
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              {isReady && total > 0 && (
+                <Button
+                  onClick={handleNextReport}
+                  disabled={loadingNext || !hasNext}
+                  variant="outline"
+                  className="gap-2 font-medium"
+                >
+                  {loadingNext
+                    ? <><Loader2 className="h-4 w-4 animate-spin" /> جارٍ الفتح...</>
+                    : hasNext
+                    ? <><ChevronLeft className="h-4 w-4" /> التقرير التالي ({current + 1}/{total})</>
+                    : "✅ آخر تقرير"}
+                </Button>
+              )}
               {isReady && (
                 <Button variant="outline" size="sm" onClick={handleRefreshNumbers} disabled={refreshing} className="gap-2">
                   <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
-                  تحديث الأرقام
+                  تحديث القائمة
                 </Button>
               )}
               {(isRunning || isReady) && (
@@ -193,53 +210,39 @@ export default function CertifiedReports() {
                   إغلاق
                 </Button>
               )}
-              <Button
-                onClick={handleStartCertify}
-                disabled={isRunning}
-                className={`gap-2 ${isReady ? "bg-emerald-600 hover:bg-emerald-700" : ""}`}
-              >
-                {isRunning ? (
-                  <><Loader2 className="h-4 w-4 animate-spin" /> جارٍ التحميل...</>
-                ) : isReady ? (
-                  <><PlayCircle className="h-4 w-4" /> إعادة الفتح</>
-                ) : (
-                  <><PlayCircle className="h-4 w-4" /> بداية التعميد</>
-                )}
+              <Button onClick={handleStartCertify} disabled={isRunning} className="gap-2">
+                {isRunning
+                  ? <><Loader2 className="h-4 w-4 animate-spin" /> جارٍ التحميل...</>
+                  : <><PlayCircle className="h-4 w-4" /> بداية التعميد</>}
               </Button>
             </div>
           </div>
         </CardHeader>
 
-        {/* أرقام التقارير من منصة تقييم */}
-        {isReady && certify.reportNumbers.length > 0 && (
+        {/* شريط تقدم التقارير */}
+        {isReady && total > 0 && (
           <CardContent className="pt-0">
-            <div className="rounded-lg border bg-muted/30 p-3">
-              <p className="text-xs text-muted-foreground mb-2 font-medium">
-                أرقام التقارير في منصة تقييم — اضغط على الرقم لفتح التقرير في المتصفح:
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {certify.reportNumbers.map((num) => (
-                  <Button
-                    key={num}
-                    variant={certify.openedReport === num ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => handleOpenReport(num)}
-                    disabled={openingReport === num}
-                    className={`gap-1.5 font-mono text-sm h-8 ${
-                      certify.openedReport === num
-                        ? "bg-emerald-600 hover:bg-emerald-700"
-                        : "hover:bg-primary hover:text-primary-foreground"
-                    }`}
-                  >
-                    {openingReport === num ? (
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                    ) : (
-                      <ExternalLink className="h-3 w-3" />
-                    )}
-                    {num}
-                  </Button>
-                ))}
+            <div className="flex items-center gap-3">
+              <div className="flex-1 bg-muted rounded-full h-2">
+                <div
+                  className="bg-emerald-500 h-2 rounded-full transition-all duration-500"
+                  style={{ width: `${(current / total) * 100}%` }}
+                />
               </div>
+              <span className="text-xs text-muted-foreground whitespace-nowrap">
+                {current} / {total}
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {certify.reportNumbers.map((num, idx) => (
+                <Badge
+                  key={num}
+                  variant={idx === certify.currentIndex ? "default" : idx < certify.currentIndex ? "secondary" : "outline"}
+                  className={`font-mono text-xs ${idx === certify.currentIndex ? "bg-emerald-600" : idx < certify.currentIndex ? "opacity-50" : ""}`}
+                >
+                  {num}
+                </Badge>
+              ))}
             </div>
           </CardContent>
         )}
@@ -274,9 +277,7 @@ export default function CertifiedReports() {
               </div>
               <div>
                 <CardTitle className="text-lg">التقارير المعمدة</CardTitle>
-                <p className="text-sm text-muted-foreground mt-0.5">
-                  التقارير المرفوعة بنجاح على منصة تقييم
-                </p>
+                <p className="text-sm text-muted-foreground mt-0.5">التقارير المرفوعة بنجاح على منصة تقييم</p>
               </div>
             </div>
             <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 text-sm px-3 py-1">
@@ -334,14 +335,10 @@ export default function CertifiedReports() {
                         {[report.region, report.city].filter(Boolean).join(" / ") || "—"}
                       </TableCell>
                       <TableCell className="font-medium text-emerald-700">
-                        {report.finalValue
-                          ? Number(report.finalValue).toLocaleString("ar-SA") + " ر.س"
-                          : "—"}
+                        {report.finalValue ? Number(report.finalValue).toLocaleString("ar-SA") + " ر.س" : "—"}
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
-                        {report.reportDate
-                          ? format(new Date(report.reportDate), "d MMM yyyy", { locale: arSA })
-                          : "—"}
+                        {report.reportDate ? format(new Date(report.reportDate), "d MMM yyyy", { locale: arSA }) : "—"}
                       </TableCell>
                       <TableCell>
                         <Link href={`/reports/${report.id}`}>
