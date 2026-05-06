@@ -42,6 +42,7 @@ function CertifierRouter() {
       <Switch>
         <Route path="/" component={CertifiedReports} />
         <Route path="/reports/:id" component={ReportDetails} />
+        <Route path="/taqeem-session" component={TaqeemSessionPage} />
         <Route component={NotFound} />
       </Switch>
     </Layout>
