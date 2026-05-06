@@ -2444,24 +2444,62 @@ async function fillAssetPage(
     addLog(session, `⚠️ fillValueByMethodLabel (دخل): ${e.message}`);
   }
 
-  // ── تحقق نهائي من المنطقة قبل الحفظ ──────────────────────────────────────
-  // إذا فشل اختيار المنطقة في الـ retry أعلاه، نُعيد المحاولة مرة أخيرة هنا
+  // ── تحقق نهائي من المنطقة والمدينة قبل الحفظ ─────────────────────────────
+  // fillApproachFields تُطلق Angular cascade وقد تُفرّغ المدينة/المنطقة
+  // نُعيد التحقق والتعبئة هنا بعد كل عمليات الأساليب
+
+  // أ) المنطقة
   if (regionEl && report.region) {
     const regionSel = buildSelector(regionEl);
-    const finalVal = await getRegionVal(regionSel);
-    if (!finalVal || finalVal === "" || finalVal === "null") {
-      addLog(session, `⚠️ المنطقة غير محددة قبل الحفظ — محاولة أخيرة...`);
-      await session.page.waitForTimeout(500);
+    const finalRegion = await getRegionVal(regionSel);
+    if (!finalRegion || finalRegion === "" || finalRegion === "null") {
+      addLog(session, `⚠️ المنطقة فُرّغت بعد الأساليب — إعادة اختيار...`);
       await (regionEl.isMat
-        ? selectAngular(session, regionSel, report.region, "المنطقة (أخيرة)", true)
-        : selectNativeByName(session, regionEl.name || "", report.region, "المنطقة (أخيرة)"));
-      await session.page.waitForTimeout(400);
-      const retryVal = await getRegionVal(regionSel);
-      addLog(session, retryVal && retryVal !== "" && retryVal !== "null"
-        ? `✅ المنطقة محددة في المحاولة الأخيرة: "${retryVal}"`
-        : `❌ المنطقة لا تزال غير محددة — سيفشل الحفظ إذا كانت إلزامية`);
+        ? selectAngular(session, regionSel, report.region, "المنطقة (استعادة)", true)
+        : selectNativeByName(session, regionEl.name || "", report.region, "المنطقة (استعادة)"));
+      // انتظر cascade تحميل المدن
+      await waitForCityOptions(session.page, null);
+      const retryRegion = await getRegionVal(regionSel);
+      addLog(session, retryRegion && retryRegion !== "" && retryRegion !== "null"
+        ? `✅ المنطقة استُعيدت: "${retryRegion}"`
+        : `❌ المنطقة لا تزال فارغة — سيفشل الحفظ`);
     } else {
-      addLog(session, `✅ التحقق النهائي من المنطقة: "${finalVal}" ✓`);
+      addLog(session, `✅ التحقق النهائي من المنطقة: "${finalRegion}" ✓`);
+    }
+  }
+
+  // ب) المدينة — قد تُفرَّغ عند تغيير المنطقة أو عند تعبئة الأساليب
+  if (cityEl && report.city) {
+    const citySel = buildSelector(cityEl);
+    const finalCity = await session.page.evaluate((sel: string) => {
+      const el = document.querySelector<HTMLSelectElement>(sel);
+      if (!el) return "";
+      if (el.tagName === "SELECT") return el.value || "";
+      return el.getAttribute("ng-reflect-value") ||
+        el.querySelector(".mat-mdc-select-value-text span,.mat-select-value-text span")?.textContent?.trim() || "";
+    }, citySel).catch(() => "");
+
+    if (!finalCity || finalCity === "" || finalCity === "null") {
+      addLog(session, `⚠️ المدينة فُرّغت بعد الأساليب — إعادة اختيار...`);
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        await (cityEl.isMat
+          ? selectAngular(session, citySel, report.city, "المدينة (استعادة)", true)
+          : selectNativeByName(session, cityEl.name || "", report.city, "المدينة (استعادة)"));
+        const retryCity = await session.page.evaluate((sel: string) => {
+          const el = document.querySelector<HTMLSelectElement>(sel);
+          if (!el) return "";
+          if (el.tagName === "SELECT") return el.value || "";
+          return el.getAttribute("ng-reflect-value") ||
+            el.querySelector(".mat-mdc-select-value-text span,.mat-select-value-text span")?.textContent?.trim() || "";
+        }, citySel).catch(() => "");
+        if (retryCity && retryCity !== "" && retryCity !== "null") {
+          addLog(session, `✅ المدينة استُعيدت (محاولة ${attempt}): "${retryCity}"`);
+          break;
+        }
+        if (attempt < 3) await session.page.waitForTimeout(400);
+      }
+    } else {
+      addLog(session, `✅ التحقق النهائي من المدينة: "${finalCity}" ✓`);
     }
   }
 }
