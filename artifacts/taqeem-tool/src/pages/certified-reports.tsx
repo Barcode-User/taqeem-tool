@@ -205,7 +205,7 @@ export default function CertifiedReports() {
             </div>
 
             <div className="flex items-center gap-2 flex-wrap">
-              {isReady && certify.openedReport && (
+              {isReady && (
                 <Button
                   onClick={handleApproveReport}
                   disabled={loadingApprove}
