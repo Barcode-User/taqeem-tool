@@ -17,6 +17,11 @@ import {
   logout,
   getAuthenticatedContext,
 } from "../automation/taqeem-session-store";
+import {
+  startCertifySession,
+  stopCertifySession,
+  getCertifyStatus,
+} from "../automation/certify-bot";
 import { hasPendingQueue, MAX_CONCURRENT, processQueue } from "../automation/queue-processor";
 
 const router = Router();
@@ -84,6 +89,33 @@ router.post("/automation/logout", async (req, res) => {
   const role = req.body?.role === "certifier" ? "certifier" : "entry";
   await logout(role);
   res.json({ message: "تم تسجيل الخروج وحذف الجلسة." });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CERTIFY BOT — يُستخدم من قِبَل معمد البيانات
+// ─────────────────────────────────────────────────────────────────────────────
+
+// GET /api/automation/certify/status
+router.get("/automation/certify/status", (_req, res) => {
+  res.json(getCertifyStatus());
+});
+
+// POST /api/automation/certify/start
+router.post("/automation/certify/start", async (_req, res) => {
+  try {
+    startCertifySession().catch(err =>
+      console.error("[certify-start] unexpected error:", err)
+    );
+    res.json({ message: "جارٍ فتح المتصفح وتحميل صفحة التقارير..." });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/automation/certify/stop
+router.post("/automation/certify/stop", async (_req, res) => {
+  await stopCertifySession();
+  res.json({ message: "تم إغلاق جلسة التعميد." });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
