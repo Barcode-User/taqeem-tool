@@ -85,18 +85,23 @@ async function startCertifySession(): Promise<void> {
       return;
     }
 
-    // ── انتظر 30 ثانية ليكتمل تحميل الصفحة ──────────────────────────────────
-    _certifyLog("⏳ انتظار 30 ثانية لاكتمال تحميل الصفحة...");
-    for (let i = 30; i > 0; i--) {
-      _certifyLog(`⏳ ${i} ثانية...`);
-      await _certifyPage.waitForTimeout(1000);
-    }
     _certifyLog(`📄 الصفحة: ${_certifyPage.url()}`);
 
-    // ── اختر "تقارير بانتظار الاعتماد" من فلتر report-status-filter ─────────
-    _certifyLog("🔍 البحث عن عنصر #report-status-filter...");
+    // ── انتظر ظهور عنصر الفلتر أولاً ────────────────────────────────────────
+    _certifyLog("⏳ انتظار تحميل عنصر الفلتر...");
+    try {
+      await _certifyPage.waitForSelector(
+        "#report-status-filter, [id='report-status-filter']",
+        { timeout: 60000 }
+      );
+      _certifyLog("✅ عنصر الفلتر جاهز");
+    } catch {
+      _certifyLog("⚠️ لم يظهر عنصر الفلتر خلال 60 ثانية — محاولة المتابعة");
+    }
 
-    // اكتشف نوع العنصر أولاً
+    // ── اكتشف نوع العنصر وطبّق الفلتر ───────────────────────────────────────
+    _certifyLog("🔍 تطبيق فلتر 'تقارير بإنتظار الإعتماد'...");
+
     const filterTagName: string = await _certifyPage.evaluate(() => {
       const el = document.querySelector("#report-status-filter, [id='report-status-filter']");
       return el ? el.tagName.toLowerCase() : "not_found";
@@ -105,19 +110,9 @@ async function startCertifySession(): Promise<void> {
 
     let filterDone = false;
 
-    // دالة مطابقة مرنة تتجاهل اختلاف الهمزة (إنتظار / انتظار / إعتماد / اعتماد)
-    function _matchWaiting(txt: string): boolean {
-      // نزيل الهمزات ونحوّل إلى حروف موحدة للمقارنة
-      const normalized = txt
-        .replace(/[أإآا]/g, "ا")
-        .replace(/[ةه]/g, "ه");
-      return normalized.includes("نتظار") && normalized.includes("عتماد");
-    }
-
     // ── الحالة 1: <select> عادي ─────────────────────────────────────────────
     if (filterTagName === "select") {
       try {
-        // سجّل جميع الخيارات المتاحة أولاً
         const allOptions: string[] = await _certifyPage.evaluate(() => {
           const sel = document.querySelector("#report-status-filter") as HTMLSelectElement;
           if (!sel) return [];
@@ -136,7 +131,7 @@ async function startCertifySession(): Promise<void> {
         });
         if (optionValue !== null) {
           await _certifyPage.selectOption("#report-status-filter", { value: optionValue });
-          _certifyLog(`✅ تم اختيار القيمة "${optionValue}" من <select>`);
+          _certifyLog(`✅ تم تطبيق الفلتر (قيمة: "${optionValue}")`);
           filterDone = true;
         } else {
           _certifyLog("⚠️ لم يُعثر على خيار 'بانتظار الاعتماد' داخل <select>");
@@ -149,15 +144,13 @@ async function startCertifySession(): Promise<void> {
     // ── الحالة 2: Angular mat-select أو ng-select ────────────────────────────
     if (!filterDone) {
       try {
-        await _certifyPage.click("#report-status-filter", { timeout: 8000 });
-        _certifyLog("✅ نقر على الفلتر (فتح القائمة)");
+        await _certifyPage.click("#report-status-filter", { timeout: 10000 });
+        _certifyLog("✅ نقر على الفلتر — انتظار ظهور القائمة...");
         await _certifyPage.waitForTimeout(1500);
 
-        // سجّل جميع الخيارات المرئية في الـ overlay
         const allOverlayOpts: string[] = await _certifyPage.evaluate(() => {
-          const selectors = ["mat-option", "li[role='option']", "[role='option']", ".ng-option"];
           const found: string[] = [];
-          for (const sel of selectors) {
+          for (const sel of ["mat-option", "li[role='option']", "[role='option']", ".ng-option"]) {
             for (const el of Array.from(document.querySelectorAll(sel))) {
               const t = (el.textContent || "").trim();
               if (t) found.push(t);
@@ -166,13 +159,11 @@ async function startCertifySession(): Promise<void> {
           return found;
         });
         if (allOverlayOpts.length > 0) {
-          _certifyLog(`📋 خيارات الـ overlay: ${allOverlayOpts.join(" | ")}`);
+          _certifyLog(`📋 خيارات القائمة: ${allOverlayOpts.join(" | ")}`);
         }
 
-        // ابحث عن الخيار مع تطبيع الهمزة
         const optClicked: string | null = await _certifyPage.evaluate(() => {
-          const selectors = ["mat-option", "li[role='option']", "[role='option']", ".ng-option", ".dropdown-item"];
-          for (const sel of selectors) {
+          for (const sel of ["mat-option", "li[role='option']", "[role='option']", ".ng-option", ".dropdown-item"]) {
             for (const el of Array.from(document.querySelectorAll(sel))) {
               const txt = (el.textContent || "").trim();
               const n = txt.replace(/[أإآا]/g, "ا").replace(/[ةه]/g, "ه");
@@ -189,32 +180,26 @@ async function startCertifySession(): Promise<void> {
           _certifyLog(`✅ تم اختيار: "${optClicked}"`);
           filterDone = true;
         } else {
-          _certifyLog("⚠️ لم يُعثر على خيار 'بانتظار الاعتماد' بعد فتح القائمة");
+          _certifyLog("⚠️ لم يُعثر على الخيار المطلوب في القائمة");
         }
       } catch (e: any) {
-        _certifyLog(`⚠️ فشل النقر على الفلتر: ${e.message}`);
+        _certifyLog(`⚠️ فشل تطبيق الفلتر: ${e.message}`);
       }
     }
 
-    await _certifyPage.waitForTimeout(1000);
-
-    // ── انتظر ظهور التقارير في الجدول ────────────────────────────────────────
+    // ── انتظر ظهور بيانات الجدول بعد الفلتر (بدون عد تنازلي) ────────────────
     _certifyLog("⏳ انتظار ظهور التقارير في الجدول...");
     try {
       await _certifyPage.waitForFunction(() => {
-        const cells = document.querySelectorAll("td, .mat-cell");
-        for (const cell of Array.from(cells)) {
-          if (/^\d{6,8}$/.test((cell.textContent || "").trim())) return true;
-        }
-        const links = document.querySelectorAll("table a, td a");
-        for (const link of Array.from(links)) {
-          if (/^\d{6,8}$/.test((link.textContent || "").trim())) return true;
-        }
-        return false;
-      }, { timeout: 30000 });
-      _certifyLog("✅ ظهرت التقارير في الجدول");
+        const hasNumberInLinks = Array.from(document.querySelectorAll("table a, td a, .mat-cell a"))
+          .some(el => /^\d{6,8}$/.test((el.textContent || "").trim()));
+        const hasNumberInCells = Array.from(document.querySelectorAll("td, .mat-cell"))
+          .some(el => /^\d{6,8}$/.test((el.textContent || "").trim()));
+        return hasNumberInLinks || hasNumberInCells;
+      }, { timeout: 60000 });
+      _certifyLog("✅ ظهرت بيانات التقارير في الجدول");
     } catch {
-      _certifyLog("⚠️ انتهى وقت الانتظار — سيُحاوَل قراءة الجدول على أي حال");
+      _certifyLog("⚠️ لم تظهر بيانات خلال 60 ثانية — سيُقرأ الجدول على أي حال");
     }
 
     // ── استخرج أرقام التقارير من الجدول المُفلتر ─────────────────────────────
