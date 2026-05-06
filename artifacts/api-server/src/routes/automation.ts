@@ -455,7 +455,7 @@ async function _approveAndExtract(): Promise<{
     formData.append("qrCodeBase64",        qrBase64);
     formData.append("finalValue",          extracted.finalValue);
 
-    const resp = await nodeFetch("http://localhost:5050/External/QrInformationApi", {
+    const resp = await nodeFetch("http://localhost:5000/External/QrInformationApi", {
       method: "POST",
       body: formData,
     });
@@ -474,7 +474,7 @@ async function _approveAndExtract(): Promise<{
       formData.append("taqeemSubmittedAt",  submittedAt);
       formData.append("qrCodeBase64",       qrBase64);
       formData.append("finalValue",         extracted.finalValue);
-      const resp = await fetch("http://localhost:5050/External/QrInformationApi", { method: "POST", body: formData });
+      const resp = await fetch("http://localhost:5000/External/QrInformationApi", { method: "POST", body: formData });
       _certifyLog(`✅ QrInformationApi (native fetch): ${resp.status}`);
     } catch (e2: any) {
       _certifyLog(`⚠️ QrInformationApi فشل: ${e2.message}`);
