@@ -343,8 +343,28 @@ async function nextCertifyReport(): Promise<{ reportNumber: string; index: numbe
 async function _approveAndExtract(): Promise<{
   dcNumber: string; finalValue: string; reportNumber: string; qrBase64: string;
 }> {
-  if (!_certifyReportPage) throw new Error("لا يوجد تقرير مفتوح في التاب الثاني");
+  _certifyLog("🚀 بدء تنفيذ اعتماد التقرير...");
+
+  // إذا كان _certifyReportPage null، حاول استعادته من التابات المفتوحة
+  if (!_certifyReportPage && _certifyPage) {
+    _certifyLog("⚠️ _certifyReportPage null — البحث عن تاب التقرير...");
+    const ctx = _certifyPage.context();
+    const allPages = ctx.pages();
+    _certifyLog(`📑 عدد التابات المفتوحة: ${allPages.length}`);
+    for (const p of allPages) {
+      const url = p.url();
+      _certifyLog(`  → ${url}`);
+      if (url.includes("/report/") || (url.includes(CERTIFY_REPORT_BASE) && p !== _certifyPage)) {
+        _certifyReportPage = p;
+        _certifyLog(`✅ تم العثور على تاب التقرير: ${url}`);
+        break;
+      }
+    }
+  }
+
+  if (!_certifyReportPage) throw new Error("لا يوجد تقرير مفتوح في التاب الثاني — افتح تقريراً أولاً");
   const page = _certifyReportPage;
+  _certifyLog(`📄 صفحة التقرير: ${page.url()}`);
 
   // 1) سجّل جميع الأزرار الموجودة على الصفحة للتشخيص
   _certifyLog("🔍 قراءة قائمة الأزرار على صفحة التقرير...");
