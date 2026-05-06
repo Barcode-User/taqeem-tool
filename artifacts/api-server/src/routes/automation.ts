@@ -41,6 +41,7 @@ let _certifyState: CertifyState = { status: "idle", logs: [], reportNumbers: [],
 let _certifyPage: any = null;      // صفحة قائمة التقارير
 let _certifyReportPage: any = null; // التاب الثاني للتقرير المفتوح
 let _certifyCleanup: (() => Promise<void>) | null = null;
+let _certifyExtracting = false;    // منع الاستخراج المزدوج
 
 function _certifyLog(msg: string) {
   _certifyState.logs.push(`[${new Date().toISOString()}] ${msg}`);
@@ -317,6 +318,9 @@ async function openCertifyReport(reportNumber: string): Promise<void> {
     try { await _certifyReportPage.close(); } catch {}
   }
   _certifyReportPage = await context.newPage();
+  // بدّء المراقب التلقائي قبل التنقل لرصد صفحة الشهادة
+  _certifyExtracting = false;
+  _watchForCertificatePage(_certifyReportPage);
   await _certifyReportPage.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
   _certifyState.openedReport = reportNumber;
   const idx = _certifyState.reportNumbers.indexOf(reportNumber);
@@ -337,6 +341,110 @@ async function nextCertifyReport(): Promise<{ reportNumber: string; index: numbe
   _certifyState.currentIndex = nextIndex;
   await openCertifyReport(reportNumber);
   return { reportNumber, index: nextIndex + 1, total: _certifyState.reportNumbers.length };
+}
+
+// ── استخراج بيانات الشهادة وإرسالها (يُستدعى تلقائياً أو يدوياً) ─────────
+async function _doExtractAndSend(page: any): Promise<{
+  dcNumber: string; finalValue: string; reportNumber: string; qrBase64: string;
+}> {
+  await page.waitForTimeout(2000);
+
+  // استخرج رقم DC والقيمة النهائية
+  _certifyLog("📋 استخراج بيانات الشهادة...");
+  const extracted: { dcNumber: string; finalValue: string } = await page.evaluate(() => {
+    const fullText = document.body.innerText || "";
+    const dcMatch = fullText.match(/DC\d+/i);
+    const dcNumber = dcMatch ? dcMatch[0].toUpperCase() : "";
+    const valMatch = fullText.match(/الر[أا]ي النهائي.*?[:：]\s*([\d,،٬]+)/);
+    const finalValue = valMatch ? valMatch[1].replace(/[,،٬]/g, "") : "";
+    return { dcNumber, finalValue };
+  });
+  _certifyLog(`📌 رقم DC: ${extracted.dcNumber || "(لم يُعثر)"} | القيمة: ${extracted.finalValue || "(لم تُعثر)"}`);
+
+  // التقاط صورة QR
+  _certifyLog("📸 التقاط صورة QR...");
+  let qrBase64 = "";
+  try {
+    const qrElem = await page.$("img[src*='qr'], img[src*='create-qr'], img[alt*='qr'], img[alt*='QR'], canvas[id*='qr'], [class*='qr'] img");
+    if (qrElem) {
+      const qrBuf = await qrElem.screenshot({ type: "png" });
+      qrBase64 = qrBuf.toString("base64");
+      _certifyLog(`✅ تم التقاط QR (${qrBase64.length} chars)`);
+    } else {
+      _certifyLog("⚠️ لم يُعثر على عنصر QR — لقطة شاشة للصفحة");
+      const fullBuf = await page.screenshot({ type: "png", fullPage: false });
+      qrBase64 = fullBuf.toString("base64");
+    }
+  } catch (e: any) {
+    _certifyLog(`⚠️ خطأ في لقطة QR: ${e.message}`);
+  }
+
+  // أرسل للـ API
+  const reportNumber = _certifyState.openedReport ?? "";
+  const submittedAt = new Date().toISOString();
+  _certifyLog("📡 إرسال البيانات لـ QrInformationApi...");
+  try {
+    const { default: nodeFetch, FormData: NodeFormData } = await import("node-fetch") as any;
+    const fd = new NodeFormData();
+    fd.append("reportCode",         extracted.dcNumber);
+    fd.append("taqeemReportNumber", reportNumber);
+    fd.append("taqeemSubmittedAt",  submittedAt);
+    fd.append("qrCodeBase64",       qrBase64);
+    fd.append("finalValue",         extracted.finalValue);
+    const resp = await nodeFetch("http://localhost:5000/External/QrInformationApi", { method: "POST", body: fd });
+    if (resp.ok) {
+      _certifyLog(`✅ QrInformationApi: ${resp.status} ${resp.statusText}`);
+    } else {
+      const body = await resp.text().catch(() => "");
+      _certifyLog(`⚠️ QrInformationApi: ${resp.status} — ${body.slice(0, 200)}`);
+    }
+  } catch {
+    try {
+      const fd2 = new FormData();
+      fd2.append("reportCode",         extracted.dcNumber);
+      fd2.append("taqeemReportNumber", reportNumber);
+      fd2.append("taqeemSubmittedAt",  submittedAt);
+      fd2.append("qrCodeBase64",       qrBase64);
+      fd2.append("finalValue",         extracted.finalValue);
+      const resp2 = await fetch("http://localhost:5000/External/QrInformationApi", { method: "POST", body: fd2 });
+      _certifyLog(`✅ QrInformationApi (fallback): ${resp2.status}`);
+    } catch (e2: any) {
+      _certifyLog(`❌ QrInformationApi فشل نهائياً: ${e2.message}`);
+    }
+  }
+
+  return { dcNumber: extracted.dcNumber, finalValue: extracted.finalValue, reportNumber, qrBase64 };
+}
+
+// ── مراقب تلقائي: يرصد ظهور صفحة الشهادة حتى بعد الضغط اليدوي ─────────────
+function _watchForCertificatePage(page: any): void {
+  page.on("load", async () => {
+    if (_certifyExtracting) return;
+    try {
+      const url: string = page.url();
+      _certifyLog(`📍 تحميل صفحة: ${url}`);
+      // تحقق من وجود QR في الصفحة المحملة
+      const hasQR: boolean = await page.evaluate(() => {
+        const imgs = Array.from(document.querySelectorAll("img"));
+        return imgs.some((img: any) =>
+          img.src?.includes("qr") || img.src?.includes("create-qr") || img.src?.includes("registration")
+        );
+      }).catch(() => false);
+
+      if (hasQR) {
+        _certifyExtracting = true;
+        _certifyLog("🎯 تم اكتشاف صفحة الشهادة تلقائياً — جارٍ الاستخراج والإرسال...");
+        try {
+          await _doExtractAndSend(page);
+          _certifyLog("✅ اكتمل الاستخراج والإرسال التلقائي");
+        } catch (e: any) {
+          _certifyLog(`❌ خطأ في الاستخراج التلقائي: ${e.message}`);
+        } finally {
+          _certifyExtracting = false;
+        }
+      }
+    } catch {}
+  });
 }
 
 // ── اعتماد التقرير: ضغط الزر + استخراج البيانات + إرسال للـ API ───────────
@@ -382,72 +490,70 @@ async function _approveAndExtract(): Promise<{
   // انتظر قليلاً بعد تحديد checkbox
   await page.waitForTimeout(1000);
 
-  // ── محاولة 1: fetch مباشر بـ FormData (يتجاوز كل معالجات JS في الصفحة) ──
-  _certifyLog("📤 محاولة إرسال النموذج بـ fetch مباشر...");
+  // ── محاولة 1: URLSearchParams fetch (يطابق طلب HTML عادي تماماً) ──
+  _certifyLog("📤 إرسال النموذج بـ URLSearchParams fetch...");
   try {
     const fetchResult: string = await page.evaluate(async () => {
       const btn = (document.getElementById("confirm") as HTMLInputElement)
         || (document.querySelector("input[name='confirm']") as HTMLInputElement)
         || (document.querySelector("input[type='submit']") as HTMLInputElement);
-      const form = btn?.form || document.querySelector("form");
+      const form = btn?.form || document.querySelector("form") as HTMLFormElement;
       if (!form) return "no_form";
 
-      // أضف قيمة زر الـ submit إلى FormData (بعض الخوادم تحتاجها)
-      const fd = new FormData(form as HTMLFormElement);
-      if (btn?.name && btn?.value) fd.append(btn.name, btn.value);
+      // بناء URLSearchParams من حقول النموذج (يطابق application/x-www-form-urlencoded)
+      const params = new URLSearchParams();
+      for (const el of Array.from(form.elements)) {
+        const inp = el as HTMLInputElement;
+        if (!inp.name || inp.disabled) continue;
+        if ((inp.type === "checkbox" || inp.type === "radio") && !inp.checked) continue;
+        params.append(inp.name, inp.value ?? "");
+      }
+      if (btn?.name && btn?.value) params.set(btn.name, btn.value);
 
-      const actionUrl = (form as HTMLFormElement).action || window.location.href;
-      const method = ((form as HTMLFormElement).method || "POST").toUpperCase();
+      const actionUrl = form.action || window.location.href;
+      const method = (form.method || "POST").toUpperCase();
 
-      // أرسل الطلب مع ملفات الجلسة
       const resp = await fetch(actionUrl, {
         method,
-        body: fd,
+        body: params,
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
         credentials: "include",
         redirect: "follow",
       });
 
-      const finalUrl = resp.url;
       if (resp.ok) {
-        // انقل الصفحة إلى URL الاستجابة النهائي
-        window.location.href = finalUrl;
-        return "ok:" + finalUrl;
+        window.location.href = resp.url;
+        return "ok:" + resp.url;
       }
-      return "error:" + resp.status;
+      return "error:" + resp.status + ":" + resp.url;
     });
     _certifyLog(`📤 fetch result: ${fetchResult}`);
     btnClicked = fetchResult.startsWith("ok:");
-
     if (btnClicked) {
-      // انتظر انتقال الصفحة بعد window.location.href
-      await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
+      await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
       _certifyLog(`✅ الصفحة انتقلت إلى: ${page.url()}`);
     }
   } catch (e: any) {
-    _certifyLog(`↪️ fetch مباشر فشل: ${(e as Error).message?.slice(0, 120)}`);
+    _certifyLog(`↪️ URLSearchParams fetch فشل: ${(e as Error).message?.slice(0, 120)}`);
   }
 
-  // ── محاولة 2: clone الزر لإزالة معالجات JS ثم native click ──
+  // ── محاولة 2: clone الزر + native click (بدون معالجات JS) ──
   if (!btnClicked) {
-    _certifyLog("🔄 محاولة clone الزر وإزالة معالجات JS...");
+    _certifyLog("🔄 clone الزر وإزالة معالجات JS...");
     try {
       await page.evaluate(() => {
         const btn = document.getElementById("confirm")
           || document.querySelector("input[name='confirm']")
           || document.querySelector("input[type='submit']");
-        if (btn) {
-          const clone = btn.cloneNode(true) as HTMLElement;
-          btn.replaceWith(clone);
-        }
+        if (btn) { const c = btn.cloneNode(true) as HTMLElement; btn.replaceWith(c); }
       });
       const loc = page.locator("#confirm, input[name='confirm'], input[type='submit']").first();
       if (await loc.count() > 0) {
         await loc.scrollIntoViewIfNeeded({ timeout: 2000 });
         await loc.click({ force: true, timeout: 5000 });
-        _certifyLog("✅ clone + click نجح");
         btnClicked = true;
-        await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
-        _certifyLog(`✅ الصفحة بعد clone-click: ${page.url()}`);
+        await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
+        _certifyLog(`✅ clone-click — الصفحة: ${page.url()}`);
       }
     } catch (e: any) {
       _certifyLog(`↪️ clone-click فشل: ${(e as Error).message?.slice(0, 120)}`);
@@ -455,105 +561,23 @@ async function _approveAndExtract(): Promise<{
   }
 
   if (!btnClicked) {
-    _certifyLog("❌ فشلت جميع محاولات الضغط — سيُحاوَل استخراج ما على الصفحة الحالية");
+    _certifyLog("⚠️ فشل الضغط التلقائي — المراقب التلقائي سيرصد الضغط اليدوي في المتصفح");
   }
 
-  // 2) انتظر ظهور الشهادة (QR أو "شهادة التسجيل")
-  _certifyLog("⏳ انتظار ظهور الشهادة والـ QR...");
+  // ── انتظر ظهور QR (90 ثانية — تكفي للضغط اليدوي أيضاً) ──
+  _certifyLog("⏳ انتظار ظهور صفحة الشهادة والـ QR (حتى 90 ثانية)...");
   try {
     await page.waitForFunction(() => {
-      const imgs = Array.from(document.querySelectorAll("img, canvas, svg"));
-      const hasQR = imgs.some(el => {
-        const src = (el as HTMLImageElement).src || "";
-        const cls = el.className || "";
-        return src.includes("qr") || cls.toLowerCase().includes("qr") ||
-               el.closest("[class*='qr']") !== null || el.closest("[id*='qr']") !== null;
-      });
-      const hasCertBtn = Array.from(document.querySelectorAll("button, a")).some(
-        el => (el.textContent || "").includes("شهادة")
+      return Array.from(document.querySelectorAll("img")).some(
+        (img: any) => img.src?.includes("qr") || img.src?.includes("create-qr") || img.src?.includes("registration")
       );
-      return hasQR || hasCertBtn;
-    }, { timeout: 60000 });
-    _certifyLog("✅ ظهرت الشهادة");
+    }, { timeout: 90000 });
+    _certifyLog("✅ ظهرت صفحة الشهادة");
   } catch {
-    _certifyLog("⚠️ لم تظهر الشهادة خلال 60 ثانية — سيُحاوَل استخراج البيانات");
-  }
-  await page.waitForTimeout(2000);
-
-  // 3) استخرج رقم DC والقيمة النهائية من الصفحة
-  _certifyLog("📋 استخراج بيانات الشهادة...");
-  const extracted: { dcNumber: string; finalValue: string } = await page.evaluate(() => {
-    const fullText = document.body.innerText || "";
-    // رقم DC: DC متبوع بأرقام
-    const dcMatch = fullText.match(/DC\d+/i);
-    const dcNumber = dcMatch ? dcMatch[0].toUpperCase() : "";
-    // القيمة النهائية
-    const valMatch = fullText.match(/الر[أا]ي النهائي.*?[:：]\s*([\d,،٬]+)/);
-    const finalValue = valMatch ? valMatch[1].replace(/[,،٬]/g, "") : "";
-    return { dcNumber, finalValue };
-  });
-  _certifyLog(`📌 رقم DC: ${extracted.dcNumber || "(لم يُعثر)"} | القيمة: ${extracted.finalValue || "(لم تُعثر)"}`);
-
-  // 4) قص صورة QR
-  _certifyLog("📸 التقاط صورة QR...");
-  let qrBase64 = "";
-  try {
-    // حاول إيجاد صورة QR
-    const qrElem = await page.$("img[src*='qr'], img[alt*='qr'], img[alt*='QR'], canvas[id*='qr'], [class*='qr'] img, [id*='qr'] img");
-    if (qrElem) {
-      const qrBuf = await qrElem.screenshot({ type: "png" });
-      qrBase64 = qrBuf.toString("base64");
-      _certifyLog(`✅ تم التقاط QR (${qrBase64.length} char)`);
-    } else {
-      // خذ لقطة شاشة للمنطقة السفلية من الصفحة حيث يظهر QR
-      _certifyLog("⚠️ لم يُعثر على عنصر QR محدد — لقطة شاشة للصفحة كاملة");
-      const fullBuf = await page.screenshot({ type: "png", fullPage: false });
-      qrBase64 = fullBuf.toString("base64");
-    }
-  } catch (e: any) {
-    _certifyLog(`⚠️ خطأ في لقطة QR: ${e.message}`);
+    _certifyLog("⚠️ لم تظهر الشهادة — سيُحاوَل استخراج البيانات الحالية");
   }
 
-  // 5) أرسل للـ API
-  const reportNumber = _certifyState.openedReport ?? "";
-  const submittedAt = new Date().toISOString();
-  _certifyLog("📡 إرسال البيانات لـ QrInformationApi...");
-  try {
-    const { default: nodeFetch, FormData: NodeFormData } = await import("node-fetch") as any;
-    const formData = new NodeFormData();
-    formData.append("reportCode",          extracted.dcNumber);
-    formData.append("taqeemReportNumber",  reportNumber);
-    formData.append("taqeemSubmittedAt",   submittedAt);
-    formData.append("qrCodeBase64",        qrBase64);
-    formData.append("finalValue",          extracted.finalValue);
-
-    const resp = await nodeFetch("http://localhost:5000/External/QrInformationApi", {
-      method: "POST",
-      body: formData,
-    });
-    if (resp.ok) {
-      _certifyLog(`✅ QrInformationApi: ${resp.status} ${resp.statusText}`);
-    } else {
-      const body = await resp.text().catch(() => "");
-      _certifyLog(`⚠️ QrInformationApi: ${resp.status} — ${body.slice(0, 200)}`);
-    }
-  } catch (e: any) {
-    // node-fetch قد لا يكون متاحاً — استخدم fetch المدمج
-    try {
-      const formData = new FormData();
-      formData.append("reportCode",         extracted.dcNumber);
-      formData.append("taqeemReportNumber", reportNumber);
-      formData.append("taqeemSubmittedAt",  submittedAt);
-      formData.append("qrCodeBase64",       qrBase64);
-      formData.append("finalValue",         extracted.finalValue);
-      const resp = await fetch("http://localhost:5000/External/QrInformationApi", { method: "POST", body: formData });
-      _certifyLog(`✅ QrInformationApi (native fetch): ${resp.status}`);
-    } catch (e2: any) {
-      _certifyLog(`⚠️ QrInformationApi فشل: ${e2.message}`);
-    }
-  }
-
-  return { dcNumber: extracted.dcNumber, finalValue: extracted.finalValue, reportNumber, qrBase64 };
+  return await _doExtractAndSend(page);
 }
 
 async function stopCertifySession(): Promise<void> {
