@@ -70,17 +70,32 @@ export default function CertifiedReports() {
 
   const handleStartCertify = async () => {
     try {
-      const resp = await fetch(`${apiBase}/api/automation/certify/start`, { method: "POST" });
-      const data = await resp.json();
+      const resp = await fetch(`${apiBase}/api/automation/certify/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({}),
+      });
+      const text = await resp.text();
+      let data: any = {};
+      try { data = JSON.parse(text); } catch { /* not json */ }
+
+      if (resp.status === 404) {
+        toast({
+          variant: "destructive",
+          title: "الخادم قديم",
+          description: "نفّذ git pull ثم أعد تشغيل الخادم على جهازك المحلي",
+        });
+        return;
+      }
       if (resp.ok) {
         toast({ title: "جارٍ فتح المتصفح...", description: "ستظهر نافذة Chrome تلقائياً" });
         setCertify({ status: "running", logs: [] });
         pollRef.current = setInterval(fetchCertifyStatus, 2000);
       } else {
-        toast({ variant: "destructive", title: "خطأ", description: data.error });
+        toast({ variant: "destructive", title: "خطأ", description: data.error ?? text });
       }
     } catch {
-      toast({ variant: "destructive", title: "خطأ في الاتصال", description: "تعذر الاتصال بالخادم" });
+      toast({ variant: "destructive", title: "خطأ في الاتصال", description: "تعذر الاتصال بالخادم — تأكد أن الخادم يعمل" });
     }
   };
 
