@@ -16,13 +16,78 @@ import {
   getLoginStatus,
   logout,
   getAuthenticatedContext,
+  createIsolatedContextForRole,
 } from "../automation/taqeem-session-store";
-import {
-  startCertifySession,
-  stopCertifySession,
-  getCertifyStatus,
-} from "../automation/certify-bot";
 import { hasPendingQueue, MAX_CONCURRENT, processQueue } from "../automation/queue-processor";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CERTIFY BOT STATE — مدمج مباشرة لتجنب مشاكل الاستيراد على Windows
+// ─────────────────────────────────────────────────────────────────────────────
+const CERTIFY_REPORTS_URL = "https://qima.taqeem.gov.sa/membership/reports/sector/1";
+
+type CertifyStatus = "idle" | "running" | "ready" | "failed";
+type CertifyState = { status: CertifyStatus; error?: string; logs: string[] };
+
+let _certifyState: CertifyState = { status: "idle", logs: [] };
+let _certifyCleanup: (() => Promise<void>) | null = null;
+
+function _certifyLog(msg: string) {
+  _certifyState.logs.push(`[${new Date().toISOString()}] ${msg}`);
+  console.log(`[CertifyBot] ${msg}`);
+}
+
+function getCertifyStatus(): CertifyState {
+  return { ..._certifyState, logs: [..._certifyState.logs] };
+}
+
+async function startCertifySession(): Promise<void> {
+  if (_certifyState.status === "running") return;
+  if (_certifyCleanup) { try { await _certifyCleanup(); } catch {} _certifyCleanup = null; }
+
+  _certifyState = { status: "running", logs: [] };
+  _certifyLog("بدء جلسة التعميد...");
+
+  try {
+    const session = await createIsolatedContextForRole("certifier");
+    if (!session) {
+      _certifyState.status = "failed";
+      _certifyState.error = "لا توجد جلسة معمد بيانات — سجّل الدخول أولاً من صفحة جلسة تقييم";
+      _certifyLog("❌ " + _certifyState.error);
+      return;
+    }
+
+    _certifyCleanup = session.cleanup;
+    const context = session.context;
+
+    _certifyLog("فتح صفحة التقارير...");
+    const page = await context.newPage();
+
+    try {
+      await page.goto(CERTIFY_REPORTS_URL, { waitUntil: "domcontentloaded", timeout: 60000 });
+    } catch (navErr: any) {
+      _certifyState.status = "failed";
+      _certifyState.error = `لا يمكن الوصول للموقع — تأكد أن الأتمتة تعمل على جهازك المحلي. (${navErr.message})`;
+      _certifyLog("❌ " + _certifyState.error);
+      if (_certifyCleanup) { try { await _certifyCleanup(); } catch {} _certifyCleanup = null; }
+      return;
+    }
+
+    await page.waitForTimeout(2000);
+    _certifyLog(`✅ الصفحة جاهزة: ${page.url()}`);
+    _certifyState.status = "ready";
+
+  } catch (err: any) {
+    _certifyState.status = "failed";
+    _certifyState.error = err.message;
+    _certifyLog("❌ خطأ: " + err.message);
+    if (_certifyCleanup) { try { await _certifyCleanup(); } catch {} _certifyCleanup = null; }
+  }
+}
+
+async function stopCertifySession(): Promise<void> {
+  if (_certifyCleanup) { try { await _certifyCleanup(); } catch {} _certifyCleanup = null; }
+  _certifyState = { status: "idle", logs: [] };
+}
 
 const router = Router();
 
