@@ -379,60 +379,83 @@ async function _approveAndExtract(): Promise<{
   _certifyLog("🖱️ محاولة النقر على زر الاعتماد (input#confirm)...");
   let btnClicked = false;
 
-  // انتظر قليلاً بعد تحديد checkbox لتمكين الزر
-  await page.waitForTimeout(1500);
+  // انتظر قليلاً بعد تحديد checkbox
+  await page.waitForTimeout(1000);
 
-  // محاولة 1: force click على #confirm
+  // ── محاولة 1: fetch مباشر بـ FormData (يتجاوز كل معالجات JS في الصفحة) ──
+  _certifyLog("📤 محاولة إرسال النموذج بـ fetch مباشر...");
   try {
-    const loc = page.locator("#confirm").first();
-    if (await loc.count() > 0) {
-      await loc.scrollIntoViewIfNeeded({ timeout: 3000 });
-      await loc.click({ force: true, timeout: 8000 });
-      _certifyLog("✅ تم النقر على #confirm (force)");
-      btnClicked = true;
+    const fetchResult: string = await page.evaluate(async () => {
+      const btn = (document.getElementById("confirm") as HTMLInputElement)
+        || (document.querySelector("input[name='confirm']") as HTMLInputElement)
+        || (document.querySelector("input[type='submit']") as HTMLInputElement);
+      const form = btn?.form || document.querySelector("form");
+      if (!form) return "no_form";
+
+      // أضف قيمة زر الـ submit إلى FormData (بعض الخوادم تحتاجها)
+      const fd = new FormData(form as HTMLFormElement);
+      if (btn?.name && btn?.value) fd.append(btn.name, btn.value);
+
+      const actionUrl = (form as HTMLFormElement).action || window.location.href;
+      const method = ((form as HTMLFormElement).method || "POST").toUpperCase();
+
+      // أرسل الطلب مع ملفات الجلسة
+      const resp = await fetch(actionUrl, {
+        method,
+        body: fd,
+        credentials: "include",
+        redirect: "follow",
+      });
+
+      const finalUrl = resp.url;
+      if (resp.ok) {
+        // انقل الصفحة إلى URL الاستجابة النهائي
+        window.location.href = finalUrl;
+        return "ok:" + finalUrl;
+      }
+      return "error:" + resp.status;
+    });
+    _certifyLog(`📤 fetch result: ${fetchResult}`);
+    btnClicked = fetchResult.startsWith("ok:");
+
+    if (btnClicked) {
+      // انتظر انتقال الصفحة بعد window.location.href
+      await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
+      _certifyLog(`✅ الصفحة انتقلت إلى: ${page.url()}`);
     }
   } catch (e: any) {
-    _certifyLog(`↪️ force click على #confirm فشل: ${(e as Error).message?.slice(0, 100)}`);
+    _certifyLog(`↪️ fetch مباشر فشل: ${(e as Error).message?.slice(0, 120)}`);
   }
 
-  // محاولة 2: dispatchEvent click عبر evaluate
+  // ── محاولة 2: clone الزر لإزالة معالجات JS ثم native click ──
   if (!btnClicked) {
+    _certifyLog("🔄 محاولة clone الزر وإزالة معالجات JS...");
     try {
-      const result = await page.evaluate(() => {
-        const el = document.getElementById("confirm") as HTMLInputElement | null
-          || document.querySelector("input[name='confirm']") as HTMLInputElement | null
-          || document.querySelector("input[type='submit']") as HTMLInputElement | null;
-        if (!el) return "not_found";
-        el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-        return `dispatched:${el.value}`;
+      await page.evaluate(() => {
+        const btn = document.getElementById("confirm")
+          || document.querySelector("input[name='confirm']")
+          || document.querySelector("input[type='submit']");
+        if (btn) {
+          const clone = btn.cloneNode(true) as HTMLElement;
+          btn.replaceWith(clone);
+        }
       });
-      _certifyLog(`✅ dispatchEvent: ${result}`);
-      btnClicked = result !== "not_found";
+      const loc = page.locator("#confirm, input[name='confirm'], input[type='submit']").first();
+      if (await loc.count() > 0) {
+        await loc.scrollIntoViewIfNeeded({ timeout: 2000 });
+        await loc.click({ force: true, timeout: 5000 });
+        _certifyLog("✅ clone + click نجح");
+        btnClicked = true;
+        await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
+        _certifyLog(`✅ الصفحة بعد clone-click: ${page.url()}`);
+      }
     } catch (e: any) {
-      _certifyLog(`↪️ dispatchEvent فشل: ${(e as Error).message?.slice(0, 100)}`);
-    }
-  }
-
-  // محاولة 3: إرسال النموذج مباشرة بـ form.submit()
-  if (!btnClicked) {
-    try {
-      const result = await page.evaluate(() => {
-        const btn = document.getElementById("confirm") as HTMLInputElement | null
-          || document.querySelector("input[type='submit']") as HTMLInputElement | null;
-        const form = btn?.form || document.querySelector("form");
-        if (!form) return "no_form";
-        (form as HTMLFormElement).submit();
-        return "form_submitted";
-      });
-      _certifyLog(`✅ form.submit(): ${result}`);
-      btnClicked = result === "form_submitted";
-    } catch (e: any) {
-      _certifyLog(`↪️ form.submit فشل: ${(e as Error).message?.slice(0, 100)}`);
+      _certifyLog(`↪️ clone-click فشل: ${(e as Error).message?.slice(0, 120)}`);
     }
   }
 
   if (!btnClicked) {
-    _certifyLog("❌ فشلت جميع محاولات النقر على زر الاعتماد");
+    _certifyLog("❌ فشلت جميع محاولات الضغط — سيُحاوَل استخراج ما على الصفحة الحالية");
   }
 
   // 2) انتظر ظهور الشهادة (QR أو "شهادة التسجيل")
