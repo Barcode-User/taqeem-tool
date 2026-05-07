@@ -384,111 +384,93 @@ async function _doExtractAndSend(page: any): Promise<{
   });
   _certifyLog(`📌 رقم DC: ${extracted.dcNumber || "(لم يُعثر)"} | القيمة: ${extracted.finalValue || "(لم تُعثر)"}`);
 
-  // 2) مسح QR — قراءة محتوى QR من رابط الصورة مباشرةً (بدون لقطة شاشة)
-  _certifyLog("🔍 مسح QR Code وقراءة محتواه...");
-  let qrBase64 = "";   // محتوى QR النصي (URL أو نص التسجيل)
-  let qrImageBase64 = ""; // صورة QR كـ base64 (للعرض فقط)
+  // 2) مسح QR — استخراج صورة QR كـ base64 + URL المحتوى من رابط الصورة
+  _certifyLog("🔍 مسح QR Code...");
+  let qrBase64 = "";     // صورة QR كـ base64 PNG (للإرسال في qrCodeBase64)
+  let qrContentUrl = ""; // URL المستخرج من محتوى QR (للفتح في تاب جديد)
+
+  const QR_SELECTORS = [
+    "img[src*='apiqrserver']",
+    "img[src*='create-qr']",
+    "img[src*='qr']",
+    "img[alt*='qr' i]",
+    "img[alt*='QR']",
+    "[class*='qr'] img",
+    "[class*='certificate'] img",
+  ].join(", ");
+
   try {
-    // استخرج src رابط صورة QR
-    const qrData: { src: string; decoded: string } = await page.evaluate(() => {
-      const selectors = [
-        "img[src*='qr']",
-        "img[src*='create-qr']",
-        "img[src*='apiqrserver']",
-        "img[alt*='qr' i]",
-        "img[alt*='QR']",
-        "[class*='qr'] img",
-        "[class*='certificate'] img",
-      ];
-      for (const sel of selectors) {
-        const img = document.querySelector(sel) as HTMLImageElement | null;
-        if (img?.src) {
-          // حاول استخراج محتوى QR من query param "data" في الـ URL
-          let decoded = "";
-          try {
-            const url = new URL(img.src);
-            decoded = url.searchParams.get("data") || url.searchParams.get("text") || url.searchParams.get("content") || "";
-            if (decoded) decoded = decodeURIComponent(decoded);
-          } catch {}
-          return { src: img.src, decoded };
+    // أ) استخرج src رابط صورة QR من الصفحة
+    const qrSrc: string = await page.evaluate((sel: string) => {
+      const img = document.querySelector(sel) as HTMLImageElement | null;
+      return img?.src || "";
+    }, QR_SELECTORS).catch(() => "");
+
+    if (qrSrc) {
+      _certifyLog(`📷 وجدت صورة QR: ${qrSrc.slice(0, 120)}`);
+
+      // ب) استخرج URL محتوى QR من query params (data / text / content)
+      try {
+        const u = new URL(qrSrc);
+        const raw = u.searchParams.get("data") || u.searchParams.get("text") || u.searchParams.get("content") || "";
+        if (raw) {
+          qrContentUrl = decodeURIComponent(raw);
+          _certifyLog(`✅ محتوى QR (URL للفتح): ${qrContentUrl.slice(0, 200)}`);
         }
-      }
-      return { src: "", decoded: "" };
-    }).catch(() => ({ src: "", decoded: "" }));
+      } catch {}
 
-    if (qrData.src) {
-      _certifyLog(`📷 صورة QR: ${qrData.src.slice(0, 120)}`);
-    }
-
-    if (qrData.decoded) {
-      // المحتوى المستخرج مباشرةً من URL (مسح حقيقي)
-      qrBase64 = qrData.decoded;
-      _certifyLog(`✅ محتوى QR (من URL): ${qrBase64.slice(0, 200)}`);
-    } else {
-      // fallback: التقط صورة QR فقط (بدون screenshot للصفحة كاملة)
-      const qrElem = await page.$([
-        "img[src*='qr']", "img[src*='create-qr']", "img[src*='apiqrserver']",
-        "img[alt*='QR']", "[class*='qr'] img",
-      ].join(", "));
+      // ج) التقط صورة عنصر QR كـ PNG base64 — هذا هو qrCodeBase64
+      const qrElem = await page.$(QR_SELECTORS);
       if (qrElem) {
         const qrBuf: Buffer = await qrElem.screenshot({ type: "png" });
-        qrImageBase64 = qrBuf.toString("base64");
-        qrBase64 = qrImageBase64; // أرسل الصورة كـ fallback
-        _certifyLog(`📷 QR صورة فقط (${Math.round(qrBuf.length / 1024)} KB) — لم يُعثر على محتوى نصي`);
-      } else {
-        _certifyLog("⚠️ لم يُعثر على QR في الصفحة");
+        qrBase64 = qrBuf.toString("base64");
+        _certifyLog(`🖼️ صورة QR (base64 PNG): ${Math.round(qrBuf.length / 1024)} KB`);
       }
+    } else {
+      _certifyLog("⚠️ لم يُعثر على صورة QR في الصفحة");
     }
   } catch (e: any) {
     _certifyLog(`⚠️ خطأ في مسح QR: ${e.message}`);
   }
 
-  // 3) فتح URL الـ QR في تاب جديد وتحويله لـ PDF (مثل مسح QR بالجوال)
+  // 3) فتح URL من QR في تاب جديد → التقاط screenshot كامل للصفحة → إرساله كملف
   const reportNumber = _certifyState.openedReport ?? "";
   const submittedAt = new Date().toISOString();
-  let pdfBuffer: Buffer = Buffer.alloc(0);
-  let pdfFilename = `certificate_${reportNumber || "report"}.pdf`;
+  let certBuffer: Buffer = Buffer.alloc(0);
+  let certFilename = `certificate_${reportNumber || "report"}.png`;
+  let certMime = "image/png";
 
-  const qrUrl = qrBase64.startsWith("http") ? qrBase64 : "";
-  if (qrUrl) {
-    _certifyLog(`🌐 فتح URL من QR في تاب جديد: ${qrUrl.slice(0, 120)}`);
+  if (qrContentUrl.startsWith("http")) {
+    _certifyLog(`🌐 فتح URL من QR في تاب جديد: ${qrContentUrl.slice(0, 120)}`);
     let qrPage: any = null;
     try {
       qrPage = await page.context().newPage();
-      await qrPage.goto(qrUrl, { waitUntil: "networkidle", timeout: 30000 });
+      await qrPage.goto(qrContentUrl, { waitUntil: "networkidle", timeout: 30000 });
       _certifyLog(`✅ صفحة QR محملة: ${qrPage.url()}`);
 
-      // انتظر ثانيتين لتحميل أي محتوى ديناميكي
-      await qrPage.waitForTimeout(2000);
+      // انتظر ثلاث ثوانٍ لتحميل أي محتوى ديناميكي
+      await qrPage.waitForTimeout(3000);
 
-      // طباعة الصفحة كـ PDF عبر CDP
-      _certifyLog("🖨️ تحويل صفحة QR إلى PDF...");
-      const cdpSession = await qrPage.context().newCDPSession(qrPage);
-      const pdfResult: { data: string } = await cdpSession.send("Page.printToPDF", {
-        landscape: false,
-        printBackground: true,
-        preferCSSPageSize: true,
-        paperWidth: 8.27,
-        paperHeight: 11.69,
-        marginTop: 0.2,
-        marginBottom: 0.2,
-        marginLeft: 0.2,
-        marginRight: 0.2,
+      // التقاط screenshot كامل للصفحة (full page)
+      _certifyLog("📸 التقاط screenshot للصفحة...");
+      const screenshotBuf: Buffer = await qrPage.screenshot({
+        type: "png",
+        fullPage: true,
       });
-      await cdpSession.detach().catch(() => {});
-      pdfBuffer = Buffer.from(pdfResult.data, "base64");
-      pdfFilename = `certificate_${reportNumber}_qr.pdf`;
-      _certifyLog(`✅ PDF جاهز من صفحة QR: ${pdfFilename} (${Math.round(pdfBuffer.length / 1024)} KB)`);
+      certBuffer = screenshotBuf;
+      certFilename = `certificate_${reportNumber}_qr.png`;
+      certMime = "image/png";
+      _certifyLog(`✅ Screenshot جاهز: ${certFilename} (${Math.round(certBuffer.length / 1024)} KB)`);
     } catch (e: any) {
-      _certifyLog(`⚠️ خطأ في فتح/تحويل صفحة QR: ${e.message?.slice(0, 120)}`);
+      _certifyLog(`⚠️ خطأ في فتح/تصوير صفحة QR: ${e.message?.slice(0, 120)}`);
     } finally {
       if (qrPage) { try { await qrPage.close(); } catch {} }
     }
   } else {
-    _certifyLog("⚠️ لم يُعثر على URL في QR — لا يمكن توليد PDF");
+    _certifyLog("⚠️ لم يُعثر على URL في QR — لا يمكن فتح الصفحة");
   }
 
-  _certifyLog(`📊 PDF: ${pdfBuffer.length > 0 ? `${pdfFilename} (${Math.round(pdfBuffer.length / 1024)} KB)` : "غير متوفر"}`);
+  _certifyLog(`📊 الملف: ${certBuffer.length > 0 ? `${certFilename} (${Math.round(certBuffer.length / 1024)} KB)` : "غير متوفر"}`);
 
   // 4) إرسال لـ QrInformationApi باستخدام form-data + http.request
   _certifyLog("📡 إرسال البيانات + PDF لـ QrInformationApi...");
@@ -501,15 +483,15 @@ async function _doExtractAndSend(page: any): Promise<{
     fd.append("taqeemSubmittedAt",  submittedAt         || "");
     fd.append("qrCodeBase64",       qrBase64            || "");
     fd.append("finalValue",         extracted.finalValue|| "");
-    if (pdfBuffer.length > 0) {
-      fd.append("certificatePath", pdfBuffer, {
-        filename: pdfFilename,
-        contentType: "application/pdf",
-        knownLength: pdfBuffer.length,
+    if (certBuffer.length > 0) {
+      fd.append("certificatePath", certBuffer, {
+        filename: certFilename,
+        contentType: certMime,
+        knownLength: certBuffer.length,
       });
-      _certifyLog(`📎 إضافة certificatePath: ${pdfFilename} (${Math.round(pdfBuffer.length / 1024)} KB)`);
+      _certifyLog(`📎 إضافة certificatePath: ${certFilename} (${Math.round(certBuffer.length / 1024)} KB)`);
     } else {
-      _certifyLog("⚠️ certificatePath فارغ — سيُرسل الطلب بدون PDF");
+      _certifyLog("⚠️ certificatePath فارغ — سيُرسل الطلب بدون ملف");
     }
 
     await new Promise<void>((resolve) => {
