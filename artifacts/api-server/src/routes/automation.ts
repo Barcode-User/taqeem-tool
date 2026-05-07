@@ -597,6 +597,7 @@ async function _doExtractAndSend(page: any): Promise<{
 
     _certifyLog(`📦 حجم الطلب الكامل: ${Math.round(fdBuffer.length / 1024)} KB`);
 
+    let _apiSuccess = false;
     await new Promise<void>((resolve) => {
       const reqOpts = {
         hostname: "localhost",
@@ -613,7 +614,8 @@ async function _doExtractAndSend(page: any): Promise<{
         res.on("data", (chunk: any) => { body += chunk; });
         res.on("end", () => {
           if (res.statusCode >= 200 && res.statusCode < 300) {
-            _certifyLog(`✅ QrInformationApi: ${res.statusCode}`);
+            _certifyLog(`✅ QrInformationApi: ${res.statusCode} — ${body.slice(0, 200)}`);
+            try { if (JSON.parse(body).success === true) _apiSuccess = true; } catch {}
           } else {
             _certifyLog(`⚠️ QrInformationApi: ${res.statusCode} — ${body.slice(0, 400)}`);
           }
@@ -627,6 +629,26 @@ async function _doExtractAndSend(page: any): Promise<{
       req.write(fdBuffer);
       req.end();
     });
+
+    // ── إذا نجح الإرسال انتقل للتقرير التالي تلقائياً ──────────────────────
+    if (_apiSuccess) {
+      _certifyLog("🔄 نجح الإرسال — الانتقال للتقرير التالي تلقائياً...");
+      // setTimeout لكسر سلسلة الاستدعاءات وتجنب التعشيش العميق
+      setTimeout(async () => {
+        try {
+          const next = await nextCertifyReport();
+          if (!next) {
+            _certifyLog("🏁 اكتملت جميع التقارير في هذه الجلسة");
+            return;
+          }
+          _certifyLog(`📂 تقرير ${next.reportNumber} (${next.index} من ${next.total}) — انتظار تحميل الصفحة...`);
+          await new Promise(r => setTimeout(r, 3000));
+          await _approveAndExtract();
+        } catch (e: any) {
+          _certifyLog(`❌ خطأ في الانتقال للتقرير التالي: ${e.message}`);
+        }
+      }, 1000);
+    }
   } catch (e: any) {
     _certifyLog(`❌ QrInformationApi خطأ عام: ${e.message?.slice(0, 120)}`);
   }
