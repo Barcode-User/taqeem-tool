@@ -190,61 +190,59 @@ async function startCertifySession(): Promise<void> {
       }
     }
 
-    // ── انتظر 5 ثوانٍ لتحميل النتائج بعد تغيير الفلتر ──────────────────────
-    _certifyLog("⏳ انتظار تحديث الجدول بعد الفلتر (5 ثوانٍ)...");
-    await new Promise(r => setTimeout(r, 5000));
+    // ── انتظر تحميل خلايا الجدول بعد الفلتر (max 15 ثانية) ─────────────────
+    _certifyLog("⏳ انتظار ظهور بيانات الجدول المفلتر...");
+    try {
+      await _certifyPage.waitForFunction(() => {
+        // ابحث عن أي خلية جدول تحتوي على رقم 5+ أرقام
+        return Array.from(document.querySelectorAll("td, a")).some(el => {
+          const t = (el.textContent || "").trim();
+          return /^\d{5,10}$/.test(t);
+        });
+      }, { timeout: 15000 });
+      _certifyLog("✅ ظهرت بيانات الجدول");
+    } catch {
+      _certifyLog("⚠️ لم تظهر بيانات خلال 15 ثانية — سيُقرأ الجدول على أي حال");
+    }
 
-    // ── استخرج أرقام التقارير من روابط /report/ فقط ─────────────────────────
+    // ── تشخيص: طباعة نماذج من روابط الصفحة ─────────────────────────────────
     _certifyLog("📋 قراءة روابط التقارير من الصفحة...");
-
-    // تشخيص: طباعة جميع روابط /report/ الموجودة في الصفحة
-    const allReportLinks: string[] = await _certifyPage.evaluate(() =>
+    const debugLinks: string[] = await _certifyPage.evaluate(() =>
       Array.from(document.querySelectorAll("a[href]"))
         .map(a => (a as HTMLAnchorElement).href)
-        .filter(h => /\/report\/\d/.test(h))
-        .slice(0, 20)
+        .filter(h => h && !h.endsWith("#") && h !== location.href)
+        .slice(0, 15)
     ).catch(() => [] as string[]);
-    _certifyLog(`🔍 روابط /report/ في الصفحة: ${allReportLinks.join(" | ") || "لا يوجد"}`);
+    _certifyLog(`🔍 روابط الصفحة (أول 15): ${debugLinks.join(" | ") || "لا يوجد"}`);
 
-    // استخرج أرقام التقارير من المحتوى الرئيسي فقط (بعيداً عن الـ sidebar)
+    // ── استخرج أرقام التقارير — 3 استراتيجيات بالتسلسل ─────────────────────
     const numbers: string[] = await _certifyPage.evaluate(() => {
       const seen = new Set<string>();
       const results: string[] = [];
-      const addNum = (n: string) => { if (!seen.has(n)) { seen.add(n); results.push(n); } };
+      const addNum = (n: string) => {
+        // تجاهل أرقام أقل من 5 خانات (pagination، sector IDs، إلخ)
+        if (n.length < 5) return;
+        if (!seen.has(n)) { seen.add(n); results.push(n); }
+      };
 
-      // حدّد منطقة المحتوى الرئيسي (بعيداً عن nav/sidebar/header)
-      const mainSelectors = [
-        "main", "#main-content", ".main-content", "[role='main']",
-        "#content", ".content-wrapper", ".page-content",
-        ".container-fluid > .row > *:not([class*='side'])",
-        "table", ".table-responsive", "#accordionExample32",
-        "[class*='accordion']", ".card-body",
-      ];
-      let root: Element | null = null;
-      for (const sel of mainSelectors) {
-        root = document.querySelector(sel);
-        if (root) break;
+      // ★ الاستراتيجية 1 (الأدق): نص الرابط هو رقم فقط (عمود "الرقم" في الجدول)
+      for (const a of Array.from(document.querySelectorAll("a"))) {
+        const txt = (a.textContent || "").trim();
+        if (/^\d{5,10}$/.test(txt)) addNum(txt);
       }
-      const searchIn = root || document.body;
 
-      // 1) روابط /report/NNNN في المحتوى الرئيسي
-      for (const a of Array.from(searchIn.querySelectorAll("a[href]"))) {
+      // ★ الاستراتيجية 2: خلايا <td> تحتوي على رقم فقط
+      for (const td of Array.from(document.querySelectorAll("td"))) {
+        const txt = (td.textContent || "").trim();
+        if (/^\d{5,10}$/.test(txt)) addNum(txt);
+      }
+
+      // ★ الاستراتيجية 3: آخر جزء من href يكون رقم 5+ خانات
+      for (const a of Array.from(document.querySelectorAll("a[href]"))) {
         const href = (a as HTMLAnchorElement).href || "";
-        const m = href.match(/\/report\/(\d{4,10})(?:\/|$|\?|#|$)/);
+        // مطابقة /NNNNN في نهاية الـ href (قبل ؟ أو # أو نهاية النص)
+        const m = href.match(/\/(\d{5,10})(?:\?|#|$)/);
         if (m) addNum(m[1]);
-      }
-
-      // 2) روابط /membership/reports/.../NNNN
-      for (const a of Array.from(searchIn.querySelectorAll("a[href]"))) {
-        const href = (a as HTMLAnchorElement).href || "";
-        const m = href.match(/\/reports?\/[^/]*\/(\d{4,10})(?:\/|$|\?|#)/);
-        if (m) addNum(m[1]);
-      }
-
-      // 3) نص خلايا الجدول (رقم التقرير كنص)
-      for (const el of Array.from(searchIn.querySelectorAll("td, th, .card-title, [class*='report-number']"))) {
-        const txt = (el.textContent || "").trim();
-        if (/^\d{4,10}$/.test(txt)) addNum(txt);
       }
 
       return results;
