@@ -441,56 +441,68 @@ async function _doExtractAndSend(page: any): Promise<{
   let certMime = "image/png";
 
   if (qrContentUrl.startsWith("http")) {
-    _certifyLog(`🌐 فتح URL من QR في تاب جديد: ${qrContentUrl.slice(0, 120)}`);
-    let qrPage: any = null;
+    _certifyLog(`📥 تحميل ملف QR مباشرةً (API Request Context): ${qrContentUrl.slice(0, 120)}`);
     try {
-      qrPage = await page.context().newPage();
+      // استخدم Playwright API Request Context — يشارك الكوكيز مع المتصفح
+      // ويحمّل الملف كبايتات خام بدون Chrome PDF viewer
+      const apiResp = await page.context().request.get(qrContentUrl, {
+        timeout: 30000,
+        maxRedirects: 10,
+      });
 
-      // اعترض الاستجابة قبل التنقل لمعرفة نوع المحتوى
-      const response = await qrPage.goto(qrContentUrl, { waitUntil: "load", timeout: 30000 });
-      const contentType: string = (response?.headers?.()?.["content-type"] || "").toLowerCase();
-      _certifyLog(`📄 Content-Type: ${contentType || "(غير معروف)"} | URL: ${qrPage.url()}`);
+      const contentType: string = (apiResp.headers()["content-type"] || "").toLowerCase();
+      const status = apiResp.status();
+      _certifyLog(`📄 Status: ${status} | Content-Type: ${contentType}`);
 
-      if (contentType.includes("application/pdf") || contentType.includes("octet-stream")) {
-        // ── الحالة المثالية: QR يؤدي مباشرةً إلى PDF ──
-        _certifyLog("✅ الاستجابة PDF مباشرة — جارٍ تحميل البايتات...");
-        const bodyBuf: Buffer = await response.body();
+      const bodyBuf: Buffer = Buffer.from(await apiResp.body());
+      _certifyLog(`📦 حجم الاستجابة: ${Math.round(bodyBuf.length / 1024)} KB`);
+
+      // تحقق أن الملف PDF حقيقي (يبدأ بـ %PDF)
+      const magic = bodyBuf.slice(0, 4).toString("ascii");
+      _certifyLog(`🔍 File magic: ${JSON.stringify(magic)}`);
+
+      if (magic === "%PDF") {
+        // ── PDF حقيقي ──
         certBuffer = bodyBuf;
         certFilename = `certificate_${reportNumber}_qr.pdf`;
         certMime = "application/pdf";
-        _certifyLog(`✅ PDF محمَّل مباشرةً: ${certFilename} (${Math.round(certBuffer.length / 1024)} KB)`);
+        _certifyLog(`✅ PDF حقيقي محمَّل: ${certFilename} (${Math.round(certBuffer.length / 1024)} KB)`);
+
+      } else if (contentType.includes("text/html") || magic.startsWith("<")) {
+        // ── HTML — افتح في تاب وحوّل بـ CDP ──
+        _certifyLog("🌐 الاستجابة HTML — فتح في تاب وتحويل لـ PDF...");
+        let qrPage: any = null;
+        try {
+          qrPage = await page.context().newPage();
+          await qrPage.goto(qrContentUrl, { waitUntil: "networkidle", timeout: 30000 });
+          await qrPage.waitForTimeout(3000);
+          const cdp = await qrPage.context().newCDPSession(qrPage);
+          const pdfResult: { data: string } = await cdp.send("Page.printToPDF", {
+            landscape: false, printBackground: true, preferCSSPageSize: true,
+            paperWidth: 8.27, paperHeight: 11.69,
+            marginTop: 0.3, marginBottom: 0.3, marginLeft: 0.3, marginRight: 0.3,
+          });
+          await cdp.detach().catch(() => {});
+          certBuffer = Buffer.from(pdfResult.data, "base64");
+          certFilename = `certificate_${reportNumber}_qr.pdf`;
+          certMime = "application/pdf";
+          _certifyLog(`✅ PDF من HTML: ${certFilename} (${Math.round(certBuffer.length / 1024)} KB)`);
+        } finally {
+          if (qrPage) { try { await qrPage.close(); } catch {} }
+        }
 
       } else {
-        // ── الصفحة تعرض HTML — نحوّلها إلى PDF بـ CDP ──
-        _certifyLog("🌐 الاستجابة HTML — انتظار 3 ثوانٍ ثم تحويل لـ PDF...");
-        await qrPage.waitForTimeout(3000);
-        _certifyLog("🖨️ تحويل صفحة QR إلى PDF عبر CDP...");
-        const cdp = await qrPage.context().newCDPSession(qrPage);
-        const pdfResult: { data: string } = await cdp.send("Page.printToPDF", {
-          landscape: false,
-          printBackground: true,
-          preferCSSPageSize: true,
-          paperWidth: 8.27,
-          paperHeight: 11.69,
-          marginTop: 0.3,
-          marginBottom: 0.3,
-          marginLeft: 0.3,
-          marginRight: 0.3,
-        });
-        await cdp.detach().catch(() => {});
-        certBuffer = Buffer.from(pdfResult.data, "base64");
-        certFilename = `certificate_${reportNumber}_qr.pdf`;
-        certMime = "application/pdf";
-        _certifyLog(`✅ PDF من صفحة HTML: ${certFilename} (${Math.round(certBuffer.length / 1024)} KB)`);
+        _certifyLog(`⚠️ نوع ملف غير معروف (magic: ${JSON.stringify(magic)}) — سيُرسل كما هو`);
+        certBuffer = bodyBuf;
+        certFilename = `certificate_${reportNumber}_qr.bin`;
+        certMime = contentType || "application/octet-stream";
       }
 
     } catch (e: any) {
-      _certifyLog(`⚠️ خطأ في فتح/تحميل صفحة QR: ${e.message?.slice(0, 120)}`);
-    } finally {
-      if (qrPage) { try { await qrPage.close(); } catch {} }
+      _certifyLog(`⚠️ خطأ في تحميل ملف QR: ${e.message?.slice(0, 150)}`);
     }
   } else {
-    _certifyLog("⚠️ لم يُعثر على URL في QR — لا يمكن فتح الصفحة");
+    _certifyLog("⚠️ لم يُعثر على URL في QR — لا يمكن تحميل الملف");
   }
 
   _certifyLog(`📊 الملف: ${certBuffer.length > 0 ? `${certFilename} (${Math.round(certBuffer.length / 1024)} KB)` : "غير متوفر"}`);
