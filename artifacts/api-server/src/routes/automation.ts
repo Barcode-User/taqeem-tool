@@ -37,7 +37,7 @@ type CertifyState = {
   openedReport?: string;
 };
 
-const CERTIFY_BOT_VERSION = "v5.0 — 2026-05-07 — full-auto: checkbox→submit→extract";
+const CERTIFY_BOT_VERSION = "v6.0 — 2026-05-07 — download certificate PDF via شهادة التسجيل";
 
 let _certifyState: CertifyState = { status: "idle", logs: [], reportNumbers: [], currentIndex: 0 };
 let _certifyPage: any = null;      // صفحة قائمة التقارير
@@ -348,7 +348,7 @@ async function _doExtractAndSend(page: any): Promise<{
 }> {
   await page.waitForTimeout(2000);
 
-  // استخرج رقم DC والقيمة النهائية
+  // 1) استخرج رقم DC والقيمة النهائية
   _certifyLog("📋 استخراج بيانات الشهادة...");
   const extracted: { dcNumber: string; finalValue: string } = await page.evaluate(() => {
     const fullText = document.body.innerText || "";
@@ -360,7 +360,7 @@ async function _doExtractAndSend(page: any): Promise<{
   });
   _certifyLog(`📌 رقم DC: ${extracted.dcNumber || "(لم يُعثر)"} | القيمة: ${extracted.finalValue || "(لم تُعثر)"}`);
 
-  // التقاط صورة QR
+  // 2) التقاط صورة QR
   _certifyLog("📸 التقاط صورة QR...");
   let qrBase64 = "";
   try {
@@ -378,42 +378,89 @@ async function _doExtractAndSend(page: any): Promise<{
     _certifyLog(`⚠️ خطأ في لقطة QR: ${e.message}`);
   }
 
-  // أرسل للـ API
+  // 3) تحميل ملف PDF الشهادة بالنقر على زر "شهادة التسجيل"
+  _certifyLog("📄 البحث عن زر شهادة التسجيل لتحميل PDF...");
+  let pdfBuffer: Buffer = Buffer.alloc(0);
+  let pdfFilename = `certificate_${_certifyState.openedReport ?? "report"}.pdf`;
+  try {
+    // ابحث عن زر/رابط "شهادة التسجيل"
+    const certBtnSelector = [
+      "a:has-text('شهادة التسجيل')",
+      "button:has-text('شهادة التسجيل')",
+      "[href*='certificate']",
+      "[href*='cert']",
+      "a:has-text('شهادة')",
+      "button:has-text('شهادة')",
+    ].join(", ");
+
+    const certBtn = page.locator(certBtnSelector).first();
+    const found = await certBtn.count() > 0;
+
+    if (found) {
+      _certifyLog("📎 تم العثور على زر شهادة التسجيل — جارٍ الضغط للتحميل...");
+
+      // ابدأ انتظار حدث التنزيل قبل النقر
+      const [ download ] = await Promise.all([
+        page.waitForEvent("download", { timeout: 30000 }),
+        certBtn.click({ timeout: 10000 }),
+      ]);
+
+      _certifyLog(`📥 جارٍ تنزيل: ${download.suggestedFilename()}...`);
+
+      // احفظ الملف مؤقتاً واقرأه
+      const fs = await import("fs");
+      const path = await import("path");
+      const os = await import("os");
+      const tmpPath = path.join(os.tmpdir(), download.suggestedFilename() || pdfFilename);
+      await download.saveAs(tmpPath);
+      pdfBuffer = fs.readFileSync(tmpPath);
+      pdfFilename = download.suggestedFilename() || pdfFilename;
+      _certifyLog(`✅ تم تحميل PDF الشهادة: ${pdfFilename} (${Math.round(pdfBuffer.length / 1024)} KB)`);
+
+      // احذف الملف المؤقت
+      fs.unlinkSync(tmpPath);
+    } else {
+      _certifyLog("⚠️ لم يُعثر على زر شهادة التسجيل — سيتم الإرسال بدون PDF");
+    }
+  } catch (e: any) {
+    _certifyLog(`⚠️ فشل تحميل PDF الشهادة: ${e.message?.slice(0, 120)}`);
+  }
+
+  // 4) أرسل للـ API (multipart/form-data مع certificatePath)
   const reportNumber = _certifyState.openedReport ?? "";
   const submittedAt = new Date().toISOString();
-  _certifyLog("📡 إرسال البيانات لـ QrInformationApi...");
+  _certifyLog("📡 إرسال البيانات + PDF لـ QrInformationApi...");
+
+  // 4) أرسل للـ API باستخدام FormData + Blob المدمجَين في Node 18
   try {
-    const { default: nodeFetch, FormData: NodeFormData } = await import("node-fetch") as any;
-    const fd = new NodeFormData();
+    const fd = new FormData();
     fd.append("reportCode",         extracted.dcNumber);
     fd.append("taqeemReportNumber", reportNumber);
     fd.append("taqeemSubmittedAt",  submittedAt);
     fd.append("qrCodeBase64",       qrBase64);
     fd.append("finalValue",         extracted.finalValue);
-    const resp = await nodeFetch("http://localhost:5000/External/QrInformationApi", { method: "POST", body: fd });
+    if (pdfBuffer.length > 0) {
+      // Blob مدمج في Node 18+ يدعم إرسال الملفات عبر FormData
+      const pdfBlob = new Blob([pdfBuffer], { type: "application/pdf" });
+      fd.append("certificatePath", pdfBlob, pdfFilename);
+    }
+    const resp = await fetch("http://localhost:5000/External/QrInformationApi", {
+      method: "POST",
+      body: fd,
+    });
     if (resp.ok) {
       _certifyLog(`✅ QrInformationApi: ${resp.status} ${resp.statusText}`);
     } else {
       const body = await resp.text().catch(() => "");
-      _certifyLog(`⚠️ QrInformationApi: ${resp.status} — ${body.slice(0, 200)}`);
+      _certifyLog(`⚠️ QrInformationApi: ${resp.status} — ${body.slice(0, 300)}`);
     }
-  } catch {
-    try {
-      const fd2 = new FormData();
-      fd2.append("reportCode",         extracted.dcNumber);
-      fd2.append("taqeemReportNumber", reportNumber);
-      fd2.append("taqeemSubmittedAt",  submittedAt);
-      fd2.append("qrCodeBase64",       qrBase64);
-      fd2.append("finalValue",         extracted.finalValue);
-      const resp2 = await fetch("http://localhost:5000/External/QrInformationApi", { method: "POST", body: fd2 });
-      _certifyLog(`✅ QrInformationApi (fallback): ${resp2.status}`);
-    } catch (e2: any) {
-      _certifyLog(`❌ QrInformationApi فشل نهائياً: ${e2.message}`);
-    }
+  } catch (e: any) {
+    _certifyLog(`❌ QrInformationApi فشل: ${e.message?.slice(0, 120)}`);
   }
 
   return { dcNumber: extracted.dcNumber, finalValue: extracted.finalValue, reportNumber, qrBase64 };
 }
+
 
 // ── مراقب Polling: يفحص كل ثانيتين إن ظهر QR (يعمل مع SPA والضغط اليدوي) ──
 function _watchForCertificatePage(page: any): void {
