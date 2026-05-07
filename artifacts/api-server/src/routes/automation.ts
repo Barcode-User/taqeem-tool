@@ -55,6 +55,128 @@ function getCertifyStatus(): CertifyState {
   return { ..._certifyState, logs: [..._certifyState.logs] };
 }
 
+// ── دالة مشتركة: تطبيق فلتر "بإنتظار الاعتماد" بشكل محدد وموثوق ────────────
+async function _applyPendingFilter(page: any): Promise<boolean> {
+  try {
+    await page.waitForSelector("#report-status-filter, [id='report-status-filter']", { timeout: 20000 });
+  } catch {
+    _certifyLog("⚠️ لم يظهر عنصر الفلتر — المتابعة بدون فلتر");
+    return false;
+  }
+
+  const tagName: string = await page.evaluate(() => {
+    const el = document.querySelector("#report-status-filter, [id='report-status-filter']");
+    return el ? el.tagName.toLowerCase() : "not_found";
+  });
+  _certifyLog(`🔎 نوع عنصر الفلتر: ${tagName}`);
+
+  // ── الحالة 1: <select> عادي ─────────────────────────────────────────────────
+  if (tagName === "select") {
+    const result: { value: string | null; options: string[] } = await page.evaluate(() => {
+      const sel = document.querySelector("#report-status-filter, [id='report-status-filter']") as HTMLSelectElement;
+      if (!sel) return { value: null, options: [] };
+      const options = Array.from(sel.options).map(o => `[${o.value}] ${o.text.trim()}`);
+      for (const opt of Array.from(sel.options)) {
+        const n = opt.text.trim().replace(/[أإآا]/g, "ا").replace(/[ةه]/g, "ه").replace(/\s+/g, " ");
+        if (n.includes("نتظار") && n.includes("عتماد")) {
+          return { value: opt.value, options };
+        }
+      }
+      return { value: null, options };
+    });
+    _certifyLog(`📋 خيارات الفلتر: ${result.options.join(" | ")}`);
+    if (result.value !== null) {
+      await page.selectOption("#report-status-filter, [id='report-status-filter']", { value: result.value });
+      _certifyLog(`✅ تم تطبيق الفلتر <select> (قيمة: "${result.value}")`);
+      return true;
+    }
+    _certifyLog("⚠️ لم يُعثر على خيار 'بانتظار الاعتماد' داخل <select>");
+    return false;
+  }
+
+  // ── الحالة 2: Angular mat-select / ng-select ─────────────────────────────────
+  try {
+    await page.click("#report-status-filter, [id='report-status-filter']", { timeout: 8000 });
+    _certifyLog("🖱️ نقر على الفلتر — انتظار ظهور القائمة المنسدلة...");
+
+    // انتظر ظهور الخيارات
+    await page.waitForFunction(() => {
+      const selectors = ["mat-option", "li[role='option']", "[role='option']", ".ng-option"];
+      return selectors.some(s => document.querySelectorAll(s).length > 0);
+    }, { timeout: 8000 }).catch(() => {});
+
+    // اطبع كل الخيارات للتشخيص
+    const allOpts: string[] = await page.evaluate(() => {
+      const out: string[] = [];
+      for (const sel of ["mat-option", "li[role='option']", "[role='option']", ".ng-option"]) {
+        for (const el of Array.from(document.querySelectorAll(sel))) {
+          const t = (el.textContent || "").trim();
+          if (t) out.push(t);
+        }
+      }
+      return out;
+    });
+    _certifyLog(`📋 خيارات القائمة: ${allOpts.join(" | ") || "لا يوجد"}`);
+
+    // اختر الخيار الصحيح بدقة (يجب أن يحتوي على كلتي الكلمتين)
+    const clicked: string | null = await page.evaluate(() => {
+      for (const sel of ["mat-option", "li[role='option']", "[role='option']", ".ng-option"]) {
+        for (const el of Array.from(document.querySelectorAll(sel))) {
+          const txt = (el.textContent || "").trim();
+          const n = txt.replace(/[أإآا]/g, "ا").replace(/[ةه]/g, "ه").replace(/\s+/g, " ");
+          // يجب أن يحتوي على "نتظار" و"عتماد" معاً — لتجنب الاختيار العشوائي
+          if (n.includes("نتظار") && n.includes("عتماد")) {
+            (el as HTMLElement).click();
+            return txt;
+          }
+        }
+      }
+      // أغلق القائمة إن فشل الاختيار
+      return null;
+    });
+
+    if (clicked) {
+      _certifyLog(`✅ تم اختيار: "${clicked}"`);
+      return true;
+    }
+
+    // أغلق القائمة إن لم يُعثر على الخيار
+    await page.keyboard.press("Escape").catch(() => {});
+    _certifyLog("⚠️ لم يُعثر على خيار 'بانتظار الاعتماد' في القائمة المنسدلة");
+    return false;
+  } catch (e: any) {
+    _certifyLog(`⚠️ فشل تطبيق فلتر Angular: ${e.message?.slice(0, 80)}`);
+    return false;
+  }
+}
+
+// ── دالة مشتركة: استخراج أرقام التقارير من الجدول ──────────────────────────
+async function _extractReportNumbers(page: any): Promise<string[]> {
+  return page.evaluate(() => {
+    const seen = new Set<string>();
+    const results: string[] = [];
+    const add = (n: string) => {
+      if (n.length >= 5 && !seen.has(n)) { seen.add(n); results.push(n); }
+    };
+    // ★ الأدق: نص الرابط هو رقم فقط (عمود "الرقم" في الجدول)
+    for (const a of Array.from(document.querySelectorAll("a"))) {
+      const t = (a.textContent || "").trim();
+      if (/^\d{5,10}$/.test(t)) add(t);
+    }
+    // ★ خلايا <td> تحتوي على رقم فقط
+    for (const td of Array.from(document.querySelectorAll("td"))) {
+      const t = (td.textContent || "").trim();
+      if (/^\d{5,10}$/.test(t)) add(t);
+    }
+    // ★ آخر جزء من href
+    for (const a of Array.from(document.querySelectorAll("a[href]"))) {
+      const m = ((a as HTMLAnchorElement).href || "").match(/\/(\d{5,10})(?:\?|#|$)/);
+      if (m) add(m[1]);
+    }
+    return results;
+  }).catch(() => [] as string[]);
+}
+
 async function startCertifySession(): Promise<void> {
   if (_certifyState.status === "running") return;
   if (_certifyCleanup) { try { await _certifyCleanup(); } catch {} _certifyCleanup = null; }
@@ -91,163 +213,23 @@ async function startCertifySession(): Promise<void> {
 
     _certifyLog(`📄 الصفحة: ${_certifyPage.url()}`);
 
-    // ── انتظر ظهور عنصر الفلتر أولاً ────────────────────────────────────────
-    _certifyLog("⏳ انتظار تحميل عنصر الفلتر...");
-    try {
-      await _certifyPage.waitForSelector(
-        "#report-status-filter, [id='report-status-filter']",
-        { timeout: 60000 }
-      );
-      _certifyLog("✅ عنصر الفلتر جاهز");
-    } catch {
-      _certifyLog("⚠️ لم يظهر عنصر الفلتر خلال 60 ثانية — محاولة المتابعة");
-    }
-
-    // ── اكتشف نوع العنصر وطبّق الفلتر ───────────────────────────────────────
+    // ── تطبيق فلتر "بإنتظار الاعتماد" بشكل موثوق ───────────────────────────
     _certifyLog("🔍 تطبيق فلتر 'تقارير بإنتظار الإعتماد'...");
+    await _applyPendingFilter(_certifyPage);
 
-    const filterTagName: string = await _certifyPage.evaluate(() => {
-      const el = document.querySelector("#report-status-filter, [id='report-status-filter']");
-      return el ? el.tagName.toLowerCase() : "not_found";
-    });
-    _certifyLog(`🔎 نوع عنصر الفلتر: ${filterTagName}`);
-
-    let filterDone = false;
-
-    // ── الحالة 1: <select> عادي ─────────────────────────────────────────────
-    if (filterTagName === "select") {
-      try {
-        const allOptions: string[] = await _certifyPage.evaluate(() => {
-          const sel = document.querySelector("#report-status-filter") as HTMLSelectElement;
-          if (!sel) return [];
-          return Array.from(sel.options).map(o => `[${o.value}] ${o.text}`);
-        });
-        _certifyLog(`📋 خيارات الفلتر: ${allOptions.join(" | ")}`);
-
-        const optionValue: string | null = await _certifyPage.evaluate(() => {
-          const sel = document.querySelector("#report-status-filter") as HTMLSelectElement;
-          if (!sel) return null;
-          for (const opt of Array.from(sel.options)) {
-            const n = opt.text.replace(/[أإآا]/g, "ا").replace(/[ةه]/g, "ه");
-            if (n.includes("نتظار") && n.includes("عتماد")) return opt.value;
-          }
-          return null;
-        });
-        if (optionValue !== null) {
-          await _certifyPage.selectOption("#report-status-filter", { value: optionValue });
-          _certifyLog(`✅ تم تطبيق الفلتر (قيمة: "${optionValue}")`);
-          filterDone = true;
-        } else {
-          _certifyLog("⚠️ لم يُعثر على خيار 'بانتظار الاعتماد' داخل <select>");
-        }
-      } catch (e: any) {
-        _certifyLog(`⚠️ selectOption فشل: ${e.message}`);
-      }
-    }
-
-    // ── الحالة 2: Angular mat-select أو ng-select ────────────────────────────
-    if (!filterDone) {
-      try {
-        await _certifyPage.click("#report-status-filter", { timeout: 10000 });
-        _certifyLog("✅ نقر على الفلتر — انتظار ظهور القائمة...");
-        await _certifyPage.waitForTimeout(1500);
-
-        const allOverlayOpts: string[] = await _certifyPage.evaluate(() => {
-          const found: string[] = [];
-          for (const sel of ["mat-option", "li[role='option']", "[role='option']", ".ng-option"]) {
-            for (const el of Array.from(document.querySelectorAll(sel))) {
-              const t = (el.textContent || "").trim();
-              if (t) found.push(t);
-            }
-          }
-          return found;
-        });
-        if (allOverlayOpts.length > 0) {
-          _certifyLog(`📋 خيارات القائمة: ${allOverlayOpts.join(" | ")}`);
-        }
-
-        const optClicked: string | null = await _certifyPage.evaluate(() => {
-          for (const sel of ["mat-option", "li[role='option']", "[role='option']", ".ng-option", ".dropdown-item"]) {
-            for (const el of Array.from(document.querySelectorAll(sel))) {
-              const txt = (el.textContent || "").trim();
-              const n = txt.replace(/[أإآا]/g, "ا").replace(/[ةه]/g, "ه");
-              if (n.includes("نتظار") && n.includes("عتماد")) {
-                (el as HTMLElement).click();
-                return txt;
-              }
-            }
-          }
-          return null;
-        });
-
-        if (optClicked) {
-          _certifyLog(`✅ تم اختيار: "${optClicked}"`);
-          filterDone = true;
-        } else {
-          _certifyLog("⚠️ لم يُعثر على الخيار المطلوب في القائمة");
-        }
-      } catch (e: any) {
-        _certifyLog(`⚠️ فشل تطبيق الفلتر: ${e.message}`);
-      }
-    }
-
-    // ── انتظر تحميل خلايا الجدول بعد الفلتر (max 15 ثانية) ─────────────────
+    // ── انتظر تحميل خلايا الجدول بعد الفلتر ────────────────────────────────
     _certifyLog("⏳ انتظار ظهور بيانات الجدول المفلتر...");
     try {
-      await _certifyPage.waitForFunction(() => {
-        // ابحث عن أي خلية جدول تحتوي على رقم 5+ أرقام
-        return Array.from(document.querySelectorAll("td, a")).some(el => {
-          const t = (el.textContent || "").trim();
-          return /^\d{5,10}$/.test(t);
-        });
-      }, { timeout: 15000 });
+      await _certifyPage.waitForFunction(() =>
+        Array.from(document.querySelectorAll("td, a")).some(el =>
+          /^\d{5,10}$/.test((el.textContent || "").trim())
+        ), { timeout: 15000 });
       _certifyLog("✅ ظهرت بيانات الجدول");
     } catch {
       _certifyLog("⚠️ لم تظهر بيانات خلال 15 ثانية — سيُقرأ الجدول على أي حال");
     }
 
-    // ── تشخيص: طباعة نماذج من روابط الصفحة ─────────────────────────────────
-    _certifyLog("📋 قراءة روابط التقارير من الصفحة...");
-    const debugLinks: string[] = await _certifyPage.evaluate(() =>
-      Array.from(document.querySelectorAll("a[href]"))
-        .map(a => (a as HTMLAnchorElement).href)
-        .filter(h => h && !h.endsWith("#") && h !== location.href)
-        .slice(0, 15)
-    ).catch(() => [] as string[]);
-    _certifyLog(`🔍 روابط الصفحة (أول 15): ${debugLinks.join(" | ") || "لا يوجد"}`);
-
-    // ── استخرج أرقام التقارير — 3 استراتيجيات بالتسلسل ─────────────────────
-    const numbers: string[] = await _certifyPage.evaluate(() => {
-      const seen = new Set<string>();
-      const results: string[] = [];
-      const addNum = (n: string) => {
-        // تجاهل أرقام أقل من 5 خانات (pagination، sector IDs، إلخ)
-        if (n.length < 5) return;
-        if (!seen.has(n)) { seen.add(n); results.push(n); }
-      };
-
-      // ★ الاستراتيجية 1 (الأدق): نص الرابط هو رقم فقط (عمود "الرقم" في الجدول)
-      for (const a of Array.from(document.querySelectorAll("a"))) {
-        const txt = (a.textContent || "").trim();
-        if (/^\d{5,10}$/.test(txt)) addNum(txt);
-      }
-
-      // ★ الاستراتيجية 2: خلايا <td> تحتوي على رقم فقط
-      for (const td of Array.from(document.querySelectorAll("td"))) {
-        const txt = (td.textContent || "").trim();
-        if (/^\d{5,10}$/.test(txt)) addNum(txt);
-      }
-
-      // ★ الاستراتيجية 3: آخر جزء من href يكون رقم 5+ خانات
-      for (const a of Array.from(document.querySelectorAll("a[href]"))) {
-        const href = (a as HTMLAnchorElement).href || "";
-        // مطابقة /NNNNN في نهاية الـ href (قبل ؟ أو # أو نهاية النص)
-        const m = href.match(/\/(\d{5,10})(?:\?|#|$)/);
-        if (m) addNum(m[1]);
-      }
-
-      return results;
-    }).catch(() => [] as string[]);
+    const numbers: string[] = await _extractReportNumbers(_certifyPage);
 
     _certifyState.reportNumbers = numbers;
     _certifyState.currentIndex = 0;
@@ -878,69 +860,21 @@ async function _refreshPendingList(): Promise<string[]> {
   await _certifyPage.goto(CERTIFY_REPORTS_URL, { waitUntil: "domcontentloaded", timeout: 60000 });
   await _certifyPage.waitForTimeout(2000);
 
-  // طبّق الفلتر
-  try {
-    await _certifyPage.waitForSelector("#report-status-filter", { timeout: 15000 });
-    const tagName: string = await _certifyPage.evaluate(() => {
-      const el = document.querySelector("#report-status-filter");
-      return el ? el.tagName.toLowerCase() : "not_found";
-    });
-    if (tagName === "select") {
-      await _certifyPage.evaluate(() => {
-        const sel = document.querySelector("#report-status-filter") as HTMLSelectElement;
-        for (const opt of Array.from(sel.options)) {
-          const n = opt.text.replace(/[أإآا]/g, "ا").replace(/[ةه]/g, "ه");
-          if (n.includes("نتظار") && n.includes("عتماد")) {
-            sel.value = opt.value;
-            sel.dispatchEvent(new Event("change", { bubbles: true }));
-            return;
-          }
-        }
-      });
-    } else {
-      await _certifyPage.click("#report-status-filter", { timeout: 5000 });
-      await _certifyPage.waitForTimeout(1500);
-      await _certifyPage.evaluate(() => {
-        for (const sel of ["mat-option", "li[role='option']", "[role='option']", ".ng-option"]) {
-          for (const el of Array.from(document.querySelectorAll(sel))) {
-            const txt = (el.textContent || "").trim();
-            const n = txt.replace(/[أإآا]/g, "ا").replace(/[ةه]/g, "ه");
-            if (n.includes("نتظار") && n.includes("عتماد")) {
-              (el as HTMLElement).click();
-              return;
-            }
-          }
-        }
-      });
-    }
-  } catch (e: any) {
-    _certifyLog(`⚠️ خطأ في تطبيق الفلتر: ${e.message?.slice(0, 80)}`);
-  }
+  // تطبيق الفلتر بالدالة المشتركة (محدد وموثوق — لا عشوائية)
+  _certifyLog("🔍 تطبيق فلتر 'بإنتظار الاعتماد'...");
+  await _applyPendingFilter(_certifyPage);
 
   // انتظر تحميل الجدول
   try {
     await _certifyPage.waitForFunction(() =>
-      Array.from(document.querySelectorAll("td, a")).some(el => /^\d{5,10}$/.test((el.textContent || "").trim()))
-    , { timeout: 12000 });
+      Array.from(document.querySelectorAll("td, a")).some(el =>
+        /^\d{5,10}$/.test((el.textContent || "").trim())
+      ), { timeout: 12000 });
   } catch {}
 
-  // استخرج أرقام التقارير
-  const numbers: string[] = await _certifyPage.evaluate(() => {
-    const seen = new Set<string>(); const results: string[] = [];
-    const add = (n: string) => { if (n.length >= 5 && !seen.has(n)) { seen.add(n); results.push(n); } };
-    for (const a of Array.from(document.querySelectorAll("a"))) {
-      const t = (a.textContent || "").trim(); if (/^\d{5,10}$/.test(t)) add(t);
-    }
-    for (const td of Array.from(document.querySelectorAll("td"))) {
-      const t = (td.textContent || "").trim(); if (/^\d{5,10}$/.test(t)) add(t);
-    }
-    for (const a of Array.from(document.querySelectorAll("a[href]"))) {
-      const m = ((a as HTMLAnchorElement).href || "").match(/\/(\d{5,10})(?:\?|#|$)/);
-      if (m) add(m[1]);
-    }
-    return results;
-  }).catch(() => [] as string[]);
-
+  // استخرج الأرقام بالدالة المشتركة
+  const numbers = await _extractReportNumbers(_certifyPage);
+  _certifyLog(`📊 وُجد ${numbers.length} تقرير: ${numbers.slice(0, 5).join(", ")}${numbers.length > 5 ? "..." : ""}`);
   return numbers;
 }
 
