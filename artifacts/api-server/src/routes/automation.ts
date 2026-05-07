@@ -416,35 +416,46 @@ async function _doExtractAndSend(page: any): Promise<{
   return { dcNumber: extracted.dcNumber, finalValue: extracted.finalValue, reportNumber, qrBase64 };
 }
 
-// ── مراقب تلقائي: يرصد ظهور صفحة الشهادة حتى بعد الضغط اليدوي ─────────────
+// ── مراقب Polling: يفحص كل ثانيتين إن ظهر QR (يعمل مع SPA والضغط اليدوي) ──
 function _watchForCertificatePage(page: any): void {
-  page.on("load", async () => {
-    if (_certifyExtracting) return;
-    try {
-      const url: string = page.url();
-      _certifyLog(`📍 تحميل صفحة: ${url}`);
-      // تحقق من وجود QR في الصفحة المحملة
-      const hasQR: boolean = await page.evaluate(() => {
-        const imgs = Array.from(document.querySelectorAll("img"));
-        return imgs.some((img: any) =>
-          img.src?.includes("qr") || img.src?.includes("create-qr") || img.src?.includes("registration")
-        );
-      }).catch(() => false);
-
-      if (hasQR) {
-        _certifyExtracting = true;
-        _certifyLog("🎯 تم اكتشاف صفحة الشهادة تلقائياً — جارٍ الاستخراج والإرسال...");
-        try {
-          await _doExtractAndSend(page);
-          _certifyLog("✅ اكتمل الاستخراج والإرسال التلقائي");
-        } catch (e: any) {
-          _certifyLog(`❌ خطأ في الاستخراج التلقائي: ${e.message}`);
-        } finally {
-          _certifyExtracting = false;
+  (async () => {
+    _certifyLog("👁️ بدء مراقبة صفحة التقرير (polling كل 2 ثانية)...");
+    let consecutiveFails = 0;
+    while (consecutiveFails < 3) {
+      await new Promise(r => setTimeout(r, 2000));
+      if (_certifyExtracting) continue;
+      try {
+        const hasQR: boolean = await page.evaluate(() => {
+          return Array.from(document.querySelectorAll("img")).some((img: any) =>
+            img.src && (
+              img.src.includes("qr") ||
+              img.src.includes("create-qr") ||
+              img.src.includes("registration") ||
+              img.src.includes("certificate")
+            )
+          );
+        });
+        consecutiveFails = 0;
+        if (hasQR && !_certifyExtracting) {
+          _certifyExtracting = true;
+          _certifyLog("🎯 QR مكتشف تلقائياً — جارٍ الاستخراج والإرسال...");
+          try {
+            await _doExtractAndSend(page);
+            _certifyLog("✅ اكتمل الاستخراج والإرسال التلقائي");
+          } catch (e: any) {
+            _certifyLog(`❌ خطأ في الاستخراج التلقائي: ${e.message}`);
+          } finally {
+            _certifyExtracting = false;
+          }
+          break; // توقف المراقبة بعد الاستخراج
         }
+      } catch {
+        consecutiveFails++;
+        _certifyLog(`⚠️ خطأ في polling (${consecutiveFails}/3)...`);
       }
-    } catch {}
-  });
+    }
+    _certifyLog("🛑 توقفت مراقبة الصفحة");
+  })();
 }
 
 // ── اعتماد التقرير: ضغط الزر + استخراج البيانات + إرسال للـ API ───────────
@@ -490,94 +501,82 @@ async function _approveAndExtract(): Promise<{
   // انتظر قليلاً بعد تحديد checkbox
   await page.waitForTimeout(1000);
 
-  // ── محاولة 1: URLSearchParams fetch (يطابق طلب HTML عادي تماماً) ──
-  _certifyLog("📤 إرسال النموذج بـ URLSearchParams fetch...");
+  // ── محاولة 1: form.submit() مباشر — يتجاوز كل معالجات JS (vD وغيره) ──
+  _certifyLog("📤 محاولة form.submit() مباشر...");
   try {
-    const fetchResult: string = await page.evaluate(async () => {
+    const submitResult: string = await page.evaluate(() => {
       const btn = (document.getElementById("confirm") as HTMLInputElement)
         || (document.querySelector("input[name='confirm']") as HTMLInputElement)
         || (document.querySelector("input[type='submit']") as HTMLInputElement);
-      const form = btn?.form || document.querySelector("form") as HTMLFormElement;
+      const form = (btn?.form || document.querySelector("form")) as HTMLFormElement | null;
       if (!form) return "no_form";
-
-      // بناء URLSearchParams من حقول النموذج (يطابق application/x-www-form-urlencoded)
-      const params = new URLSearchParams();
-      for (const el of Array.from(form.elements)) {
-        const inp = el as HTMLInputElement;
-        if (!inp.name || inp.disabled) continue;
-        if ((inp.type === "checkbox" || inp.type === "radio") && !inp.checked) continue;
-        params.append(inp.name, inp.value ?? "");
-      }
-      if (btn?.name && btn?.value) params.set(btn.name, btn.value);
-
-      const actionUrl = form.action || window.location.href;
-      const method = (form.method || "POST").toUpperCase();
-
-      const resp = await fetch(actionUrl, {
-        method,
-        body: params,
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        credentials: "include",
-        redirect: "follow",
-      });
-
-      if (resp.ok) {
-        window.location.href = resp.url;
-        return "ok:" + resp.url;
-      }
-      return "error:" + resp.status + ":" + resp.url;
+      // تأكد من تحديد الـ checkbox أولاً
+      const cb = form.querySelector("input[type='checkbox']") as HTMLInputElement | null;
+      if (cb && !cb.checked) cb.checked = true;
+      // form.submit() لا يُطلق أي حدث JS — يرسل النموذج مباشرة للخادم
+      form.submit();
+      return "submitted";
     });
-    _certifyLog(`📤 fetch result: ${fetchResult}`);
-    btnClicked = fetchResult.startsWith("ok:");
-    if (btnClicked) {
+    _certifyLog(`📤 form.submit() result: ${submitResult}`);
+    if (submitResult === "submitted") {
+      btnClicked = true;
+      // انتظر التنقل بعد submit
       await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
-      _certifyLog(`✅ الصفحة انتقلت إلى: ${page.url()}`);
+      _certifyLog(`✅ الصفحة بعد submit: ${page.url()}`);
     }
   } catch (e: any) {
-    _certifyLog(`↪️ URLSearchParams fetch فشل: ${(e as Error).message?.slice(0, 120)}`);
+    _certifyLog(`↪️ form.submit() فشل: ${(e as Error).message?.slice(0, 120)}`);
   }
 
-  // ── محاولة 2: clone الزر + native click (بدون معالجات JS) ──
+  // ── محاولة 2: dispatchEvent('submit') على النموذج ──
   if (!btnClicked) {
-    _certifyLog("🔄 clone الزر وإزالة معالجات JS...");
+    _certifyLog("🔄 محاولة dispatchEvent submit...");
     try {
       await page.evaluate(() => {
-        const btn = document.getElementById("confirm")
-          || document.querySelector("input[name='confirm']")
-          || document.querySelector("input[type='submit']");
-        if (btn) { const c = btn.cloneNode(true) as HTMLElement; btn.replaceWith(c); }
+        const form = document.querySelector("form") as HTMLFormElement;
+        if (!form) return;
+        const cb = form.querySelector("input[type='checkbox']") as HTMLInputElement | null;
+        if (cb && !cb.checked) cb.checked = true;
+        // أزل معالجات submit من النموذج عن طريق clone
+        const clone = form.cloneNode(true) as HTMLFormElement;
+        form.replaceWith(clone);
+        clone.submit();
       });
-      const loc = page.locator("#confirm, input[name='confirm'], input[type='submit']").first();
-      if (await loc.count() > 0) {
-        await loc.scrollIntoViewIfNeeded({ timeout: 2000 });
-        await loc.click({ force: true, timeout: 5000 });
-        btnClicked = true;
-        await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
-        _certifyLog(`✅ clone-click — الصفحة: ${page.url()}`);
-      }
+      btnClicked = true;
+      await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
+      _certifyLog(`✅ clone+submit — الصفحة: ${page.url()}`);
     } catch (e: any) {
-      _certifyLog(`↪️ clone-click فشل: ${(e as Error).message?.slice(0, 120)}`);
+      _certifyLog(`↪️ clone+submit فشل: ${(e as Error).message?.slice(0, 120)}`);
     }
   }
 
   if (!btnClicked) {
-    _certifyLog("⚠️ فشل الضغط التلقائي — المراقب التلقائي سيرصد الضغط اليدوي في المتصفح");
+    _certifyLog("⚠️ فشل الضغط التلقائي — المراقب Polling سيرصد الضغط اليدوي تلقائياً");
   }
 
-  // ── انتظر ظهور QR (90 ثانية — تكفي للضغط اليدوي أيضاً) ──
-  _certifyLog("⏳ انتظار ظهور صفحة الشهادة والـ QR (حتى 90 ثانية)...");
-  try {
-    await page.waitForFunction(() => {
-      return Array.from(document.querySelectorAll("img")).some(
-        (img: any) => img.src?.includes("qr") || img.src?.includes("create-qr") || img.src?.includes("registration")
-      );
-    }, { timeout: 90000 });
-    _certifyLog("✅ ظهرت صفحة الشهادة");
-  } catch {
-    _certifyLog("⚠️ لم تظهر الشهادة — سيُحاوَل استخراج البيانات الحالية");
+  // ── المراقب Polling يتولى الاستخراج (يعمل بالتوازي منذ openCertifyReport) ──
+  // هنا ننتظر فقط إن نجح الضغط التلقائي — وإلا يعمل المراقب مع الضغط اليدوي
+  if (btnClicked) {
+    _certifyLog("⏳ انتظار ظهور QR بعد الضغط التلقائي...");
+    try {
+      await page.waitForFunction(() => {
+        return Array.from(document.querySelectorAll("img")).some(
+          (img: any) => img.src && (
+            img.src.includes("qr") || img.src.includes("create-qr") ||
+            img.src.includes("registration") || img.src.includes("certificate")
+          )
+        );
+      }, { timeout: 30000 });
+      _certifyLog("✅ ظهر QR — يمكن للمراقب الـ polling الاستخراج");
+    } catch {
+      _certifyLog("⚠️ QR لم يظهر بعد 30 ثانية — المراقب سيواصل المراقبة");
+    }
+    return await _doExtractAndSend(page);
   }
 
-  return await _doExtractAndSend(page);
+  // إذا فشل الضغط التلقائي — أعد قيمة فارغة وأترك المراقب يعمل
+  _certifyLog("ℹ️ المراقب Polling يعمل في الخلفية — اضغط زر الاعتماد يدوياً في المتصفح");
+  return { dcNumber: "", finalValue: "", reportNumber: _certifyState.openedReport ?? "", qrBase64: "" };
 }
 
 async function stopCertifySession(): Promise<void> {
