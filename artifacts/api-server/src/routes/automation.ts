@@ -37,7 +37,7 @@ type CertifyState = {
   openedReport?: string;
 };
 
-const CERTIFY_BOT_VERSION = "v4.0 — 2026-05-07 — polling-watcher + form.submit()";
+const CERTIFY_BOT_VERSION = "v5.0 — 2026-05-07 — full-auto: checkbox→submit→extract";
 
 let _certifyState: CertifyState = { status: "idle", logs: [], reportNumbers: [], currentIndex: 0 };
 let _certifyPage: any = null;      // صفحة قائمة التقارير
@@ -230,22 +230,19 @@ async function startCertifySession(): Promise<void> {
     if (numbers.length > 0) {
       _certifyLog(`✅ وُجد ${numbers.length} تقرير بانتظار الاعتماد: ${numbers.slice(0, 5).join(", ")}${numbers.length > 5 ? "..." : ""}`);
 
-      // ── تاب (2): افتح أول تقرير في تاب منفصل (استعراض فقط) ───────────────
-      const firstNumber = numbers[0];
-      const firstUrl = `${CERTIFY_REPORT_BASE}/${firstNumber}?office=${CERTIFY_OFFICE}`;
-      _certifyLog(`🔗 فتح التقرير ${firstNumber} في تاب ثانٍ...`);
-      _certifyReportPage = await context.newPage();
-      await _certifyReportPage.goto(firstUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
-      _certifyState.openedReport = firstNumber;
-      _certifyLog(`✅ تم فتح التقرير ${firstNumber} (1 من ${numbers.length}) في تاب منفصل`);
-      // حدّد checkbox الموافقة على السياسات تلقائياً
-      await _checkPolicyCheckbox(_certifyReportPage);
+      // افتح أول تقرير عبر openCertifyReport التي تبدأ polling watcher تلقائياً
+      await openCertifyReport(numbers[0]);
+
+      // ابدأ الاعتماد التلقائي فوراً بعد تحديد الـ checkbox
+      _certifyState.status = "approving";
+      _certifyLog("🚀 بدء الاعتماد التلقائي — جارٍ إرسال النموذج...");
+      _approveAndExtract().catch(e =>
+        _certifyLog(`❌ خطأ في الاعتماد التلقائي: ${e.message}`)
+      );
     } else {
       _certifyLog("⚠️ لم يُعثر على تقارير بانتظار الاعتماد في الجدول — ربما الصفحة فارغة أو الفلتر لم ينطبق");
+      _certifyState.status = "ready";
     }
-
-    _certifyState.status = "ready";
-    _certifyLog("✅ جاهز — التاب الأول: قائمة التقارير | التاب الثاني: التقرير المفتوح");
 
   } catch (err: any) {
     _certifyState.status = "failed";
