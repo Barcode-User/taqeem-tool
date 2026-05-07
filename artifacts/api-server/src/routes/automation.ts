@@ -44,6 +44,7 @@ let _certifyPage: any = null;      // صفحة قائمة التقارير
 let _certifyReportPage: any = null; // التاب الثاني للتقرير المفتوح
 let _certifyCleanup: (() => Promise<void>) | null = null;
 let _certifyExtracting = false;    // منع الاستخراج المزدوج
+let _certifyAutoLoop  = false;    // تحكم في حلقة الانتظار التلقائية
 
 function _certifyLog(msg: string) {
   _certifyState.logs.push(`[${new Date().toISOString()}] ${msg}`);
@@ -638,7 +639,10 @@ async function _doExtractAndSend(page: any): Promise<{
         try {
           const next = await nextCertifyReport();
           if (!next) {
-            _certifyLog("🏁 اكتملت جميع التقارير في هذه الجلسة");
+            // لا توجد تقارير إضافية — ابدأ حلقة الانتظار (5 دقائق ثم تحقق مجدداً)
+            _autoRefreshLoop().catch(e =>
+              _certifyLog(`❌ خطأ في حلقة التحديث: ${e.message}`)
+            );
             return;
           }
           _certifyLog(`📂 تقرير ${next.reportNumber} (${next.index} من ${next.total}) — انتظار تحميل الصفحة...`);
@@ -867,7 +871,116 @@ async function _approveAndExtract(): Promise<{
   return { dcNumber: "", finalValue: "", reportNumber: _certifyState.openedReport ?? "", qrBase64: "" };
 }
 
+// ── يجلب أرقام التقارير المعلقة مجدداً دون إعادة بناء المتصفح ───────────────
+async function _refreshPendingList(): Promise<string[]> {
+  if (!_certifyPage) return [];
+  _certifyLog("🔄 إعادة تحميل قائمة التقارير بإنتظار الاعتماد...");
+  await _certifyPage.goto(CERTIFY_REPORTS_URL, { waitUntil: "domcontentloaded", timeout: 60000 });
+  await _certifyPage.waitForTimeout(2000);
+
+  // طبّق الفلتر
+  try {
+    await _certifyPage.waitForSelector("#report-status-filter", { timeout: 15000 });
+    const tagName: string = await _certifyPage.evaluate(() => {
+      const el = document.querySelector("#report-status-filter");
+      return el ? el.tagName.toLowerCase() : "not_found";
+    });
+    if (tagName === "select") {
+      await _certifyPage.evaluate(() => {
+        const sel = document.querySelector("#report-status-filter") as HTMLSelectElement;
+        for (const opt of Array.from(sel.options)) {
+          const n = opt.text.replace(/[أإآا]/g, "ا").replace(/[ةه]/g, "ه");
+          if (n.includes("نتظار") && n.includes("عتماد")) {
+            sel.value = opt.value;
+            sel.dispatchEvent(new Event("change", { bubbles: true }));
+            return;
+          }
+        }
+      });
+    } else {
+      await _certifyPage.click("#report-status-filter", { timeout: 5000 });
+      await _certifyPage.waitForTimeout(1500);
+      await _certifyPage.evaluate(() => {
+        for (const sel of ["mat-option", "li[role='option']", "[role='option']", ".ng-option"]) {
+          for (const el of Array.from(document.querySelectorAll(sel))) {
+            const txt = (el.textContent || "").trim();
+            const n = txt.replace(/[أإآا]/g, "ا").replace(/[ةه]/g, "ه");
+            if (n.includes("نتظار") && n.includes("عتماد")) {
+              (el as HTMLElement).click();
+              return;
+            }
+          }
+        }
+      });
+    }
+  } catch (e: any) {
+    _certifyLog(`⚠️ خطأ في تطبيق الفلتر: ${e.message?.slice(0, 80)}`);
+  }
+
+  // انتظر تحميل الجدول
+  try {
+    await _certifyPage.waitForFunction(() =>
+      Array.from(document.querySelectorAll("td, a")).some(el => /^\d{5,10}$/.test((el.textContent || "").trim()))
+    , { timeout: 12000 });
+  } catch {}
+
+  // استخرج أرقام التقارير
+  const numbers: string[] = await _certifyPage.evaluate(() => {
+    const seen = new Set<string>(); const results: string[] = [];
+    const add = (n: string) => { if (n.length >= 5 && !seen.has(n)) { seen.add(n); results.push(n); } };
+    for (const a of Array.from(document.querySelectorAll("a"))) {
+      const t = (a.textContent || "").trim(); if (/^\d{5,10}$/.test(t)) add(t);
+    }
+    for (const td of Array.from(document.querySelectorAll("td"))) {
+      const t = (td.textContent || "").trim(); if (/^\d{5,10}$/.test(t)) add(t);
+    }
+    for (const a of Array.from(document.querySelectorAll("a[href]"))) {
+      const m = ((a as HTMLAnchorElement).href || "").match(/\/(\d{5,10})(?:\?|#|$)/);
+      if (m) add(m[1]);
+    }
+    return results;
+  }).catch(() => [] as string[]);
+
+  return numbers;
+}
+
+// ── حلقة التحديث التلقائي: تنتظر 5 دقائق ثم تتحقق من تقارير جديدة ─────────
+async function _autoRefreshLoop(): Promise<void> {
+  _certifyAutoLoop = true;
+  const WAIT_MS = 5 * 60 * 1000; // 5 دقائق
+  while (_certifyAutoLoop) {
+    _certifyLog("⏰ اكتملت جميع التقارير — سيتم التحقق من تقارير جديدة بعد 5 دقائق...");
+
+    // انتظر 5 دقائق مع إمكانية إيقاف مبكر
+    const deadline = Date.now() + WAIT_MS;
+    while (_certifyAutoLoop && Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 10000));
+    }
+    if (!_certifyAutoLoop) break;
+
+    try {
+      const numbers = await _refreshPendingList();
+      if (numbers.length === 0) {
+        _certifyLog("⚠️ لا توجد تقارير جديدة بعد — سيُعاد التحقق بعد 5 دقائق أخرى...");
+        continue; // كرر الانتظار
+      }
+      _certifyLog(`✅ وُجد ${numbers.length} تقرير جديد بانتظار الاعتماد — بدء الاعتماد...`);
+      _certifyState.reportNumbers = numbers;
+      _certifyState.currentIndex = 0;
+      await openCertifyReport(numbers[0]);
+      _certifyState.status = "approving";
+      await _approveAndExtract();
+      // بعد انتهاء التقارير ستُطلق حلقة جديدة تلقائياً من _doExtractAndSend
+      break;
+    } catch (e: any) {
+      _certifyLog(`❌ خطأ في التحديث التلقائي: ${e.message}`);
+    }
+  }
+  if (!_certifyAutoLoop) _certifyLog("🛑 توقفت حلقة التحديث التلقائي");
+}
+
 async function stopCertifySession(): Promise<void> {
+  _certifyAutoLoop = false; // أوقف حلقة الانتظار
   if (_certifyReportPage) { try { await _certifyReportPage.close(); } catch {} _certifyReportPage = null; }
   if (_certifyCleanup) { try { await _certifyCleanup(); } catch {} _certifyCleanup = null; }
   _certifyState = { status: "idle", logs: [], reportNumbers: [], currentIndex: 0 };
