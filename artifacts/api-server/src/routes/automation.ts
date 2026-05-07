@@ -370,6 +370,20 @@ async function nextCertifyReport(): Promise<{ reportNumber: string; index: numbe
 async function _doExtractAndSend(page: any): Promise<{
   dcNumber: string; finalValue: string; reportNumber: string; qrBase64: string;
 }> {
+  // ── Guard: منع الاستدعاء المزدوج (race condition بين polling + approveAndExtract) ──
+  if (_certifyExtracting) {
+    _certifyLog("⚠️ الاستخراج جارٍ بالفعل — تجاهل الاستدعاء المكرر");
+    // انتظر حتى ينتهي الاستدعاء الأول
+    let waited = 0;
+    while (_certifyExtracting && waited < 60000) {
+      await new Promise(r => setTimeout(r, 500));
+      waited += 500;
+    }
+    return { dcNumber: "", finalValue: "", reportNumber: _certifyState.openedReport ?? "", qrBase64: "" };
+  }
+  _certifyExtracting = true;
+
+  try {
   await page.waitForTimeout(2000);
 
   // 1) استخرج رقم DC والقيمة النهائية
@@ -614,6 +628,11 @@ async function _doExtractAndSend(page: any): Promise<{
   }
 
   return { dcNumber: extracted.dcNumber, finalValue: extracted.finalValue, reportNumber, qrBase64 };
+
+  } finally {
+    // أطلق القفل دائماً عند الانتهاء
+    _certifyExtracting = false;
+  }
 }
 
 
@@ -641,15 +660,12 @@ function _watchForCertificatePage(page: any): void {
         });
         consecutiveFails = 0;
         if (result.hasQR && !_certifyExtracting) {
-          _certifyExtracting = true;
           _certifyLog(`🎯 QR مكتشف على: ${result.url} — جارٍ الاستخراج...`);
           try {
             await _doExtractAndSend(page);
             _certifyLog("✅ اكتمل الاستخراج والإرسال التلقائي");
           } catch (e: any) {
             _certifyLog(`❌ خطأ في الاستخراج: ${e.message}`);
-          } finally {
-            _certifyExtracting = false;
           }
           break;
         }
