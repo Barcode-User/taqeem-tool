@@ -37,6 +37,8 @@ type CertifyState = {
   openedReport?: string;
 };
 
+const CERTIFY_BOT_VERSION = "v4.0 — 2026-05-07 — polling-watcher + form.submit()";
+
 let _certifyState: CertifyState = { status: "idle", logs: [], reportNumbers: [], currentIndex: 0 };
 let _certifyPage: any = null;      // صفحة قائمة التقارير
 let _certifyReportPage: any = null; // التاب الثاني للتقرير المفتوح
@@ -691,9 +693,15 @@ router.get("/automation/certify/status", (_req, res) => {
   res.json(getCertifyStatus());
 });
 
+// GET /api/automation/certify/version
+router.get("/automation/certify/version", (_req, res) => {
+  res.json({ version: CERTIFY_BOT_VERSION });
+});
+
 // POST /api/automation/certify/start
 router.post("/automation/certify/start", async (_req, res) => {
   try {
+    _certifyLog(`🤖 CertifyBot ${CERTIFY_BOT_VERSION}`);
     startCertifySession().catch(err =>
       console.error("[certify-start] unexpected error:", err)
     );
