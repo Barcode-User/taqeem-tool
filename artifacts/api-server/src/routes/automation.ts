@@ -443,21 +443,60 @@ async function _doExtractAndSend(page: any): Promise<{
   if (qrContentUrl.startsWith("http")) {
     _certifyLog(`📥 تحميل ملف QR مباشرةً (API Request Context): ${qrContentUrl.slice(0, 120)}`);
     try {
-      // استخدم Playwright API Request Context — يشارك الكوكيز مع المتصفح
-      // ويحمّل الملف كبايتات خام بدون Chrome PDF viewer
-      const apiResp = await page.context().request.get(qrContentUrl, {
-        timeout: 30000,
-        maxRedirects: 10,
-      });
+      // استخرج الكوكيز من المتصفح لإرسالها مع الطلب
+      const browserCookies: Array<{name: string; value: string}> = await page.context().cookies();
+      const cookieHeader = browserCookies.map(c => `${c.name}=${c.value}`).join("; ");
 
-      const contentType: string = (apiResp.headers()["content-type"] || "").toLowerCase();
-      const status = apiResp.status();
-      _certifyLog(`📄 Status: ${status} | Content-Type: ${contentType}`);
+      // استخدم https مباشرةً مع rejectUnauthorized: false (تجاوز SSL)
+      // لأن page.context().request لا يتجاوز TLS errors على Windows
+      const httpsM = require("https") as typeof import("https");
+      const { URL: URLClass } = require("url") as typeof import("url");
 
-      const bodyBuf: Buffer = Buffer.from(await apiResp.body());
-      _certifyLog(`📦 حجم الاستجابة: ${Math.round(bodyBuf.length / 1024)} KB`);
+      const fetchWithRedirects = (targetUrl: string, depth = 0): Promise<{ statusCode: number; contentType: string; body: Buffer }> =>
+        new Promise((resolve, reject) => {
+          if (depth > 10) return reject(new Error("Too many redirects"));
+          const parsed = new URLClass(targetUrl);
+          const opts = {
+            hostname: parsed.hostname,
+            port: parsed.port || 443,
+            path: parsed.pathname + parsed.search,
+            method: "GET",
+            rejectUnauthorized: false, // تجاوز SSL validation
+            headers: {
+              Cookie: cookieHeader,
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+              Accept: "application/pdf,*/*",
+            },
+          };
+          const req = httpsM.request(opts, (res: any) => {
+            // اتبع الـ redirects
+            if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+              const loc = res.headers.location as string;
+              const next = loc.startsWith("http") ? loc : `${parsed.protocol}//${parsed.host}${loc}`;
+              _certifyLog(`↩️ Redirect ${res.statusCode} → ${next.slice(0, 80)}`);
+              res.resume();
+              resolve(fetchWithRedirects(next, depth + 1));
+              return;
+            }
+            const chunks: Buffer[] = [];
+            res.on("data", (c: Buffer) => chunks.push(c));
+            res.on("end", () => resolve({
+              statusCode: res.statusCode,
+              contentType: (res.headers["content-type"] || "").toLowerCase(),
+              body: Buffer.concat(chunks),
+            }));
+            res.on("error", reject);
+          });
+          req.on("error", reject);
+          req.end();
+        });
 
-      // تحقق أن الملف PDF حقيقي (يبدأ بـ %PDF)
+      _certifyLog("🌐 تحميل ملف QR بـ HTTPS مباشرةً (مع كوكيز المتصفح)...");
+      const result = await fetchWithRedirects(qrContentUrl);
+      const { statusCode, contentType, body: bodyBuf } = result;
+
+      _certifyLog(`📄 Status: ${statusCode} | Content-Type: ${contentType} | حجم: ${Math.round(bodyBuf.length / 1024)} KB`);
+
       const magic = bodyBuf.slice(0, 4).toString("ascii");
       _certifyLog(`🔍 File magic: ${JSON.stringify(magic)}`);
 
@@ -499,7 +538,7 @@ async function _doExtractAndSend(page: any): Promise<{
       }
 
     } catch (e: any) {
-      _certifyLog(`⚠️ خطأ في تحميل ملف QR: ${e.message?.slice(0, 150)}`);
+      _certifyLog(`⚠️ خطأ في تحميل ملف QR: ${e.message?.slice(0, 200)}`);
     }
   } else {
     _certifyLog("⚠️ لم يُعثر على URL في QR — لا يمكن تحميل الملف");
