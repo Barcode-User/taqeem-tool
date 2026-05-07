@@ -150,31 +150,34 @@ async function _applyPendingFilter(page: any): Promise<boolean> {
   }
 }
 
-// ── دالة مشتركة: استخراج أرقام التقارير من الجدول ──────────────────────────
+// ── دالة مشتركة: استخراج أرقام التقارير من روابط /report/{رقم} فقط ─────────
+// يتجاهل أي رقم آخر في الصفحة (pagination، sector IDs، إلخ)
 async function _extractReportNumbers(page: any): Promise<string[]> {
-  return page.evaluate(() => {
+  const numbers: string[] = await page.evaluate(() => {
     const seen = new Set<string>();
     const results: string[] = [];
-    const add = (n: string) => {
-      if (n.length >= 5 && !seen.has(n)) { seen.add(n); results.push(n); }
-    };
-    // ★ الأدق: نص الرابط هو رقم فقط (عمود "الرقم" في الجدول)
-    for (const a of Array.from(document.querySelectorAll("a"))) {
-      const t = (a.textContent || "").trim();
-      if (/^\d{5,10}$/.test(t)) add(t);
-    }
-    // ★ خلايا <td> تحتوي على رقم فقط
-    for (const td of Array.from(document.querySelectorAll("td"))) {
-      const t = (td.textContent || "").trim();
-      if (/^\d{5,10}$/.test(t)) add(t);
-    }
-    // ★ آخر جزء من href
+
+    // ★ المصدر الوحيد المعتمد: روابط href تحتوي على /report/{رقم}
+    // مثال: https://qima.taqeem.gov.sa/report/1724799
     for (const a of Array.from(document.querySelectorAll("a[href]"))) {
-      const m = ((a as HTMLAnchorElement).href || "").match(/\/(\d{5,10})(?:\?|#|$)/);
-      if (m) add(m[1]);
+      const href = (a as HTMLAnchorElement).href || "";
+      // مطابقة /report/ متبوعة برقم 5-10 خانات
+      const m = href.match(/\/report\/(\d{5,10})(?:\?|#|\/|$)/);
+      if (m && !seen.has(m[1])) {
+        seen.add(m[1]);
+        results.push(m[1]);
+      }
     }
     return results;
   }).catch(() => [] as string[]);
+
+  // سجّل الأرقام المُستخرجة مع مصدرها للتشخيص
+  if (numbers.length > 0) {
+    _certifyLog(`🔢 أرقام التقارير من روابط /report/: ${numbers.slice(0, 8).join(", ")}${numbers.length > 8 ? `... (${numbers.length} إجمالاً)` : ""}`);
+  } else {
+    _certifyLog("⚠️ لم يُعثر على روابط /report/{رقم} — قد يكون الفلتر لم ينطبق أو الصفحة فارغة");
+  }
+  return numbers;
 }
 
 async function startCertifySession(): Promise<void> {
