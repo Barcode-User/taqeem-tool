@@ -384,22 +384,63 @@ async function _doExtractAndSend(page: any): Promise<{
   });
   _certifyLog(`📌 رقم DC: ${extracted.dcNumber || "(لم يُعثر)"} | القيمة: ${extracted.finalValue || "(لم تُعثر)"}`);
 
-  // 2) التقاط صورة QR
-  _certifyLog("📸 التقاط صورة QR...");
-  let qrBase64 = "";
+  // 2) مسح QR — قراءة محتوى QR من رابط الصورة مباشرةً (بدون لقطة شاشة)
+  _certifyLog("🔍 مسح QR Code وقراءة محتواه...");
+  let qrBase64 = "";   // محتوى QR النصي (URL أو نص التسجيل)
+  let qrImageBase64 = ""; // صورة QR كـ base64 (للعرض فقط)
   try {
-    const qrElem = await page.$("img[src*='qr'], img[src*='create-qr'], img[alt*='qr'], img[alt*='QR'], canvas[id*='qr'], [class*='qr'] img");
-    if (qrElem) {
-      const qrBuf = await qrElem.screenshot({ type: "png" });
-      qrBase64 = qrBuf.toString("base64");
-      _certifyLog(`✅ تم التقاط QR (${qrBase64.length} chars)`);
+    // استخرج src رابط صورة QR
+    const qrData: { src: string; decoded: string } = await page.evaluate(() => {
+      const selectors = [
+        "img[src*='qr']",
+        "img[src*='create-qr']",
+        "img[src*='apiqrserver']",
+        "img[alt*='qr' i]",
+        "img[alt*='QR']",
+        "[class*='qr'] img",
+        "[class*='certificate'] img",
+      ];
+      for (const sel of selectors) {
+        const img = document.querySelector(sel) as HTMLImageElement | null;
+        if (img?.src) {
+          // حاول استخراج محتوى QR من query param "data" في الـ URL
+          let decoded = "";
+          try {
+            const url = new URL(img.src);
+            decoded = url.searchParams.get("data") || url.searchParams.get("text") || url.searchParams.get("content") || "";
+            if (decoded) decoded = decodeURIComponent(decoded);
+          } catch {}
+          return { src: img.src, decoded };
+        }
+      }
+      return { src: "", decoded: "" };
+    }).catch(() => ({ src: "", decoded: "" }));
+
+    if (qrData.src) {
+      _certifyLog(`📷 صورة QR: ${qrData.src.slice(0, 120)}`);
+    }
+
+    if (qrData.decoded) {
+      // المحتوى المستخرج مباشرةً من URL (مسح حقيقي)
+      qrBase64 = qrData.decoded;
+      _certifyLog(`✅ محتوى QR (من URL): ${qrBase64.slice(0, 200)}`);
     } else {
-      _certifyLog("⚠️ لم يُعثر على عنصر QR — لقطة شاشة للصفحة");
-      const fullBuf = await page.screenshot({ type: "png", fullPage: false });
-      qrBase64 = fullBuf.toString("base64");
+      // fallback: التقط صورة QR فقط (بدون screenshot للصفحة كاملة)
+      const qrElem = await page.$([
+        "img[src*='qr']", "img[src*='create-qr']", "img[src*='apiqrserver']",
+        "img[alt*='QR']", "[class*='qr'] img",
+      ].join(", "));
+      if (qrElem) {
+        const qrBuf: Buffer = await qrElem.screenshot({ type: "png" });
+        qrImageBase64 = qrBuf.toString("base64");
+        qrBase64 = qrImageBase64; // أرسل الصورة كـ fallback
+        _certifyLog(`📷 QR صورة فقط (${Math.round(qrBuf.length / 1024)} KB) — لم يُعثر على محتوى نصي`);
+      } else {
+        _certifyLog("⚠️ لم يُعثر على QR في الصفحة");
+      }
     }
   } catch (e: any) {
-    _certifyLog(`⚠️ خطأ في لقطة QR: ${e.message}`);
+    _certifyLog(`⚠️ خطأ في مسح QR: ${e.message}`);
   }
 
   // 3) الحصول على PDF الشهادة — محاولتان بالترتيب
@@ -455,32 +496,11 @@ async function _doExtractAndSend(page: any): Promise<{
     _certifyLog(`⚠️ [أ] خطأ: ${e.message?.slice(0, 100)}`);
   }
 
-  // محاولة ب: CDP printToPDF (fallback دائم التشغيل)
   if (pdfBuffer.length === 0) {
-    _certifyLog("📄 [ب] توليد PDF بـ CDP printToPDF...");
-    try {
-      const cdpSession = await page.context().newCDPSession(page);
-      const pdfResult: { data: string } = await cdpSession.send("Page.printToPDF", {
-        landscape: false,
-        printBackground: true,
-        preferCSSPageSize: false,
-        paperWidth: 8.27,
-        paperHeight: 11.69,
-        marginTop: 0.39,
-        marginBottom: 0.39,
-        marginLeft: 0.39,
-        marginRight: 0.39,
-      });
-      await cdpSession.detach().catch(() => {});
-      pdfBuffer = Buffer.from(pdfResult.data, "base64");
-      pdfFilename = `certificate_${reportNumber}_cdp.pdf`;
-      _certifyLog(`✅ [ب] PDF via CDP (${Math.round(pdfBuffer.length / 1024)} KB)`);
-    } catch (cdpErr: any) {
-      _certifyLog(`⚠️ [ب] CDP فشل: ${cdpErr.message?.slice(0, 80)}`);
-    }
+    _certifyLog("⚠️ PDF الشهادة لم يُحمَّل — سيُرسل الطلب بدون PDF (لن تُؤخذ لقطة شاشة بديلة)");
+  } else {
+    _certifyLog(`📊 PDF جاهز: ${pdfFilename} (${Math.round(pdfBuffer.length / 1024)} KB)`);
   }
-
-  _certifyLog(`📊 PDF نهائي: ${pdfBuffer.length > 0 ? `${pdfFilename} (${Math.round(pdfBuffer.length / 1024)} KB)` : "لا يوجد — سيُرسل بدون PDF"}`);
 
   // 4) إرسال لـ QrInformationApi باستخدام form-data + http.request
   _certifyLog("📡 إرسال البيانات + PDF لـ QrInformationApi...");
