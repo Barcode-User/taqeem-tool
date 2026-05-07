@@ -190,37 +190,62 @@ async function startCertifySession(): Promise<void> {
       }
     }
 
-    // ── انتظر ظهور بيانات الجدول بعد الفلتر (بدون عد تنازلي) ────────────────
-    _certifyLog("⏳ انتظار ظهور التقارير في الجدول...");
+    // ── انتظر 5 ثوانٍ لتحميل النتائج بعد تغيير الفلتر ──────────────────────
+    _certifyLog("⏳ انتظار تحديث الجدول بعد الفلتر (5 ثوانٍ)...");
+    await new Promise(r => setTimeout(r, 5000));
+
+    // ── انتظر ظهور أي رابط في الجدول (مرونة كاملة) ─────────────────────────
     try {
       await _certifyPage.waitForFunction(() => {
-        const hasNumberInLinks = Array.from(document.querySelectorAll("table a, td a, .mat-cell a"))
-          .some(el => /^\d{6,8}$/.test((el.textContent || "").trim()));
-        const hasNumberInCells = Array.from(document.querySelectorAll("td, .mat-cell"))
-          .some(el => /^\d{6,8}$/.test((el.textContent || "").trim()));
-        return hasNumberInLinks || hasNumberInCells;
-      }, { timeout: 60000 });
-      _certifyLog("✅ ظهرت بيانات التقارير في الجدول");
+        const allLinks = Array.from(document.querySelectorAll("a[href]"));
+        return allLinks.some(a => {
+          const href = (a as HTMLAnchorElement).href || "";
+          const txt  = (a.textContent || "").trim();
+          return /\d{4,}/.test(href) || /\d{4,}/.test(txt);
+        });
+      }, { timeout: 20000 });
+      _certifyLog("✅ ظهرت روابط في الصفحة");
     } catch {
-      _certifyLog("⚠️ لم تظهر بيانات خلال 60 ثانية — سيُقرأ الجدول على أي حال");
+      _certifyLog("⚠️ لم تظهر روابط خلال 20 ثانية — سيُقرأ الجدول على أي حال");
     }
 
-    // ── استخرج أرقام التقارير من الجدول المُفلتر ─────────────────────────────
+    // ── استخرج أرقام التقارير (من href + نص + كل العناصر) ───────────────────
     _certifyLog("📋 قراءة أرقام التقارير من الجدول...");
+
+    // أولاً: تفريغ HTML مختصر للتشخيص
+    const debugHtml: string = await _certifyPage.evaluate(() => {
+      const table = document.querySelector("table, [class*='table'], [class*='grid'], [class*='list']");
+      return table ? table.innerHTML.slice(0, 2000) : document.body.innerHTML.slice(0, 2000);
+    }).catch(() => "");
+    if (debugHtml) {
+      _certifyLog(`🔍 HTML الجدول (أول 500 حرف): ${debugHtml.replace(/\s+/g," ").slice(0, 500)}`);
+    }
+
     const numbers: string[] = await _certifyPage.evaluate(() => {
+      const seen = new Set<string>();
       const results: string[] = [];
-      const links = document.querySelectorAll("table a, td a, .mat-cell a, [class*='cell'] a");
-      for (const link of Array.from(links)) {
-        const text = (link.textContent || "").trim();
-        if (/^\d{6,8}$/.test(text) && !results.includes(text)) results.push(text);
+
+      const addNum = (n: string) => { if (!seen.has(n)) { seen.add(n); results.push(n); } };
+
+      // 1) أرقام من href للروابط: /reports/12345 أو ?id=12345
+      for (const a of Array.from(document.querySelectorAll("a[href]"))) {
+        const href = (a as HTMLAnchorElement).href || "";
+        const m = href.match(/\/(\d{4,10})(?:\/|$|\?|#)/);
+        if (m) addNum(m[1]);
       }
-      if (results.length === 0) {
-        const cells = document.querySelectorAll("td, .mat-cell");
-        for (const cell of Array.from(cells)) {
-          const text = (cell.textContent || "").trim();
-          if (/^\d{6,8}$/.test(text) && !results.includes(text)) results.push(text);
-        }
+
+      // 2) نص الروابط
+      for (const a of Array.from(document.querySelectorAll("a"))) {
+        const txt = (a.textContent || "").trim();
+        if (/^\d{4,10}$/.test(txt)) addNum(txt);
       }
+
+      // 3) خلايا الجدول (td, .mat-cell, أي عنصر يحتوي على رقم فقط)
+      for (const el of Array.from(document.querySelectorAll("td, .mat-cell, [class*='cell'], [class*='row'] span"))) {
+        const txt = (el.textContent || "").trim();
+        if (/^\d{4,10}$/.test(txt)) addNum(txt);
+      }
+
       return results;
     }).catch(() => [] as string[]);
 
