@@ -445,33 +445,47 @@ async function _doExtractAndSend(page: any): Promise<{
     let qrPage: any = null;
     try {
       qrPage = await page.context().newPage();
-      await qrPage.goto(qrContentUrl, { waitUntil: "networkidle", timeout: 30000 });
-      _certifyLog(`✅ صفحة QR محملة: ${qrPage.url()}`);
 
-      // انتظر ثلاث ثوانٍ لتحميل أي محتوى ديناميكي
-      await qrPage.waitForTimeout(3000);
+      // اعترض الاستجابة قبل التنقل لمعرفة نوع المحتوى
+      const response = await qrPage.goto(qrContentUrl, { waitUntil: "load", timeout: 30000 });
+      const contentType: string = (response?.headers?.()?.["content-type"] || "").toLowerCase();
+      _certifyLog(`📄 Content-Type: ${contentType || "(غير معروف)"} | URL: ${qrPage.url()}`);
 
-      // تحويل الصفحة إلى PDF عبر CDP (مثل طباعة الصفحة)
-      _certifyLog("🖨️ تحويل صفحة QR إلى PDF...");
-      const cdp = await qrPage.context().newCDPSession(qrPage);
-      const pdfResult: { data: string } = await cdp.send("Page.printToPDF", {
-        landscape: false,
-        printBackground: true,
-        preferCSSPageSize: true,
-        paperWidth: 8.27,   // A4
-        paperHeight: 11.69,
-        marginTop: 0.3,
-        marginBottom: 0.3,
-        marginLeft: 0.3,
-        marginRight: 0.3,
-      });
-      await cdp.detach().catch(() => {});
-      certBuffer = Buffer.from(pdfResult.data, "base64");
-      certFilename = `certificate_${reportNumber}_qr.pdf`;
-      certMime = "application/pdf";
-      _certifyLog(`✅ PDF جاهز: ${certFilename} (${Math.round(certBuffer.length / 1024)} KB)`);
+      if (contentType.includes("application/pdf") || contentType.includes("octet-stream")) {
+        // ── الحالة المثالية: QR يؤدي مباشرةً إلى PDF ──
+        _certifyLog("✅ الاستجابة PDF مباشرة — جارٍ تحميل البايتات...");
+        const bodyBuf: Buffer = await response.body();
+        certBuffer = bodyBuf;
+        certFilename = `certificate_${reportNumber}_qr.pdf`;
+        certMime = "application/pdf";
+        _certifyLog(`✅ PDF محمَّل مباشرةً: ${certFilename} (${Math.round(certBuffer.length / 1024)} KB)`);
+
+      } else {
+        // ── الصفحة تعرض HTML — نحوّلها إلى PDF بـ CDP ──
+        _certifyLog("🌐 الاستجابة HTML — انتظار 3 ثوانٍ ثم تحويل لـ PDF...");
+        await qrPage.waitForTimeout(3000);
+        _certifyLog("🖨️ تحويل صفحة QR إلى PDF عبر CDP...");
+        const cdp = await qrPage.context().newCDPSession(qrPage);
+        const pdfResult: { data: string } = await cdp.send("Page.printToPDF", {
+          landscape: false,
+          printBackground: true,
+          preferCSSPageSize: true,
+          paperWidth: 8.27,
+          paperHeight: 11.69,
+          marginTop: 0.3,
+          marginBottom: 0.3,
+          marginLeft: 0.3,
+          marginRight: 0.3,
+        });
+        await cdp.detach().catch(() => {});
+        certBuffer = Buffer.from(pdfResult.data, "base64");
+        certFilename = `certificate_${reportNumber}_qr.pdf`;
+        certMime = "application/pdf";
+        _certifyLog(`✅ PDF من صفحة HTML: ${certFilename} (${Math.round(certBuffer.length / 1024)} KB)`);
+      }
+
     } catch (e: any) {
-      _certifyLog(`⚠️ خطأ في فتح/تصوير صفحة QR: ${e.message?.slice(0, 120)}`);
+      _certifyLog(`⚠️ خطأ في فتح/تحميل صفحة QR: ${e.message?.slice(0, 120)}`);
     } finally {
       if (qrPage) { try { await qrPage.close(); } catch {} }
     }
