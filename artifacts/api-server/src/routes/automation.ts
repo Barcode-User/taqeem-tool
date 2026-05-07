@@ -615,10 +615,19 @@ async function _doExtractAndSend(page: any): Promise<{
 
     // ── إذا نجح الإرسال انتقل للتقرير التالي تلقائياً ──────────────────────
     if (_apiSuccess) {
-      _certifyLog("🔄 نجح الإرسال — الانتقال للتقرير التالي تلقائياً...");
+      _certifyLog("🔄 نجح الإرسال — إغلاق تاب التقرير والانتقال للتالي...");
       // setTimeout لكسر سلسلة الاستدعاءات وتجنب التعشيش العميق
       setTimeout(async () => {
         try {
+          // ── أغلق تاب التقرير الحالي أولاً ─────────────────────────────────
+          if (_certifyReportPage) {
+            try {
+              await _certifyReportPage.close();
+              _certifyLog("🔒 تم إغلاق تاب التقرير المنتهي");
+            } catch {}
+            _certifyReportPage = null;
+          }
+
           const next = await nextCertifyReport();
           if (!next) {
             // لا توجد تقارير إضافية — ابدأ حلقة الانتظار (5 دقائق ثم تحقق مجدداً)
@@ -627,6 +636,7 @@ async function _doExtractAndSend(page: any): Promise<{
             );
             return;
           }
+          // nextCertifyReport → openCertifyReport يفتح تاباً جديداً تلقائياً
           _certifyLog(`📂 تقرير ${next.reportNumber} (${next.index} من ${next.total}) — انتظار تحميل الصفحة...`);
           await new Promise(r => setTimeout(r, 3000));
           await _approveAndExtract();
