@@ -896,36 +896,38 @@ async function _refreshPendingList(): Promise<string[]> {
   return numbers;
 }
 
-// ── حلقة التحديث التلقائي: تنتظر 5 دقائق ثم تتحقق من تقارير جديدة ─────────
+// ── حلقة التحديث التلقائي: تُعيد تحميل الصفحة الرئيسية فور اكتمال التقارير ──
 async function _autoRefreshLoop(): Promise<void> {
   _certifyAutoLoop = true;
-  const WAIT_MS = 5 * 60 * 1000; // 5 دقائق
   while (_certifyAutoLoop) {
-    _certifyLog("⏰ اكتملت جميع التقارير — سيتم التحقق من تقارير جديدة بعد 5 دقائق...");
+    _certifyLog("🔄 اكتملت تقارير الشاشة الحالية — تحديث الصفحة الرئيسية...");
 
-    // انتظر 5 دقائق مع إمكانية إيقاف مبكر
-    const deadline = Date.now() + WAIT_MS;
-    while (_certifyAutoLoop && Date.now() < deadline) {
-      await new Promise(r => setTimeout(r, 10000));
-    }
+    // انتظر 15 ثانية قصيرة قبل إعادة التحميل (تجنب الضغط المتكرر)
+    await new Promise(r => setTimeout(r, 15000));
     if (!_certifyAutoLoop) break;
 
     try {
+      // أعد تحميل صفحة القائمة وطبّق الفلتر واستخرج التقارير الظاهرة
       const numbers = await _refreshPendingList();
+
       if (numbers.length === 0) {
-        _certifyLog("⚠️ لا توجد تقارير جديدة بعد — سيُعاد التحقق بعد 5 دقائق أخرى...");
-        continue; // كرر الانتظار
+        _certifyLog("⚠️ لا توجد تقارير بانتظار الاعتماد — إعادة المحاولة بعد 30 ثانية...");
+        // انتظر 30 ثانية إضافية إن كانت القائمة فارغة
+        await new Promise(r => setTimeout(r, 30000));
+        continue;
       }
-      _certifyLog(`✅ وُجد ${numbers.length} تقرير جديد بانتظار الاعتماد — بدء الاعتماد...`);
+
+      _certifyLog(`✅ وُجد ${numbers.length} تقرير جديد على الشاشة — بدء الاعتماد...`);
       _certifyState.reportNumbers = numbers;
       _certifyState.currentIndex = 0;
       await openCertifyReport(numbers[0]);
       _certifyState.status = "approving";
       await _approveAndExtract();
-      // بعد انتهاء التقارير ستُطلق حلقة جديدة تلقائياً من _doExtractAndSend
+      // عند انتهاء هذه الدفعة ستُطلق _autoRefreshLoop من جديد تلقائياً
       break;
     } catch (e: any) {
       _certifyLog(`❌ خطأ في التحديث التلقائي: ${e.message}`);
+      await new Promise(r => setTimeout(r, 15000)); // انتظر قبل إعادة المحاولة
     }
   }
   if (!_certifyAutoLoop) _certifyLog("🛑 توقفت حلقة التحديث التلقائي");
