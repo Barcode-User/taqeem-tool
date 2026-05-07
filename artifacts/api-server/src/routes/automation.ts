@@ -419,42 +419,47 @@ async function _doExtractAndSend(page: any): Promise<{
 // ── مراقب Polling: يفحص كل ثانيتين إن ظهر QR (يعمل مع SPA والضغط اليدوي) ──
 function _watchForCertificatePage(page: any): void {
   (async () => {
-    _certifyLog("👁️ بدء مراقبة صفحة التقرير (polling كل 2 ثانية)...");
+    _certifyLog("👁️ بدء مراقبة صفحة التقرير بـ polling (كل 2 ثانية)...");
     let consecutiveFails = 0;
-    while (consecutiveFails < 3) {
+    const MAX_FAILS = 15; // يتحمل حتى 30 ثانية من الأخطاء المتتالية (أثناء التنقل)
+    while (consecutiveFails < MAX_FAILS) {
       await new Promise(r => setTimeout(r, 2000));
-      if (_certifyExtracting) continue;
+      if (_certifyExtracting) { consecutiveFails = 0; continue; }
       try {
-        const hasQR: boolean = await page.evaluate(() => {
-          return Array.from(document.querySelectorAll("img")).some((img: any) =>
+        const result: { hasQR: boolean; url: string } = await page.evaluate(() => {
+          const hasQR = Array.from(document.querySelectorAll("img")).some((img: any) =>
             img.src && (
               img.src.includes("qr") ||
               img.src.includes("create-qr") ||
               img.src.includes("registration") ||
-              img.src.includes("certificate")
+              img.src.includes("certificate") ||
+              img.src.includes("qrcode")
             )
           );
+          return { hasQR, url: window.location.href };
         });
         consecutiveFails = 0;
-        if (hasQR && !_certifyExtracting) {
+        if (result.hasQR && !_certifyExtracting) {
           _certifyExtracting = true;
-          _certifyLog("🎯 QR مكتشف تلقائياً — جارٍ الاستخراج والإرسال...");
+          _certifyLog(`🎯 QR مكتشف على: ${result.url} — جارٍ الاستخراج...`);
           try {
             await _doExtractAndSend(page);
             _certifyLog("✅ اكتمل الاستخراج والإرسال التلقائي");
           } catch (e: any) {
-            _certifyLog(`❌ خطأ في الاستخراج التلقائي: ${e.message}`);
+            _certifyLog(`❌ خطأ في الاستخراج: ${e.message}`);
           } finally {
             _certifyExtracting = false;
           }
-          break; // توقف المراقبة بعد الاستخراج
+          break;
         }
-      } catch {
+      } catch (err: any) {
         consecutiveFails++;
-        _certifyLog(`⚠️ خطأ في polling (${consecutiveFails}/3)...`);
+        if (consecutiveFails % 5 === 0) {
+          _certifyLog(`⚠️ polling: ${consecutiveFails}/${MAX_FAILS} خطأ متتالٍ (الصفحة قد تكون تتنقل...)`);
+        }
       }
     }
-    _certifyLog("🛑 توقفت مراقبة الصفحة");
+    _certifyLog("🛑 توقف مراقب الـ polling");
   })();
 }
 
@@ -501,26 +506,42 @@ async function _approveAndExtract(): Promise<{
   // انتظر قليلاً بعد تحديد checkbox
   await page.waitForTimeout(1000);
 
-  // ── محاولة 1: form.submit() مباشر — يتجاوز كل معالجات JS (vD وغيره) ──
-  _certifyLog("📤 محاولة form.submit() مباشر...");
+  // ── محاولة 1: form.submit() + hidden input لاسم الزر (يتجاوز vD تماماً) ──
+  // ملاحظة: form.submit() لا يُضيف قيمة أي submit button تلقائياً
+  // لذا نُضيف hidden input باسم "confirm" قبل الإرسال ليعرف الخادم الإجراء
+  _certifyLog("📤 محاولة form.submit() مع hidden confirm input...");
   try {
     const submitResult: string = await page.evaluate(() => {
-      const btn = (document.getElementById("confirm") as HTMLInputElement)
-        || (document.querySelector("input[name='confirm']") as HTMLInputElement)
-        || (document.querySelector("input[type='submit']") as HTMLInputElement);
-      const form = (btn?.form || document.querySelector("form")) as HTMLFormElement | null;
+      // ابحث عن النموذج المحدد (#mainForm) أو أول نموذج في الصفحة
+      const form = (document.getElementById("mainForm") || document.querySelector("form")) as HTMLFormElement | null;
       if (!form) return "no_form";
-      // تأكد من تحديد الـ checkbox أولاً
-      const cb = form.querySelector("input[type='checkbox']") as HTMLInputElement | null;
-      if (cb && !cb.checked) cb.checked = true;
-      // form.submit() لا يُطلق أي حدث JS — يرسل النموذج مباشرة للخادم
+
+      // تأكد من تحديد الـ checkbox
+      const cb = form.querySelector("input[type='checkbox'][name='policy']") as HTMLInputElement | null
+              || form.querySelector("input[type='checkbox']") as HTMLInputElement | null;
+      if (cb && !cb.checked) { cb.checked = true; }
+
+      // تأكد من أن زر confirm ليس disabled
+      const confirmBtn = document.getElementById("confirm") as HTMLInputElement | null;
+      if (confirmBtn) confirmBtn.disabled = false;
+
+      // أضف hidden input بقيمة زر confirm (الخادم يحتاجها لمعرفة الإجراء)
+      const existing = form.querySelector("input[type='hidden'][name='confirm']");
+      if (!existing) {
+        const hidden = document.createElement("input");
+        hidden.type = "hidden";
+        hidden.name = "confirm";
+        hidden.value = confirmBtn?.value || "اعتماد التقرير";
+        form.appendChild(hidden);
+      }
+
+      // أرسل النموذج مباشرة — لا يُطلق أي حدث JS
       form.submit();
       return "submitted";
     });
     _certifyLog(`📤 form.submit() result: ${submitResult}`);
     if (submitResult === "submitted") {
       btnClicked = true;
-      // انتظر التنقل بعد submit
       await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
       _certifyLog(`✅ الصفحة بعد submit: ${page.url()}`);
     }
@@ -528,16 +549,24 @@ async function _approveAndExtract(): Promise<{
     _certifyLog(`↪️ form.submit() فشل: ${(e as Error).message?.slice(0, 120)}`);
   }
 
-  // ── محاولة 2: dispatchEvent('submit') على النموذج ──
+  // ── محاولة 2: clone النموذج كاملاً + submit (يُزيل كل معالجات JS) ──
   if (!btnClicked) {
-    _certifyLog("🔄 محاولة dispatchEvent submit...");
+    _certifyLog("🔄 محاولة clone النموذج + submit...");
     try {
       await page.evaluate(() => {
-        const form = document.querySelector("form") as HTMLFormElement;
+        const form = (document.getElementById("mainForm") || document.querySelector("form")) as HTMLFormElement | null;
         if (!form) return;
+        // تحديد checkbox في النموذج الأصلي
         const cb = form.querySelector("input[type='checkbox']") as HTMLInputElement | null;
         if (cb && !cb.checked) cb.checked = true;
-        // أزل معالجات submit من النموذج عن طريق clone
+        // إضافة hidden input قبل clone
+        let hidden = form.querySelector("input[type='hidden'][name='confirm']") as HTMLInputElement | null;
+        if (!hidden) {
+          hidden = document.createElement("input");
+          hidden.type = "hidden"; hidden.name = "confirm"; hidden.value = "اعتماد التقرير";
+          form.appendChild(hidden);
+        }
+        // clone لإزالة جميع event listeners ثم submit
         const clone = form.cloneNode(true) as HTMLFormElement;
         form.replaceWith(clone);
         clone.submit();
