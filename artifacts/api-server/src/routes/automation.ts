@@ -402,84 +402,136 @@ async function _doExtractAndSend(page: any): Promise<{
     _certifyLog(`⚠️ خطأ في لقطة QR: ${e.message}`);
   }
 
-  // 3) تحميل ملف PDF الشهادة بالنقر على زر "شهادة التسجيل"
-  _certifyLog("📄 البحث عن زر شهادة التسجيل لتحميل PDF...");
-  let pdfBuffer: Buffer = Buffer.alloc(0);
-  let pdfFilename = `certificate_${_certifyState.openedReport ?? "report"}.pdf`;
-  try {
-    // ابحث عن زر/رابط "شهادة التسجيل"
-    const certBtnSelector = [
-      "a:has-text('شهادة التسجيل')",
-      "button:has-text('شهادة التسجيل')",
-      "[href*='certificate']",
-      "[href*='cert']",
-      "a:has-text('شهادة')",
-      "button:has-text('شهادة')",
-    ].join(", ");
-
-    const certBtn = page.locator(certBtnSelector).first();
-    const found = await certBtn.count() > 0;
-
-    if (found) {
-      _certifyLog("📎 تم العثور على زر شهادة التسجيل — جارٍ الضغط للتحميل...");
-
-      // ابدأ انتظار حدث التنزيل قبل النقر
-      const [ download ] = await Promise.all([
-        page.waitForEvent("download", { timeout: 30000 }),
-        certBtn.click({ timeout: 10000 }),
-      ]);
-
-      _certifyLog(`📥 جارٍ تنزيل: ${download.suggestedFilename()}...`);
-
-      // احفظ الملف مؤقتاً واقرأه
-      const fs = await import("fs");
-      const path = await import("path");
-      const os = await import("os");
-      const tmpPath = path.join(os.tmpdir(), download.suggestedFilename() || pdfFilename);
-      await download.saveAs(tmpPath);
-      pdfBuffer = fs.readFileSync(tmpPath);
-      pdfFilename = download.suggestedFilename() || pdfFilename;
-      _certifyLog(`✅ تم تحميل PDF الشهادة: ${pdfFilename} (${Math.round(pdfBuffer.length / 1024)} KB)`);
-
-      // احذف الملف المؤقت
-      fs.unlinkSync(tmpPath);
-    } else {
-      _certifyLog("⚠️ لم يُعثر على زر شهادة التسجيل — سيتم الإرسال بدون PDF");
-    }
-  } catch (e: any) {
-    _certifyLog(`⚠️ فشل تحميل PDF الشهادة: ${e.message?.slice(0, 120)}`);
-  }
-
-  // 4) أرسل للـ API (multipart/form-data مع certificatePath)
+  // 3) الحصول على PDF الشهادة — محاولتان بالترتيب
   const reportNumber = _certifyState.openedReport ?? "";
   const submittedAt = new Date().toISOString();
-  _certifyLog("📡 إرسال البيانات + PDF لـ QrInformationApi...");
+  let pdfBuffer: Buffer = Buffer.alloc(0);
+  let pdfFilename = `certificate_${reportNumber || "report"}.pdf`;
 
-  // 4) أرسل للـ API باستخدام FormData + Blob المدمجَين في Node 18
+  // محاولة أ: النقر على "شهادة التسجيل" واعتراض التنزيل
+  _certifyLog("📄 [أ] البحث عن زر شهادة التسجيل لتحميل PDF...");
   try {
-    const fd = new FormData();
-    fd.append("reportCode",         extracted.dcNumber);
-    fd.append("taqeemReportNumber", reportNumber);
-    fd.append("taqeemSubmittedAt",  submittedAt);
-    fd.append("qrCodeBase64",       qrBase64);
-    fd.append("finalValue",         extracted.finalValue);
-    if (pdfBuffer.length > 0) {
-      // Blob مدمج في Node 18+ يدعم إرسال الملفات عبر FormData
-      const pdfBlob = new Blob([pdfBuffer], { type: "application/pdf" });
-      fd.append("certificatePath", pdfBlob, pdfFilename);
-    }
-    const resp = await fetch("http://localhost:5000/External/QrInformationApi", {
-      method: "POST",
-      body: fd,
-    });
-    if (resp.ok) {
-      _certifyLog(`✅ QrInformationApi: ${resp.status} ${resp.statusText}`);
+    // اطبع جميع الأزرار والروابط الموجودة على الصفحة للتشخيص
+    const allBtnsAndLinks: string[] = await page.evaluate(() =>
+      Array.from(document.querySelectorAll("a, button, input[type='button'], input[type='submit']"))
+        .map(el => `[${el.tagName}] ${(el.textContent || "").trim().slice(0, 40)} | href=${(el as HTMLAnchorElement).href || ""}`)
+        .filter(s => s.length > 10)
+    ).catch(() => [] as string[]);
+    _certifyLog(`🔍 عناصر الصفحة (${allBtnsAndLinks.length}): ${allBtnsAndLinks.slice(0, 10).join(" || ")}`);
+
+    const certBtn = page.locator([
+      "a:has-text('شهادة التسجيل')",
+      "button:has-text('شهادة التسجيل')",
+      "a:has-text('شهادة')",
+      "button:has-text('شهادة')",
+      "[href*='certificate']",
+      "[href*='cert']",
+    ].join(", ")).first();
+
+    if (await certBtn.count() > 0) {
+      _certifyLog("📎 تم العثور على زر شهادة التسجيل — جارٍ الضغط للتحميل...");
+      try {
+        const [download] = await Promise.all([
+          page.waitForEvent("download", { timeout: 20000 }),
+          certBtn.click({ timeout: 10000 }),
+        ]);
+        _certifyLog(`📥 جارٍ تنزيل: ${download.suggestedFilename()}...`);
+        const fsm = require("fs") as typeof import("fs");
+        const pathm = require("path") as typeof import("path");
+        const osm = require("os") as typeof import("os");
+        const tmpPath = pathm.join(osm.tmpdir(), download.suggestedFilename() || pdfFilename);
+        await download.saveAs(tmpPath);
+        pdfBuffer = fsm.readFileSync(tmpPath);
+        pdfFilename = download.suggestedFilename() || pdfFilename;
+        _certifyLog(`✅ [أ] PDF جاهز: ${pdfFilename} (${Math.round(pdfBuffer.length / 1024)} KB)`);
+        try { fsm.unlinkSync(tmpPath); } catch {}
+      } catch (dlErr: any) {
+        _certifyLog(`⚠️ [أ] حدث التنزيل لم يُطلَق: ${dlErr.message?.slice(0, 80)}`);
+      }
     } else {
-      const body = await resp.text().catch(() => "");
-      _certifyLog(`⚠️ QrInformationApi: ${resp.status} — ${body.slice(0, 300)}`);
+      _certifyLog("⚠️ [أ] لم يُعثر على زر شهادة التسجيل");
     }
   } catch (e: any) {
-    _certifyLog(`❌ QrInformationApi فشل: ${e.message?.slice(0, 120)}`);
+    _certifyLog(`⚠️ [أ] خطأ: ${e.message?.slice(0, 100)}`);
+  }
+
+  // محاولة ب: CDP printToPDF (fallback دائم التشغيل)
+  if (pdfBuffer.length === 0) {
+    _certifyLog("📄 [ب] توليد PDF بـ CDP printToPDF...");
+    try {
+      const cdpSession = await page.context().newCDPSession(page);
+      const pdfResult: { data: string } = await cdpSession.send("Page.printToPDF", {
+        landscape: false,
+        printBackground: true,
+        preferCSSPageSize: false,
+        paperWidth: 8.27,
+        paperHeight: 11.69,
+        marginTop: 0.39,
+        marginBottom: 0.39,
+        marginLeft: 0.39,
+        marginRight: 0.39,
+      });
+      await cdpSession.detach().catch(() => {});
+      pdfBuffer = Buffer.from(pdfResult.data, "base64");
+      pdfFilename = `certificate_${reportNumber}_cdp.pdf`;
+      _certifyLog(`✅ [ب] PDF via CDP (${Math.round(pdfBuffer.length / 1024)} KB)`);
+    } catch (cdpErr: any) {
+      _certifyLog(`⚠️ [ب] CDP فشل: ${cdpErr.message?.slice(0, 80)}`);
+    }
+  }
+
+  _certifyLog(`📊 PDF نهائي: ${pdfBuffer.length > 0 ? `${pdfFilename} (${Math.round(pdfBuffer.length / 1024)} KB)` : "لا يوجد — سيُرسل بدون PDF"}`);
+
+  // 4) إرسال لـ QrInformationApi باستخدام form-data + http.request
+  _certifyLog("📡 إرسال البيانات + PDF لـ QrInformationApi...");
+  try {
+    const FormDataLib = require("form-data");
+    const http = require("http") as typeof import("http");
+    const fd = new FormDataLib();
+    fd.append("reportCode",         extracted.dcNumber  || "");
+    fd.append("taqeemReportNumber", reportNumber        || "");
+    fd.append("taqeemSubmittedAt",  submittedAt         || "");
+    fd.append("qrCodeBase64",       qrBase64            || "");
+    fd.append("finalValue",         extracted.finalValue|| "");
+    if (pdfBuffer.length > 0) {
+      fd.append("certificatePath", pdfBuffer, {
+        filename: pdfFilename,
+        contentType: "application/pdf",
+        knownLength: pdfBuffer.length,
+      });
+      _certifyLog(`📎 إضافة certificatePath: ${pdfFilename} (${Math.round(pdfBuffer.length / 1024)} KB)`);
+    } else {
+      _certifyLog("⚠️ certificatePath فارغ — سيُرسل الطلب بدون PDF");
+    }
+
+    await new Promise<void>((resolve) => {
+      const reqOpts = {
+        hostname: "localhost",
+        port: 5000,
+        path: "/External/QrInformationApi",
+        method: "POST",
+        headers: fd.getHeaders(),
+      };
+      const req = http.request(reqOpts, (res: any) => {
+        let body = "";
+        res.on("data", (chunk: any) => { body += chunk; });
+        res.on("end", () => {
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            _certifyLog(`✅ QrInformationApi: ${res.statusCode}`);
+          } else {
+            _certifyLog(`⚠️ QrInformationApi: ${res.statusCode} — ${body.slice(0, 300)}`);
+          }
+          resolve();
+        });
+      });
+      req.on("error", (err: any) => {
+        _certifyLog(`❌ QrInformationApi فشل: ${err.message?.slice(0, 120)}`);
+        resolve();
+      });
+      fd.pipe(req);
+    });
+  } catch (e: any) {
+    _certifyLog(`❌ QrInformationApi خطأ عام: ${e.message?.slice(0, 120)}`);
   }
 
   return { dcNumber: extracted.dcNumber, finalValue: extracted.finalValue, reportNumber, qrBase64 };
