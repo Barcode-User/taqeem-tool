@@ -619,24 +619,29 @@ async function _doExtractAndSend(page: any): Promise<{
       // setTimeout لكسر سلسلة الاستدعاءات وتجنب التعشيش العميق
       setTimeout(async () => {
         try {
-          // ── أغلق تاب التقرير الحالي أولاً ─────────────────────────────────
+          // ── انقل تاب التقرير لصفحة فارغة (يبدو للمستخدم أنه أُغلق بصرياً)
+          // openCertifyReport ستغلقه فعلياً حين تفتح التالي — تجنباً لخطأ "page closed"
           if (_certifyReportPage) {
             try {
-              await _certifyReportPage.close();
-              _certifyLog("🔒 تم إغلاق تاب التقرير المنتهي");
+              await _certifyReportPage.goto("about:blank", { timeout: 5000 });
+              _certifyLog("🔒 تم مسح تاب التقرير المنتهي");
             } catch {}
-            _certifyReportPage = null;
           }
 
           const next = await nextCertifyReport();
           if (!next) {
-            // لا توجد تقارير إضافية — ابدأ حلقة الانتظار (5 دقائق ثم تحقق مجدداً)
+            // لا توجد تقارير إضافية — أغلق تاب التقرير ثم ابدأ حلقة الانتظار
+            if (_certifyReportPage) {
+              try { await _certifyReportPage.close(); } catch {}
+              _certifyReportPage = null;
+              _certifyLog("🔒 تم إغلاق تاب التقرير (لا توجد تقارير إضافية)");
+            }
             _autoRefreshLoop().catch(e =>
               _certifyLog(`❌ خطأ في حلقة التحديث: ${e.message}`)
             );
             return;
           }
-          // nextCertifyReport → openCertifyReport يفتح تاباً جديداً تلقائياً
+          // nextCertifyReport → openCertifyReport أغلقت القديم وفتحت الجديد بأمان
           _certifyLog(`📂 تقرير ${next.reportNumber} (${next.index} من ${next.total}) — انتظار تحميل الصفحة...`);
           await new Promise(r => setTimeout(r, 3000));
           await _approveAndExtract();
