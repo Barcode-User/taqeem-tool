@@ -451,16 +451,25 @@ async function _doExtractAndSend(page: any): Promise<{
       // انتظر ثلاث ثوانٍ لتحميل أي محتوى ديناميكي
       await qrPage.waitForTimeout(3000);
 
-      // التقاط screenshot كامل للصفحة (full page)
-      _certifyLog("📸 التقاط screenshot للصفحة...");
-      const screenshotBuf: Buffer = await qrPage.screenshot({
-        type: "png",
-        fullPage: true,
+      // تحويل الصفحة إلى PDF عبر CDP (مثل طباعة الصفحة)
+      _certifyLog("🖨️ تحويل صفحة QR إلى PDF...");
+      const cdp = await qrPage.context().newCDPSession(qrPage);
+      const pdfResult: { data: string } = await cdp.send("Page.printToPDF", {
+        landscape: false,
+        printBackground: true,
+        preferCSSPageSize: true,
+        paperWidth: 8.27,   // A4
+        paperHeight: 11.69,
+        marginTop: 0.3,
+        marginBottom: 0.3,
+        marginLeft: 0.3,
+        marginRight: 0.3,
       });
-      certBuffer = screenshotBuf;
-      certFilename = `certificate_${reportNumber}_qr.png`;
-      certMime = "image/png";
-      _certifyLog(`✅ Screenshot جاهز: ${certFilename} (${Math.round(certBuffer.length / 1024)} KB)`);
+      await cdp.detach().catch(() => {});
+      certBuffer = Buffer.from(pdfResult.data, "base64");
+      certFilename = `certificate_${reportNumber}_qr.pdf`;
+      certMime = "application/pdf";
+      _certifyLog(`✅ PDF جاهز: ${certFilename} (${Math.round(certBuffer.length / 1024)} KB)`);
     } catch (e: any) {
       _certifyLog(`⚠️ خطأ في فتح/تصوير صفحة QR: ${e.message?.slice(0, 120)}`);
     } finally {
