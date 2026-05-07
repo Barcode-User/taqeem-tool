@@ -529,13 +529,27 @@ async function _doExtractAndSend(page: any): Promise<{
       _certifyLog("⚠️ certificatePath فارغ — سيُرسل الطلب بدون ملف");
     }
 
+    // اجمع كامل الـ multipart body أولاً لحساب Content-Length الصحيح
+    // (ASP.NET يحتاج Content-Length لقراءة IFormFile بشكل سليم)
+    const fdBuffer = await new Promise<Buffer>((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      fd.on("data",  (c: Buffer) => chunks.push(c));
+      fd.on("end",   ()          => resolve(Buffer.concat(chunks)));
+      fd.on("error", reject);
+    });
+
+    _certifyLog(`📦 حجم الطلب الكامل: ${Math.round(fdBuffer.length / 1024)} KB`);
+
     await new Promise<void>((resolve) => {
       const reqOpts = {
         hostname: "localhost",
         port: 5000,
         path: "/External/QrInformationApi",
         method: "POST",
-        headers: fd.getHeaders(),
+        headers: {
+          ...fd.getHeaders(),
+          "Content-Length": fdBuffer.length,  // ضروري لـ ASP.NET IFormFile
+        },
       };
       const req = http.request(reqOpts, (res: any) => {
         let body = "";
@@ -544,7 +558,7 @@ async function _doExtractAndSend(page: any): Promise<{
           if (res.statusCode >= 200 && res.statusCode < 300) {
             _certifyLog(`✅ QrInformationApi: ${res.statusCode}`);
           } else {
-            _certifyLog(`⚠️ QrInformationApi: ${res.statusCode} — ${body.slice(0, 300)}`);
+            _certifyLog(`⚠️ QrInformationApi: ${res.statusCode} — ${body.slice(0, 400)}`);
           }
           resolve();
         });
@@ -553,7 +567,8 @@ async function _doExtractAndSend(page: any): Promise<{
         _certifyLog(`❌ QrInformationApi فشل: ${err.message?.slice(0, 120)}`);
         resolve();
       });
-      fd.pipe(req);
+      req.write(fdBuffer);
+      req.end();
     });
   } catch (e: any) {
     _certifyLog(`❌ QrInformationApi خطأ عام: ${e.message?.slice(0, 120)}`);
