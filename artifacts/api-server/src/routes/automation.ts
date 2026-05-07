@@ -443,64 +443,52 @@ async function _doExtractAndSend(page: any): Promise<{
     _certifyLog(`⚠️ خطأ في مسح QR: ${e.message}`);
   }
 
-  // 3) الحصول على PDF الشهادة — محاولتان بالترتيب
+  // 3) فتح URL الـ QR في تاب جديد وتحويله لـ PDF (مثل مسح QR بالجوال)
   const reportNumber = _certifyState.openedReport ?? "";
   const submittedAt = new Date().toISOString();
   let pdfBuffer: Buffer = Buffer.alloc(0);
   let pdfFilename = `certificate_${reportNumber || "report"}.pdf`;
 
-  // محاولة أ: النقر على "شهادة التسجيل" واعتراض التنزيل
-  _certifyLog("📄 [أ] البحث عن زر شهادة التسجيل لتحميل PDF...");
-  try {
-    // اطبع جميع الأزرار والروابط الموجودة على الصفحة للتشخيص
-    const allBtnsAndLinks: string[] = await page.evaluate(() =>
-      Array.from(document.querySelectorAll("a, button, input[type='button'], input[type='submit']"))
-        .map(el => `[${el.tagName}] ${(el.textContent || "").trim().slice(0, 40)} | href=${(el as HTMLAnchorElement).href || ""}`)
-        .filter(s => s.length > 10)
-    ).catch(() => [] as string[]);
-    _certifyLog(`🔍 عناصر الصفحة (${allBtnsAndLinks.length}): ${allBtnsAndLinks.slice(0, 10).join(" || ")}`);
+  const qrUrl = qrBase64.startsWith("http") ? qrBase64 : "";
+  if (qrUrl) {
+    _certifyLog(`🌐 فتح URL من QR في تاب جديد: ${qrUrl.slice(0, 120)}`);
+    let qrPage: any = null;
+    try {
+      qrPage = await page.context().newPage();
+      await qrPage.goto(qrUrl, { waitUntil: "networkidle", timeout: 30000 });
+      _certifyLog(`✅ صفحة QR محملة: ${qrPage.url()}`);
 
-    const certBtn = page.locator([
-      "a:has-text('شهادة التسجيل')",
-      "button:has-text('شهادة التسجيل')",
-      "a:has-text('شهادة')",
-      "button:has-text('شهادة')",
-      "[href*='certificate']",
-      "[href*='cert']",
-    ].join(", ")).first();
+      // انتظر ثانيتين لتحميل أي محتوى ديناميكي
+      await qrPage.waitForTimeout(2000);
 
-    if (await certBtn.count() > 0) {
-      _certifyLog("📎 تم العثور على زر شهادة التسجيل — جارٍ الضغط للتحميل...");
-      try {
-        const [download] = await Promise.all([
-          page.waitForEvent("download", { timeout: 20000 }),
-          certBtn.click({ timeout: 10000 }),
-        ]);
-        _certifyLog(`📥 جارٍ تنزيل: ${download.suggestedFilename()}...`);
-        const fsm = require("fs") as typeof import("fs");
-        const pathm = require("path") as typeof import("path");
-        const osm = require("os") as typeof import("os");
-        const tmpPath = pathm.join(osm.tmpdir(), download.suggestedFilename() || pdfFilename);
-        await download.saveAs(tmpPath);
-        pdfBuffer = fsm.readFileSync(tmpPath);
-        pdfFilename = download.suggestedFilename() || pdfFilename;
-        _certifyLog(`✅ [أ] PDF جاهز: ${pdfFilename} (${Math.round(pdfBuffer.length / 1024)} KB)`);
-        try { fsm.unlinkSync(tmpPath); } catch {}
-      } catch (dlErr: any) {
-        _certifyLog(`⚠️ [أ] حدث التنزيل لم يُطلَق: ${dlErr.message?.slice(0, 80)}`);
-      }
-    } else {
-      _certifyLog("⚠️ [أ] لم يُعثر على زر شهادة التسجيل");
+      // طباعة الصفحة كـ PDF عبر CDP
+      _certifyLog("🖨️ تحويل صفحة QR إلى PDF...");
+      const cdpSession = await qrPage.context().newCDPSession(qrPage);
+      const pdfResult: { data: string } = await cdpSession.send("Page.printToPDF", {
+        landscape: false,
+        printBackground: true,
+        preferCSSPageSize: true,
+        paperWidth: 8.27,
+        paperHeight: 11.69,
+        marginTop: 0.2,
+        marginBottom: 0.2,
+        marginLeft: 0.2,
+        marginRight: 0.2,
+      });
+      await cdpSession.detach().catch(() => {});
+      pdfBuffer = Buffer.from(pdfResult.data, "base64");
+      pdfFilename = `certificate_${reportNumber}_qr.pdf`;
+      _certifyLog(`✅ PDF جاهز من صفحة QR: ${pdfFilename} (${Math.round(pdfBuffer.length / 1024)} KB)`);
+    } catch (e: any) {
+      _certifyLog(`⚠️ خطأ في فتح/تحويل صفحة QR: ${e.message?.slice(0, 120)}`);
+    } finally {
+      if (qrPage) { try { await qrPage.close(); } catch {} }
     }
-  } catch (e: any) {
-    _certifyLog(`⚠️ [أ] خطأ: ${e.message?.slice(0, 100)}`);
+  } else {
+    _certifyLog("⚠️ لم يُعثر على URL في QR — لا يمكن توليد PDF");
   }
 
-  if (pdfBuffer.length === 0) {
-    _certifyLog("⚠️ PDF الشهادة لم يُحمَّل — سيُرسل الطلب بدون PDF (لن تُؤخذ لقطة شاشة بديلة)");
-  } else {
-    _certifyLog(`📊 PDF جاهز: ${pdfFilename} (${Math.round(pdfBuffer.length / 1024)} KB)`);
-  }
+  _certifyLog(`📊 PDF: ${pdfBuffer.length > 0 ? `${pdfFilename} (${Math.round(pdfBuffer.length / 1024)} KB)` : "غير متوفر"}`);
 
   // 4) إرسال لـ QrInformationApi باستخدام form-data + http.request
   _certifyLog("📡 إرسال البيانات + PDF لـ QrInformationApi...");
