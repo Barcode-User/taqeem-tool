@@ -584,11 +584,15 @@ async function _doExtractAndSend(page: any): Promise<{
 
     // اجمع كامل الـ multipart body أولاً لحساب Content-Length الصحيح
     // (ASP.NET يحتاج Content-Length لقراءة IFormFile بشكل سليم)
+    // نستخدم pipe() لأن fd.on("data") قد لا يُطلق stream تلقائياً
     const fdBuffer = await new Promise<Buffer>((resolve, reject) => {
+      const { PassThrough } = require("stream") as typeof import("stream");
       const chunks: Buffer[] = [];
-      fd.on("data",  (c: Buffer) => chunks.push(c));
-      fd.on("end",   ()          => resolve(Buffer.concat(chunks)));
-      fd.on("error", reject);
+      const pt = new PassThrough();
+      pt.on("data",  (c: Buffer) => chunks.push(c));
+      pt.on("end",   ()          => resolve(Buffer.concat(chunks)));
+      pt.on("error", reject);
+      fd.pipe(pt);
     });
 
     _certifyLog(`📦 حجم الطلب الكامل: ${Math.round(fdBuffer.length / 1024)} KB`);
