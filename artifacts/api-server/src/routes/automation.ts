@@ -578,15 +578,30 @@ async function _approveAndExtract(): Promise<{
   // انتظر قليلاً بعد تحديد checkbox
   await page.waitForTimeout(1000);
 
+  // ── تحقق أولاً من وجود #mainForm — إذا لم يوجد انتقل للتالي ────────────────
+  const hasMainForm: boolean = await page.evaluate(() => !!document.getElementById("mainForm")).catch(() => false);
+  if (!hasMainForm) {
+    _certifyLog("⚠️ هذا التقرير ليس له نموذج اعتماد (#mainForm غير موجود) — الانتقال للتقرير التالي تلقائياً...");
+    const next = await nextCertifyReport().catch(() => null);
+    if (next) {
+      _certifyLog(`➡️ فتح التقرير التالي: ${next.reportNumber} (${next.index} من ${next.total})`);
+      await new Promise(r => setTimeout(r, 2000));
+      return await _approveAndExtract();
+    } else {
+      _certifyLog("⚠️ لا توجد تقارير أخرى في القائمة");
+      return { dcNumber: "", finalValue: "", reportNumber: _certifyState.openedReport ?? "", qrBase64: "" };
+    }
+  }
+
   // ── محاولة 1: form.submit() + hidden input لاسم الزر (يتجاوز vD تماماً) ──
   // ملاحظة: form.submit() لا يُضيف قيمة أي submit button تلقائياً
   // لذا نُضيف hidden input باسم "confirm" قبل الإرسال ليعرف الخادم الإجراء
   _certifyLog("📤 محاولة form.submit() مع hidden confirm input...");
   try {
     const submitResult: string = await page.evaluate(() => {
-      // ابحث عن النموذج المحدد (#mainForm) أو أول نموذج في الصفحة
-      const form = (document.getElementById("mainForm") || document.querySelector("form")) as HTMLFormElement | null;
-      if (!form) return "no_form";
+      // استخدم #mainForm فقط — لا fallback لأي نموذج آخر
+      const form = document.getElementById("mainForm") as HTMLFormElement | null;
+      if (!form) return "no_mainForm";
 
       // تأكد من تحديد الـ checkbox
       const cb = form.querySelector("input[type='checkbox'][name='policy']") as HTMLInputElement | null
@@ -626,7 +641,8 @@ async function _approveAndExtract(): Promise<{
     _certifyLog("🔄 محاولة clone النموذج + submit...");
     try {
       await page.evaluate(() => {
-        const form = (document.getElementById("mainForm") || document.querySelector("form")) as HTMLFormElement | null;
+        // استخدم #mainForm فقط — لا fallback
+        const form = document.getElementById("mainForm") as HTMLFormElement | null;
         if (!form) return;
         // تحديد checkbox في النموذج الأصلي
         const cb = form.querySelector("input[type='checkbox']") as HTMLInputElement | null;
