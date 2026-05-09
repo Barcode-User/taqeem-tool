@@ -54,3 +54,10 @@ export const sqliteGetDataSystemById = sq.sqliteGetDataSystemById;
 export const sqliteGetDataSystemByReportId = sq.sqliteGetDataSystemByReportId;
 export const sqliteListDataSystem = sq.sqliteListDataSystem;
 export const sqliteUpdateDataSystemLinkedReport = sq.sqliteUpdateDataSystemLinkedReport;
+
+// ─── التقارير المعمدة (كلا البيئتين) ────────────────────────────────────────
+export type { CertifiedReport } from "./sqlite";
+export const insertCertifiedReport = isPostgres
+  ? pg.pgInsertCertifiedReport : sq.sqliteInsertCertifiedReport;
+export const listCertifiedReports = isPostgres
+  ? pg.pgListCertifiedReports : sq.sqliteListCertifiedReports;
