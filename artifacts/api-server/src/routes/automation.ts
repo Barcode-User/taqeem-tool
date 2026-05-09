@@ -7,6 +7,7 @@ import {
   getReportById,
   getReportsByAutomationStatus,
   updateReport,
+  insertCertifiedReport,
 } from "@workspace/db";
 import { startAutomation } from "../automation/taqeem-bot";
 import { getSessionByReportId, submitOtp, isAnySessionRunning, canStartNewSession } from "../automation/session-manager";
@@ -615,6 +616,20 @@ async function _doExtractAndSend(page: any): Promise<{
       req.write(fdBuffer);
       req.end();
     });
+
+    // ── حفظ السجل في جدول التقارير المعمدة ─────────────────────────────────
+    if (_apiSuccess) {
+      const certifiedAt = new Date().toISOString();
+      insertCertifiedReport({
+        reportCode:         extracted.dcNumber  || reportNumber || "",
+        taqeemReportNumber: reportNumber        || "",
+        certifiedAt,
+      }).then(() => {
+        _certifyLog(`💾 تم حفظ التقرير ${extracted.dcNumber || reportNumber} في سجل التقارير المعمدة`);
+      }).catch((e: any) => {
+        _certifyLog(`⚠️ فشل حفظ السجل: ${e?.message ?? e}`);
+      });
+    }
 
     // ── إذا نجح الإرسال انتقل للتقرير التالي تلقائياً ──────────────────────
     if (_apiSuccess) {
