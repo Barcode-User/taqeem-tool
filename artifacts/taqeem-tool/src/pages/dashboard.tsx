@@ -87,6 +87,24 @@ export default function Dashboard() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [dsMap, setDsMap] = useState<Record<number, DsEntry>>({});
 
+  // ── فلتر البطاقة النشطة (الافتراضي: إجمالي اليوم) ────────────────────────
+  type CardFilter = "all_total" | "today_total" | "today_queued" | "today_failed" | "week_total" | "week_queued" | "week_failed";
+  const [cardFilter, setCardFilter] = useState<CardFilter>("today_total");
+
+  const cardFilterLabel: Record<CardFilter, string> = {
+    all_total:    "إجمالي كامل",
+    today_total:  "إجمالي تقارير اليوم",
+    today_queued: "في الطابور اليوم",
+    today_failed: "فشل الرفع اليوم",
+    week_total:   "إجمالي تقارير الأسبوع",
+    week_queued:  "في الطابور هذا الأسبوع",
+    week_failed:  "فشل الرفع هذا الأسبوع",
+  };
+
+  // حدود التاريخ
+  const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+  const weekStart  = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000); weekStart.setHours(0,0,0,0);
+
   // ── تحديد متعدد ──────────────────────────────────────────────────────────
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [retrying, setRetrying] = useState(false);
@@ -116,7 +134,20 @@ export default function Dashboard() {
       report.clientName?.includes(searchQuery)   ||
       report.propertyType?.includes(searchQuery);
     const matchesStatus = statusFilter === "all" || report.status === statusFilter;
-    return matchesSearch && matchesStatus;
+
+    // ── فلتر البطاقة ──────────────────────────────────────────────────────
+    const created = (report as any).createdAt ? new Date((report as any).createdAt) : null;
+    const automSt = (report as any).automationStatus ?? "idle";
+    let matchesCard = true;
+    if (cardFilter === "today_total")  matchesCard = !!created && created >= todayStart;
+    if (cardFilter === "today_queued") matchesCard = !!created && created >= todayStart && automSt === "queued";
+    if (cardFilter === "today_failed") matchesCard = !!created && created >= todayStart && automSt === "failed";
+    if (cardFilter === "week_total")   matchesCard = !!created && created >= weekStart;
+    if (cardFilter === "week_queued")  matchesCard = !!created && created >= weekStart  && automSt === "queued";
+    if (cardFilter === "week_failed")  matchesCard = !!created && created >= weekStart  && automSt === "failed";
+    // all_total → matchesCard = true (الكل)
+
+    return matchesSearch && matchesStatus && matchesCard;
   });
 
   // التقارير الظاهرة التي يمكن تحديدها (الفاشلة فقط)
@@ -190,101 +221,106 @@ export default function Dashboard() {
         </Link>
       </div>
 
+      {/* ── بطاقة الإجمالي الكامل ── */}
+      {(() => {
+        const active = cardFilter === "all_total";
+        return (
+          <button
+            onClick={() => setCardFilter("all_total")}
+            className={`w-full text-right rounded-xl border-2 shadow-sm transition-all duration-150 bg-card hover:shadow-md
+              ${active ? "border-slate-600 ring-2 ring-slate-400/40 shadow-md" : "border-border hover:border-slate-400"}`}
+          >
+            <div className="flex items-center justify-between px-5 py-4">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">إجمالي كامل</p>
+                {statsLoading ? <Skeleton className="h-9 w-16 mt-1" /> : <p className="text-4xl font-bold mt-0.5">{(stats as any)?.total ?? 0}</p>}
+              </div>
+              <div className={`h-10 w-10 rounded-full flex items-center justify-center transition-colors ${active ? "bg-slate-600 text-white" : "bg-slate-100 text-slate-600"}`}>
+                <FileText className="h-5 w-5" />
+              </div>
+            </div>
+            {active && <div className="h-1 bg-slate-600 rounded-b-xl" />}
+          </button>
+        );
+      })()}
+
       {/* ── إحصائيات اليوم ── */}
       <div>
         <h2 className="text-sm font-semibold text-muted-foreground mb-3 flex items-center gap-2">
-          <Clock className="h-4 w-4" />
-          إحصائيات اليوم
+          <Clock className="h-4 w-4" /> إحصائيات اليوم
         </h2>
         <div className="grid gap-4 grid-cols-1 sm:grid-cols-3">
-          <Card className="border-t-4 border-t-slate-500 shadow-sm">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">إجمالي تقارير اليوم</CardTitle>
-              <div className="h-8 w-8 bg-slate-100 text-slate-600 rounded-full flex items-center justify-center">
-                <FileText className="h-4 w-4" />
-              </div>
-            </CardHeader>
-            <CardContent>
-              {statsLoading ? <Skeleton className="h-8 w-16" /> : <div className="text-3xl font-bold">{(stats as any)?.todayTotal ?? 0}</div>}
-            </CardContent>
-          </Card>
-
-          <Card className="border-t-4 border-t-orange-500 shadow-sm">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">في الطابور</CardTitle>
-              <div className="h-8 w-8 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center">
-                <ListChecks className="h-4 w-4" />
-              </div>
-            </CardHeader>
-            <CardContent>
-              {statsLoading ? <Skeleton className="h-8 w-16" /> : <div className="text-3xl font-bold">{(stats as any)?.todayQueued ?? 0}</div>}
-            </CardContent>
-          </Card>
-
-          <Card className="border-t-4 border-t-red-500 shadow-sm">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">فشل الرفع اليوم</CardTitle>
-              <div className="h-8 w-8 bg-red-100 text-red-600 rounded-full flex items-center justify-center">
-                <XCircle className="h-4 w-4" />
-              </div>
-            </CardHeader>
-            <CardContent>
-              {statsLoading ? <Skeleton className="h-8 w-16" /> : <div className="text-3xl font-bold">{(stats as any)?.todayFailed ?? 0}</div>}
-            </CardContent>
-          </Card>
+          {([
+            { key: "today_total",  label: "إجمالي تقارير اليوم",  value: (stats as any)?.todayTotal,  icon: FileText,    top: "border-t-slate-500",  iconBg: "bg-slate-100",   iconTxt: "text-slate-600",  activeBg: "bg-slate-600" },
+            { key: "today_queued", label: "في الطابور اليوم",      value: (stats as any)?.todayQueued, icon: ListChecks,  top: "border-t-orange-500", iconBg: "bg-orange-100",  iconTxt: "text-orange-600", activeBg: "bg-orange-500" },
+            { key: "today_failed", label: "فشل الرفع اليوم",       value: (stats as any)?.todayFailed, icon: XCircle,     top: "border-t-red-500",    iconBg: "bg-red-100",     iconTxt: "text-red-600",    activeBg: "bg-red-600" },
+          ] as const).map(({ key, label, value, icon: Icon, top, iconBg, iconTxt, activeBg }) => {
+            const active = cardFilter === key;
+            return (
+              <button key={key} onClick={() => setCardFilter(key as CardFilter)}
+                className={`text-right rounded-xl border-t-4 ${top} shadow-sm transition-all duration-150 bg-card hover:shadow-md
+                  ${active ? "ring-2 ring-offset-1 ring-slate-400/50 shadow-md scale-[1.02]" : "hover:scale-[1.01]"}`}>
+                <div className="flex flex-row items-center justify-between px-4 pt-4 pb-1">
+                  <p className="text-sm font-medium">{label}</p>
+                  <div className={`h-8 w-8 rounded-full flex items-center justify-center transition-colors ${active ? `${activeBg} text-white` : `${iconBg} ${iconTxt}`}`}>
+                    <Icon className="h-4 w-4" />
+                  </div>
+                </div>
+                <div className="px-4 pb-4">
+                  {statsLoading ? <Skeleton className="h-8 w-16 mt-1" /> : <p className="text-3xl font-bold">{value ?? 0}</p>}
+                </div>
+              </button>
+            );
+          })}
         </div>
       </div>
 
       {/* ── إحصائيات الأسبوع ── */}
       <div>
         <h2 className="text-sm font-semibold text-muted-foreground mb-3 flex items-center gap-2">
-          <CheckCircle2 className="h-4 w-4" />
-          على مدار الأسبوع
+          <CheckCircle2 className="h-4 w-4" /> على مدار الأسبوع
         </h2>
         <div className="grid gap-4 grid-cols-1 sm:grid-cols-3">
-          <Card className="border-t-4 border-t-blue-500 shadow-sm">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">إجمالي تقارير الأسبوع</CardTitle>
-              <div className="h-8 w-8 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center">
-                <FileText className="h-4 w-4" />
-              </div>
-            </CardHeader>
-            <CardContent>
-              {statsLoading ? <Skeleton className="h-8 w-16" /> : <div className="text-3xl font-bold">{(stats as any)?.weekTotal ?? 0}</div>}
-            </CardContent>
-          </Card>
-
-          <Card className="border-t-4 border-t-yellow-500 shadow-sm">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">في الطابور هذا الأسبوع</CardTitle>
-              <div className="h-8 w-8 bg-yellow-100 text-yellow-600 rounded-full flex items-center justify-center">
-                <ListChecks className="h-4 w-4" />
-              </div>
-            </CardHeader>
-            <CardContent>
-              {statsLoading ? <Skeleton className="h-8 w-16" /> : <div className="text-3xl font-bold">{(stats as any)?.weekQueued ?? 0}</div>}
-            </CardContent>
-          </Card>
-
-          <Card className="border-t-4 border-t-rose-500 shadow-sm">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">فشل الرفع هذا الأسبوع</CardTitle>
-              <div className="h-8 w-8 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center">
-                <XCircle className="h-4 w-4" />
-              </div>
-            </CardHeader>
-            <CardContent>
-              {statsLoading ? <Skeleton className="h-8 w-16" /> : <div className="text-3xl font-bold">{(stats as any)?.weekFailed ?? 0}</div>}
-            </CardContent>
-          </Card>
+          {([
+            { key: "week_total",   label: "إجمالي تقارير الأسبوع",      value: (stats as any)?.weekTotal,   icon: FileText,   top: "border-t-blue-500",   iconBg: "bg-blue-100",   iconTxt: "text-blue-600",   activeBg: "bg-blue-600" },
+            { key: "week_queued",  label: "في الطابور هذا الأسبوع",     value: (stats as any)?.weekQueued,  icon: ListChecks, top: "border-t-yellow-500", iconBg: "bg-yellow-100", iconTxt: "text-yellow-600", activeBg: "bg-yellow-500" },
+            { key: "week_failed",  label: "فشل الرفع هذا الأسبوع",      value: (stats as any)?.weekFailed,  icon: XCircle,    top: "border-t-rose-500",   iconBg: "bg-rose-100",   iconTxt: "text-rose-600",   activeBg: "bg-rose-600" },
+          ] as const).map(({ key, label, value, icon: Icon, top, iconBg, iconTxt, activeBg }) => {
+            const active = cardFilter === key;
+            return (
+              <button key={key} onClick={() => setCardFilter(key as CardFilter)}
+                className={`text-right rounded-xl border-t-4 ${top} shadow-sm transition-all duration-150 bg-card hover:shadow-md
+                  ${active ? "ring-2 ring-offset-1 ring-slate-400/50 shadow-md scale-[1.02]" : "hover:scale-[1.01]"}`}>
+                <div className="flex flex-row items-center justify-between px-4 pt-4 pb-1">
+                  <p className="text-sm font-medium">{label}</p>
+                  <div className={`h-8 w-8 rounded-full flex items-center justify-center transition-colors ${active ? `${activeBg} text-white` : `${iconBg} ${iconTxt}`}`}>
+                    <Icon className="h-4 w-4" />
+                  </div>
+                </div>
+                <div className="px-4 pb-4">
+                  {statsLoading ? <Skeleton className="h-8 w-16 mt-1" /> : <p className="text-3xl font-bold">{value ?? 0}</p>}
+                </div>
+              </button>
+            );
+          })}
         </div>
       </div>
 
       {/* ── جدول التقارير ── */}
       <Card className="shadow-sm">
         <CardHeader className="pb-4">
-          <CardTitle>أحدث التقارير</CardTitle>
-          <CardDescription>التقارير التي تم معالجتها مؤخراً</CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>{cardFilterLabel[cardFilter]}</CardTitle>
+              <CardDescription>
+                {filteredReports?.length ?? 0} تقرير
+              </CardDescription>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => setCardFilter("today_total")}
+              className="text-xs text-muted-foreground gap-1">
+              إعادة الضبط
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           {/* شريط البحث والفلاتر */}
