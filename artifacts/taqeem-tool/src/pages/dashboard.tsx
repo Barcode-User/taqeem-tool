@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { FileText, Clock, CheckCircle2, Upload, AlertCircle, PlusCircle, Search, Filter, Database, Loader2, CircleDashed, Ban, RotateCcw } from "lucide-react";
+import { FileText, Clock, CheckCircle2, Upload, AlertCircle, PlusCircle, Search, Filter, Database, Loader2, CircleDashed, Ban, RotateCcw, ListChecks, XCircle } from "lucide-react";
 import { format } from "date-fns";
 import { arSA } from "date-fns/locale";
 import { Button } from "@/components/ui/button";
@@ -190,52 +190,94 @@ export default function Dashboard() {
         </Link>
       </div>
 
-      {/* ── بطاقات الإحصائيات ── */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card className="border-t-4 border-t-slate-500 shadow-sm">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">إجمالي التقارير</CardTitle>
-            <div className="h-8 w-8 bg-slate-100 text-slate-600 rounded-full flex items-center justify-center">
-              <FileText className="h-4 w-4" />
-            </div>
-          </CardHeader>
-          <CardContent>
-            {statsLoading ? <Skeleton className="h-8 w-16" /> : <div className="text-3xl font-bold">{stats?.total || 0}</div>}
-          </CardContent>
-        </Card>
-        <Card className="border-t-4 border-t-yellow-500 shadow-sm">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">قيد الانتظار / مستخرج</CardTitle>
-            <div className="h-8 w-8 bg-yellow-100 text-yellow-600 rounded-full flex items-center justify-center">
-              <Clock className="h-4 w-4" />
-            </div>
-          </CardHeader>
-          <CardContent>
-            {statsLoading ? <Skeleton className="h-8 w-16" /> : <div className="text-3xl font-bold">{(stats?.pending || 0) + (stats?.extracted || 0)}</div>}
-          </CardContent>
-        </Card>
-        <Card className="border-t-4 border-t-purple-500 shadow-sm">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">تمت المراجعة</CardTitle>
-            <div className="h-8 w-8 bg-purple-100 text-purple-600 rounded-full flex items-center justify-center">
-              <CheckCircle2 className="h-4 w-4" />
-            </div>
-          </CardHeader>
-          <CardContent>
-            {statsLoading ? <Skeleton className="h-8 w-16" /> : <div className="text-3xl font-bold">{stats?.reviewed || 0}</div>}
-          </CardContent>
-        </Card>
-        <Card className="border-t-4 border-t-green-500 shadow-sm">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">تم الرفع لتقييم</CardTitle>
-            <div className="h-8 w-8 bg-green-100 text-green-600 rounded-full flex items-center justify-center">
-              <Upload className="h-4 w-4" />
-            </div>
-          </CardHeader>
-          <CardContent>
-            {statsLoading ? <Skeleton className="h-8 w-16" /> : <div className="text-3xl font-bold">{stats?.submitted || 0}</div>}
-          </CardContent>
-        </Card>
+      {/* ── إحصائيات اليوم ── */}
+      <div>
+        <h2 className="text-sm font-semibold text-muted-foreground mb-3 flex items-center gap-2">
+          <Clock className="h-4 w-4" />
+          إحصائيات اليوم
+        </h2>
+        <div className="grid gap-4 grid-cols-1 sm:grid-cols-3">
+          <Card className="border-t-4 border-t-slate-500 shadow-sm">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">إجمالي تقارير اليوم</CardTitle>
+              <div className="h-8 w-8 bg-slate-100 text-slate-600 rounded-full flex items-center justify-center">
+                <FileText className="h-4 w-4" />
+              </div>
+            </CardHeader>
+            <CardContent>
+              {statsLoading ? <Skeleton className="h-8 w-16" /> : <div className="text-3xl font-bold">{(stats as any)?.todayTotal ?? 0}</div>}
+            </CardContent>
+          </Card>
+
+          <Card className="border-t-4 border-t-orange-500 shadow-sm">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">في الطابور</CardTitle>
+              <div className="h-8 w-8 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center">
+                <ListChecks className="h-4 w-4" />
+              </div>
+            </CardHeader>
+            <CardContent>
+              {statsLoading ? <Skeleton className="h-8 w-16" /> : <div className="text-3xl font-bold">{(stats as any)?.todayQueued ?? 0}</div>}
+            </CardContent>
+          </Card>
+
+          <Card className="border-t-4 border-t-red-500 shadow-sm">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">فشل الرفع اليوم</CardTitle>
+              <div className="h-8 w-8 bg-red-100 text-red-600 rounded-full flex items-center justify-center">
+                <XCircle className="h-4 w-4" />
+              </div>
+            </CardHeader>
+            <CardContent>
+              {statsLoading ? <Skeleton className="h-8 w-16" /> : <div className="text-3xl font-bold">{(stats as any)?.todayFailed ?? 0}</div>}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      {/* ── إحصائيات الأسبوع ── */}
+      <div>
+        <h2 className="text-sm font-semibold text-muted-foreground mb-3 flex items-center gap-2">
+          <CheckCircle2 className="h-4 w-4" />
+          على مدار الأسبوع
+        </h2>
+        <div className="grid gap-4 grid-cols-1 sm:grid-cols-3">
+          <Card className="border-t-4 border-t-blue-500 shadow-sm">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">إجمالي تقارير الأسبوع</CardTitle>
+              <div className="h-8 w-8 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center">
+                <FileText className="h-4 w-4" />
+              </div>
+            </CardHeader>
+            <CardContent>
+              {statsLoading ? <Skeleton className="h-8 w-16" /> : <div className="text-3xl font-bold">{(stats as any)?.weekTotal ?? 0}</div>}
+            </CardContent>
+          </Card>
+
+          <Card className="border-t-4 border-t-yellow-500 shadow-sm">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">في الطابور هذا الأسبوع</CardTitle>
+              <div className="h-8 w-8 bg-yellow-100 text-yellow-600 rounded-full flex items-center justify-center">
+                <ListChecks className="h-4 w-4" />
+              </div>
+            </CardHeader>
+            <CardContent>
+              {statsLoading ? <Skeleton className="h-8 w-16" /> : <div className="text-3xl font-bold">{(stats as any)?.weekQueued ?? 0}</div>}
+            </CardContent>
+          </Card>
+
+          <Card className="border-t-4 border-t-rose-500 shadow-sm">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">فشل الرفع هذا الأسبوع</CardTitle>
+              <div className="h-8 w-8 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center">
+                <XCircle className="h-4 w-4" />
+              </div>
+            </CardHeader>
+            <CardContent>
+              {statsLoading ? <Skeleton className="h-8 w-16" /> : <div className="text-3xl font-bold">{(stats as any)?.weekFailed ?? 0}</div>}
+            </CardContent>
+          </Card>
+        </div>
       </div>
 
       {/* ── جدول التقارير ── */}
