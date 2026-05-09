@@ -409,3 +409,55 @@ export async function pgHasPendingQueue(): Promise<number> {
   const r = await pool.query("SELECT COUNT(*) AS cnt FROM reports WHERE automation_status = 'queued'");
   return Number(r.rows[0]?.cnt ?? 0);
 }
+
+// ─── جدول التقارير المعمدة ────────────────────────────────────────────────────
+async function ensureCertifiedTable(): Promise<PgPool> {
+  const pool = getPgPool();
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS certified_reports (
+      id                   SERIAL PRIMARY KEY,
+      report_code          VARCHAR(200) NOT NULL,
+      taqeem_report_number VARCHAR(200) NOT NULL,
+      certified_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  return pool;
+}
+
+export interface CertifiedReport {
+  id: number;
+  reportCode: string;
+  taqeemReportNumber: string;
+  certifiedAt: string;
+}
+
+export async function pgInsertCertifiedReport(data: {
+  reportCode: string;
+  taqeemReportNumber: string;
+  certifiedAt?: string;
+}): Promise<CertifiedReport> {
+  const pool = await ensureCertifiedTable();
+  const certifiedAt = data.certifiedAt ?? new Date().toISOString();
+  const r = await pool.query(
+    "INSERT INTO certified_reports (report_code, taqeem_report_number, certified_at) VALUES ($1, $2, $3) RETURNING *",
+    [data.reportCode, data.taqeemReportNumber, certifiedAt]
+  );
+  const row = r.rows[0];
+  return {
+    id: row.id,
+    reportCode: row.report_code,
+    taqeemReportNumber: row.taqeem_report_number,
+    certifiedAt: row.certified_at instanceof Date ? row.certified_at.toISOString() : row.certified_at,
+  };
+}
+
+export async function pgListCertifiedReports(): Promise<CertifiedReport[]> {
+  const pool = await ensureCertifiedTable();
+  const r = await pool.query("SELECT * FROM certified_reports ORDER BY id DESC");
+  return r.rows.map(row => ({
+    id: row.id,
+    reportCode: row.report_code,
+    taqeemReportNumber: row.taqeem_report_number,
+    certifiedAt: row.certified_at instanceof Date ? row.certified_at.toISOString() : row.certified_at,
+  }));
+}
