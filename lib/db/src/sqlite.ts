@@ -854,3 +854,53 @@ export async function sqliteHasPendingQueue(): Promise<number> {
   const rows = db.prepare("SELECT Id FROM Reports WHERE AutomationStatus = 'queued'").all() as any[];
   return rows.length;
 }
+
+// ─── جدول التقارير المعمدة ────────────────────────────────────────────────────
+function ensureCertifiedTable(db: DatabaseSync) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS CertifiedReports (
+      Id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+      ReportCode          TEXT NOT NULL,
+      TaqeemReportNumber  TEXT NOT NULL,
+      CertifiedAt         TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+}
+
+export interface CertifiedReport {
+  id: number;
+  reportCode: string;
+  taqeemReportNumber: string;
+  certifiedAt: string;
+}
+
+export async function sqliteInsertCertifiedReport(data: {
+  reportCode: string;
+  taqeemReportNumber: string;
+  certifiedAt?: string;
+}): Promise<CertifiedReport> {
+  const db = getDb();
+  ensureCertifiedTable(db);
+  const certifiedAt = data.certifiedAt ?? new Date().toISOString();
+  const r = db.prepare(
+    "INSERT INTO CertifiedReports (ReportCode, TaqeemReportNumber, CertifiedAt) VALUES (?, ?, ?)"
+  ).run(data.reportCode, data.taqeemReportNumber, certifiedAt) as any;
+  return {
+    id: Number(r.lastInsertRowid),
+    reportCode: data.reportCode,
+    taqeemReportNumber: data.taqeemReportNumber,
+    certifiedAt,
+  };
+}
+
+export async function sqliteListCertifiedReports(): Promise<CertifiedReport[]> {
+  const db = getDb();
+  ensureCertifiedTable(db);
+  const rows = db.prepare("SELECT * FROM CertifiedReports ORDER BY Id DESC").all() as any[];
+  return rows.map(r => ({
+    id: Number(r.Id),
+    reportCode: r.ReportCode ?? "",
+    taqeemReportNumber: r.TaqeemReportNumber ?? "",
+    certifiedAt: r.CertifiedAt ?? "",
+  }));
+}
