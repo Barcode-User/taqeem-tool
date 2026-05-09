@@ -1,6 +1,4 @@
 import { useState, useEffect, useRef } from "react";
-import { Link } from "wouter";
-import { useListReports } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -8,7 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
-  CheckCircle2, Search, FileText, Eye,
+  CheckCircle2, Search, FileText,
   PlayCircle, StopCircle, Loader2, AlertCircle, RefreshCw, ChevronLeft, Stamp,
 } from "lucide-react";
 import { format } from "date-fns";
@@ -25,37 +23,48 @@ type CertifyState = {
   openedReport?: string;
 };
 
+type CertifiedRecord = {
+  id: number;
+  reportCode: string;
+  taqeemReportNumber: string;
+  certifiedAt: string;
+};
+
 export default function CertifiedReports() {
   const [searchQuery, setSearchQuery] = useState("");
   const { toast } = useToast();
   const apiBase = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
 
+  // ── حالة البوت ───────────────────────────────────────────────────────────
   const [certify, setCertify] = useState<CertifyState>({
     status: "idle", logs: [], reportNumbers: [], currentIndex: 0,
   });
   const [loadingNext, setLoadingNext] = useState(false);
   const [loadingApprove, setLoadingApprove] = useState(false);
-  const [lastApproveResult, setLastApproveResult] = useState<{ dcNumber: string; finalValue: string; reportNumber: string } | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const { data: allReports, isLoading } = useListReports({
-    query: { staleTime: 30_000, refetchOnWindowFocus: true },
-  });
+  // ── سجل التقارير المعمدة ─────────────────────────────────────────────────
+  const [records, setRecords] = useState<CertifiedRecord[]>([]);
+  const [recordsLoading, setRecordsLoading] = useState(true);
 
-  const reports = allReports?.filter((r) => (r as any).automationStatus === "completed");
-  const filtered = reports?.filter((r) => {
+  const fetchRecords = async () => {
+    try {
+      const resp = await fetch(`${apiBase}/api/certified-reports`);
+      if (resp.ok) setRecords(await resp.json());
+    } catch {}
+    finally { setRecordsLoading(false); }
+  };
+
+  useEffect(() => { fetchRecords(); }, []);
+
+  const filtered = records.filter(r => {
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
-    return (
-      r.reportNumber?.toLowerCase().includes(q) ||
-      r.clientName?.toLowerCase().includes(q) ||
-      r.propertyType?.toLowerCase().includes(q) ||
-      r.region?.toLowerCase().includes(q) ||
-      r.city?.toLowerCase().includes(q)
-    );
+    return r.reportCode.toLowerCase().includes(q) || r.taqeemReportNumber.toLowerCase().includes(q);
   });
 
+  // ── البوت ─────────────────────────────────────────────────────────────────
   const fetchCertifyStatus = async () => {
     try {
       const resp = await fetch(`${apiBase}/api/automation/certify/status`);
@@ -64,6 +73,8 @@ export default function CertifiedReports() {
         setCertify(data);
         if (data.status === "ready" || data.status === "failed" || data.status === "idle") {
           if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+          // حدّث قائمة السجلات بعد اكتمال دفعة
+          if (data.status !== "running") fetchRecords();
         }
       }
     } catch {}
@@ -115,9 +126,9 @@ export default function CertifiedReports() {
       const resp = await fetch(`${apiBase}/api/automation/certify/approve`, { method: "POST" });
       const data = await resp.json();
       if (resp.ok && data.success) {
-        setLastApproveResult({ dcNumber: data.dcNumber, finalValue: data.finalValue, reportNumber: data.reportNumber });
-        toast({ title: "✅ تم اعتماد التقرير وإرسال البيانات", description: `DC: ${data.dcNumber} | القيمة: ${data.finalValue}` });
+        toast({ title: "✅ تم اعتماد التقرير وإرسال البيانات", description: `DC: ${data.dcNumber}` });
         await fetchCertifyStatus();
+        await fetchRecords();
       } else {
         toast({ variant: "destructive", title: "خطأ في الاعتماد", description: data.error });
       }
@@ -135,7 +146,7 @@ export default function CertifiedReports() {
       const data = await resp.json();
       if (resp.ok) {
         if (data.done) {
-          toast({ title: "✅ انتهت جميع التقارير", description: "لا توجد تقارير إضافية في هذه الصفحة" });
+          toast({ title: "✅ انتهت جميع التقارير" });
         } else {
           toast({ title: `📄 تم فتح التقرير ${data.reportNumber}`, description: `${data.index} من ${data.total}` });
           setCertify(prev => ({ ...prev, openedReport: data.reportNumber, currentIndex: data.index - 1 }));
@@ -157,8 +168,7 @@ export default function CertifiedReports() {
       if (resp.ok) {
         const data = await resp.json();
         setCertify(prev => ({ ...prev, reportNumbers: data.reportNumbers, currentIndex: 0 }));
-        toast({ title: "تم التحديث", description: `${data.count} تقرير — سيفتح الروبوت الأول` });
-        // افتح التقرير الأول من القائمة الجديدة تلقائياً
+        toast({ title: "تم التحديث", description: `${data.count} تقرير` });
         if (data.reportNumbers?.length > 0) {
           await fetch(`${apiBase}/api/automation/certify/open`, {
             method: "POST",
@@ -172,10 +182,10 @@ export default function CertifiedReports() {
   };
 
   const isRunning = certify.status === "running";
-  const isReady = certify.status === "ready";
-  const total = certify.reportNumbers.length;
-  const current = certify.currentIndex + 1;
-  const hasNext = certify.currentIndex < total - 1;
+  const isReady   = certify.status === "ready";
+  const total     = certify.reportNumbers.length;
+  const current   = certify.currentIndex + 1;
+  const hasNext   = certify.currentIndex < total - 1;
 
   return (
     <div className="space-y-6">
@@ -206,23 +216,15 @@ export default function CertifiedReports() {
 
             <div className="flex items-center gap-2 flex-wrap">
               {isReady && (
-                <Button
-                  onClick={handleApproveReport}
-                  disabled={loadingApprove}
-                  className="gap-2 font-medium bg-emerald-700 hover:bg-emerald-800 text-white"
-                >
+                <Button onClick={handleApproveReport} disabled={loadingApprove}
+                  className="gap-2 font-medium bg-emerald-700 hover:bg-emerald-800 text-white">
                   {loadingApprove
                     ? <><Loader2 className="h-4 w-4 animate-spin" /> جارٍ الاعتماد...</>
                     : <><Stamp className="h-4 w-4" /> اعتماد التقرير</>}
                 </Button>
               )}
               {isReady && total > 0 && (
-                <Button
-                  onClick={handleNextReport}
-                  disabled={loadingNext || !hasNext}
-                  variant="outline"
-                  className="gap-2 font-medium"
-                >
+                <Button onClick={handleNextReport} disabled={loadingNext || !hasNext} variant="outline" className="gap-2">
                   {loadingNext
                     ? <><Loader2 className="h-4 w-4 animate-spin" /> جارٍ الفتح...</>
                     : hasNext
@@ -237,9 +239,9 @@ export default function CertifiedReports() {
                 </Button>
               )}
               {(isRunning || isReady) && (
-                <Button variant="outline" size="sm" onClick={handleStopCertify} className="gap-2 text-red-600 border-red-200 hover:bg-red-50">
-                  <StopCircle className="h-4 w-4" />
-                  إغلاق
+                <Button variant="outline" size="sm" onClick={handleStopCertify}
+                  className="gap-2 text-red-600 border-red-200 hover:bg-red-50">
+                  <StopCircle className="h-4 w-4" /> إغلاق
                 </Button>
               )}
               <Button onClick={handleStartCertify} disabled={isRunning} className="gap-2">
@@ -254,24 +256,17 @@ export default function CertifiedReports() {
         {/* شريط تقدم التقارير */}
         {isReady && total > 0 && (
           <CardContent className="pt-0">
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 mb-2">
               <div className="flex-1 bg-muted rounded-full h-2">
-                <div
-                  className="bg-emerald-500 h-2 rounded-full transition-all duration-500"
-                  style={{ width: `${(current / total) * 100}%` }}
-                />
+                <div className="bg-emerald-500 h-2 rounded-full transition-all duration-500"
+                  style={{ width: `${(current / total) * 100}%` }} />
               </div>
-              <span className="text-xs text-muted-foreground whitespace-nowrap">
-                {current} / {total}
-              </span>
+              <span className="text-xs text-muted-foreground whitespace-nowrap">{current} / {total}</span>
             </div>
-            <div className="flex flex-wrap gap-1.5 mt-2">
+            <div className="flex flex-wrap gap-1.5">
               {certify.reportNumbers.map((num, idx) => (
-                <Badge
-                  key={num}
-                  variant={idx === certify.currentIndex ? "default" : idx < certify.currentIndex ? "secondary" : "outline"}
-                  className={`font-mono text-xs ${idx === certify.currentIndex ? "bg-emerald-600" : idx < certify.currentIndex ? "opacity-50" : ""}`}
-                >
+                <Badge key={num} variant={idx === certify.currentIndex ? "default" : idx < certify.currentIndex ? "secondary" : "outline"}
+                  className={`font-mono text-xs ${idx === certify.currentIndex ? "bg-emerald-600" : idx < certify.currentIndex ? "opacity-50" : ""}`}>
                   {num}
                 </Badge>
               ))}
@@ -279,7 +274,6 @@ export default function CertifiedReports() {
           </CardContent>
         )}
 
-        {/* خطأ */}
         {certify.status === "failed" && certify.error && (
           <CardContent className="pt-0">
             <div className="rounded-lg bg-red-50 border border-red-200 text-red-800 p-3 text-sm flex items-start gap-2">
@@ -289,7 +283,6 @@ export default function CertifiedReports() {
           </CardContent>
         )}
 
-        {/* سجل العمليات */}
         {certify.logs.length > 0 && (
           <CardContent className="pt-0">
             <div className="rounded-lg bg-slate-950 text-green-400 font-mono text-xs p-3 space-y-0.5 max-h-28 overflow-y-auto" dir="ltr">
@@ -299,22 +292,29 @@ export default function CertifiedReports() {
         )}
       </Card>
 
-      {/* ─── قائمة التقارير المعمدة ─────────────────────────────────────────── */}
+      {/* ─── جدول التقارير المعمدة ──────────────────────────────────────────── */}
       <Card>
         <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-3">
             <div className="flex items-center gap-3">
               <div className="h-9 w-9 rounded-full bg-emerald-100 flex items-center justify-center">
                 <CheckCircle2 className="h-5 w-5 text-emerald-600" />
               </div>
               <div>
-                <CardTitle className="text-lg">التقارير المعمدة</CardTitle>
-                <p className="text-sm text-muted-foreground mt-0.5">التقارير المرفوعة بنجاح على منصة تقييم</p>
+                <CardTitle className="text-lg">سجل التقارير المعمدة</CardTitle>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  التقارير التي تم تعميدها بنجاح عبر منصة قيمة
+                </p>
               </div>
             </div>
-            <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 text-sm px-3 py-1">
-              {isLoading ? "..." : (filtered?.length ?? 0)} تقرير
-            </Badge>
+            <div className="flex items-center gap-2">
+              <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 text-sm px-3 py-1">
+                {recordsLoading ? "..." : filtered.length} تقرير
+              </Badge>
+              <Button variant="outline" size="sm" onClick={fetchRecords} className="gap-2">
+                <RefreshCw className="h-3.5 w-3.5" /> تحديث
+              </Button>
+            </div>
           </div>
         </CardHeader>
 
@@ -323,7 +323,7 @@ export default function CertifiedReports() {
             <div className="relative flex-1 max-w-sm">
               <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="بحث برقم التقرير أو اسم العميل..."
+                placeholder="بحث برقم التقرير أو رقم تقييم..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pr-9"
@@ -331,54 +331,45 @@ export default function CertifiedReports() {
             </div>
           </div>
 
-          {isLoading ? (
+          {recordsLoading ? (
             <div className="space-y-3">
-              {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-12 w-full rounded-md" />)}
+              {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-12 w-full rounded-md" />)}
             </div>
-          ) : filtered?.length === 0 ? (
+          ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-3">
               <FileText className="h-12 w-12 opacity-30" />
-              <p className="text-base font-medium">لا توجد تقارير معمدة</p>
-              <p className="text-sm">التقارير المرفوعة بنجاح على تقييم ستظهر هنا</p>
+              <p className="text-base font-medium">لا توجد تقارير معمدة بعد</p>
+              <p className="text-sm">ستظهر هنا فور اكتمال كل تعميد تلقائي</p>
             </div>
           ) : (
             <div className="rounded-md border overflow-hidden">
               <Table>
                 <TableHeader>
                   <TableRow className="bg-muted/40">
-                    <TableHead className="text-right font-semibold">رقم التقرير</TableHead>
-                    <TableHead className="text-right font-semibold">العميل</TableHead>
-                    <TableHead className="text-right font-semibold">نوع الأصل</TableHead>
-                    <TableHead className="text-right font-semibold">المنطقة / المدينة</TableHead>
-                    <TableHead className="text-right font-semibold">قيمة التقييم</TableHead>
-                    <TableHead className="text-right font-semibold">تاريخ التقرير</TableHead>
-                    <TableHead className="text-right font-semibold">عرض</TableHead>
+                    <TableHead className="text-right font-semibold">#</TableHead>
+                    <TableHead className="text-right font-semibold">رقم التقرير (DC)</TableHead>
+                    <TableHead className="text-right font-semibold">رقم تقرير قيمة</TableHead>
+                    <TableHead className="text-right font-semibold">تاريخ التعميد</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filtered?.map((report) => (
-                    <TableRow key={report.id} className="hover:bg-muted/30 transition-colors">
-                      <TableCell className="font-mono text-sm font-medium text-primary">
-                        {report.reportNumber || "—"}
-                      </TableCell>
-                      <TableCell className="font-medium">{report.clientName || "—"}</TableCell>
-                      <TableCell>{report.propertyType || "—"}</TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {[report.region, report.city].filter(Boolean).join(" / ") || "—"}
-                      </TableCell>
-                      <TableCell className="font-medium text-emerald-700">
-                        {report.finalValue ? Number(report.finalValue).toLocaleString("ar-SA") + " ر.س" : "—"}
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {report.reportDate ? format(new Date(report.reportDate), "d MMM yyyy", { locale: arSA }) : "—"}
+                  {filtered.map((rec, idx) => (
+                    <TableRow key={rec.id} className="hover:bg-muted/30 transition-colors">
+                      <TableCell className="text-muted-foreground text-sm">{idx + 1}</TableCell>
+                      <TableCell>
+                        <span className="font-mono text-sm font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded px-2 py-0.5">
+                          {rec.reportCode || "—"}
+                        </span>
                       </TableCell>
                       <TableCell>
-                        <Link href={`/reports/${report.id}`}>
-                          <Button variant="ghost" size="sm" className="h-8 px-2">
-                            <Eye className="h-4 w-4 ml-1" />
-                            عرض
-                          </Button>
-                        </Link>
+                        <span className="font-mono text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-0.5">
+                          {rec.taqeemReportNumber || "—"}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {rec.certifiedAt
+                          ? format(new Date(rec.certifiedAt), "d MMM yyyy — HH:mm", { locale: arSA })
+                          : "—"}
                       </TableCell>
                     </TableRow>
                   ))}
