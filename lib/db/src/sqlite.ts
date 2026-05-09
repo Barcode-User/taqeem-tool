@@ -819,12 +819,34 @@ export async function sqliteDeleteReport(id: number): Promise<void> {
 
 export async function sqliteGetReportStats() {
   const db = getDb();
-  const total = (db.prepare("SELECT COUNT(*) as c FROM Reports").get() as any).c;
-  const extracted = (db.prepare("SELECT COUNT(*) as c FROM Reports WHERE Status = 'extracted'").get() as any).c;
-  const reviewed = (db.prepare("SELECT COUNT(*) as c FROM Reports WHERE Status = 'reviewed'").get() as any).c;
-  const submitted = (db.prepare("SELECT COUNT(*) as c FROM Reports WHERE TaqeemReportNumber IS NOT NULL AND TaqeemReportNumber != ''").get() as any).c;
-  const pending = (db.prepare("SELECT COUNT(*) as c FROM Reports WHERE Status = 'pending'").get() as any).c;
-  return { total, extracted, reviewed, submitted, pending };
+  const row = db.prepare(`
+    SELECT
+      COUNT(*) AS total,
+      SUM(CASE WHEN Status = 'pending'   THEN 1 ELSE 0 END) AS pending,
+      SUM(CASE WHEN Status = 'extracted' THEN 1 ELSE 0 END) AS extracted,
+      SUM(CASE WHEN Status = 'reviewed'  THEN 1 ELSE 0 END) AS reviewed,
+      SUM(CASE WHEN TaqeemReportNumber IS NOT NULL AND TaqeemReportNumber != '' THEN 1 ELSE 0 END) AS submitted,
+      SUM(CASE WHEN date(CreatedAt) = date('now') THEN 1 ELSE 0 END) AS today_total,
+      SUM(CASE WHEN date(CreatedAt) = date('now') AND AutomationStatus = 'queued' THEN 1 ELSE 0 END) AS today_queued,
+      SUM(CASE WHEN date(CreatedAt) = date('now') AND AutomationStatus = 'failed' THEN 1 ELSE 0 END) AS today_failed,
+      SUM(CASE WHEN CreatedAt >= datetime('now', '-6 days') THEN 1 ELSE 0 END) AS week_total,
+      SUM(CASE WHEN CreatedAt >= datetime('now', '-6 days') AND AutomationStatus = 'queued' THEN 1 ELSE 0 END) AS week_queued,
+      SUM(CASE WHEN CreatedAt >= datetime('now', '-6 days') AND AutomationStatus = 'failed' THEN 1 ELSE 0 END) AS week_failed
+    FROM Reports
+  `).get() as any;
+  return {
+    total:       Number(row?.total       ?? 0),
+    pending:     Number(row?.pending     ?? 0),
+    extracted:   Number(row?.extracted   ?? 0),
+    reviewed:    Number(row?.reviewed    ?? 0),
+    submitted:   Number(row?.submitted   ?? 0),
+    todayTotal:  Number(row?.today_total  ?? 0),
+    todayQueued: Number(row?.today_queued ?? 0),
+    todayFailed: Number(row?.today_failed ?? 0),
+    weekTotal:   Number(row?.week_total   ?? 0),
+    weekQueued:  Number(row?.week_queued  ?? 0),
+    weekFailed:  Number(row?.week_failed  ?? 0),
+  };
 }
 
 export async function sqliteHasPendingQueue(): Promise<number> {
