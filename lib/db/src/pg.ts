@@ -367,7 +367,11 @@ export async function pgDeleteReport(id: number): Promise<void> {
   await pool.query("DELETE FROM reports WHERE id = $1", [id]);
 }
 
-export async function pgGetReportStats(): Promise<{ total: number; pending: number; extracted: number; reviewed: number; submitted: number }> {
+export async function pgGetReportStats(): Promise<{
+  total: number; pending: number; extracted: number; reviewed: number; submitted: number;
+  todayTotal: number; todayQueued: number; todayFailed: number;
+  weekTotal: number; weekQueued: number; weekFailed: number;
+}> {
   const pool = await withTable();
   const r = await pool.query(`
     SELECT
@@ -375,16 +379,28 @@ export async function pgGetReportStats(): Promise<{ total: number; pending: numb
       SUM(CASE WHEN status = 'pending'   THEN 1 ELSE 0 END) AS pending,
       SUM(CASE WHEN status = 'extracted' THEN 1 ELSE 0 END) AS extracted,
       SUM(CASE WHEN status = 'reviewed'  THEN 1 ELSE 0 END) AS reviewed,
-      SUM(CASE WHEN status = 'submitted' THEN 1 ELSE 0 END) AS submitted
+      SUM(CASE WHEN status = 'submitted' THEN 1 ELSE 0 END) AS submitted,
+      COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE)                                                    AS today_total,
+      COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE AND automation_status = 'queued')                   AS today_queued,
+      COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE AND automation_status = 'failed')                   AS today_failed,
+      COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE - INTERVAL '6 days')                               AS week_total,
+      COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE - INTERVAL '6 days' AND automation_status = 'queued') AS week_queued,
+      COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE - INTERVAL '6 days' AND automation_status = 'failed')  AS week_failed
     FROM reports
   `);
   const row = r.rows[0];
   return {
-    total: Number(row?.total ?? 0),
-    pending: Number(row?.pending ?? 0),
-    extracted: Number(row?.extracted ?? 0),
-    reviewed: Number(row?.reviewed ?? 0),
-    submitted: Number(row?.submitted ?? 0),
+    total:       Number(row?.total ?? 0),
+    pending:     Number(row?.pending ?? 0),
+    extracted:   Number(row?.extracted ?? 0),
+    reviewed:    Number(row?.reviewed ?? 0),
+    submitted:   Number(row?.submitted ?? 0),
+    todayTotal:  Number(row?.today_total  ?? 0),
+    todayQueued: Number(row?.today_queued ?? 0),
+    todayFailed: Number(row?.today_failed ?? 0),
+    weekTotal:   Number(row?.week_total   ?? 0),
+    weekQueued:  Number(row?.week_queued  ?? 0),
+    weekFailed:  Number(row?.week_failed  ?? 0),
   };
 }
 
