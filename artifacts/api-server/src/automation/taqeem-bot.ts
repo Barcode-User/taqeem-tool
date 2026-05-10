@@ -4621,13 +4621,24 @@ async function submitAndDownloadCertificate(
   }
 
   if (!btnClicked) {
-    addLog(session, '⚠️ جميع الاستراتيجيات فشلت — الانتظار للمراجعة اليدوية');
+    addLog(session, '⚠️ جميع الاستراتيجيات فشلت — لم يصل التقرير لمرحلة الإرسال');
     const pageSnap = await page.evaluate(() => document.body.innerText ?? "").catch(() => "");
     addLog(session, `📝 محتوى الصفحة: ${pageSnap.slice(0, 400)}`);
-    await updateReport(reportId, { automationStatus: "waiting_review", automationError: null });
+    await updateReport(reportId, {
+      automationStatus: "incomplete",
+      automationError: "لم يتم الضغط على زر إرسال التقرير — غير مكتمل الرفع",
+    });
     closeSession(session.sessionId);
     return;
   }
+
+  // ── نجح الضغط على الزر — ضبط الحالة فوراً ──────────────────────────────
+  addLog(session, '🏆 تم الضغط على "إرسال التقرير" — ضبط الحالة: تم الرفع');
+  await updateReport(reportId, {
+    status: "submitted",
+    automationStatus: "submitted_taqeem",
+    taqeemSubmittedAt: new Date().toISOString(),
+  });
 
   // ── 4. انتظار صفحة التأكيد ───────────────────────────────────────────────
   addLog(session, "▶ الخطوة 3: انتظار صفحة التأكيد");
