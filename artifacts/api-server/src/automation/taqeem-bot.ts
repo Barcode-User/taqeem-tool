@@ -4517,105 +4517,103 @@ async function submitAndDownloadCertificate(
   }
   await page.waitForTimeout(400);
 
-  // ── 3. ضغط زر "إرسال التقرير" — استراتيجيات متعددة ────────────────────
-  addLog(session, "▶ الخطوة 2: ضغط زر إرسال التقرير...");
+  // ── 3. ضغط زر "إرسال التقرير" — input#send[type=submit] ────────────────
+  // الزر هو: <input type="submit" id="send" name="send" value="إرسال التقرير">
+  addLog(session, "▶ الخطوة 2: ضغط زر إرسال التقرير (input#send)...");
 
-  // انتظر Angular يعالج الـ checkbox قبل البحث عن الزر
-  await page.waitForTimeout(800);
+  // انتظر ظهور الزر (حتى 15 ثانية)
+  await page.waitForSelector("input#send, input[name='send']", { timeout: 15000 }).catch(() => {});
 
-  // سجّل جميع الأزرار الموجودة للتشخيص
+  // سجّل الأزرار الموجودة للتشخيص
   const allBtnTexts: string[] = await page.evaluate(() =>
-    Array.from(document.querySelectorAll("button, [role='button'], input[type='submit']"))
-      .map(el => (el.textContent ?? "").trim())
-      .filter(t => t.length > 0)
+    Array.from(document.querySelectorAll("button, input[type='submit'], input[type='button']"))
+      .map(el => `${el.tagName}#${(el as any).id}[value="${(el as any).value || ""}"][text="${(el as any).textContent?.trim() || ""}"]`)
   ).catch(() => []);
-  addLog(session, `📋 الأزرار الموجودة: ${allBtnTexts.join(" | ")}`);
+  addLog(session, `📋 الأزرار: ${allBtnTexts.join(" | ")}`);
 
   let btnClicked = false;
 
-  // ── استراتيجية 1: انتظار ظهور الزر ثم Playwright click ──────────────────
+  // ── استراتيجية 1: Playwright click بالـ ID ───────────────────────────────
   if (!btnClicked) {
     try {
-      const btnAppeared = await page.waitForSelector(
-        "button:has-text('إرسال التقرير')",
-        { timeout: 15000 }
-      ).then(() => true).catch(() => false);
-
-      if (btnAppeared) {
-        const loc = page.locator("button").filter({ hasText: /إرسال التقرير/i }).first();
+      const loc = page.locator("input#send");
+      if ((await loc.count().catch(() => 0)) > 0) {
         await loc.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
         await page.waitForTimeout(300);
         await loc.click({ timeout: 8000 });
         btnClicked = true;
-        addLog(session, '✅ تم الضغط على "إرسال التقرير" (Playwright click)');
+        addLog(session, '✅ تم الضغط (input#send — Playwright click)');
       }
     } catch (e: any) {
       addLog(session, `↪️ استراتيجية 1 فشلت: ${e.message?.slice(0, 80)}`);
     }
   }
 
-  // ── استراتيجية 2: force click (تتجاوز أي overlay أو angular guard) ────────
+  // ── استراتيجية 2: form.submit() مع hidden input (يتجاوز JS handlers) ──────
   if (!btnClicked) {
     try {
-      const loc = page.locator("button").filter({ hasText: /إرسال التقرير/i }).first();
+      const result: string = await page.evaluate(() => {
+        const btn = document.getElementById("send") as HTMLInputElement | null
+                 || document.querySelector("input[name='send']") as HTMLInputElement | null;
+        if (!btn) return "no_btn";
+        const form = btn.closest("form") as HTMLFormElement | null;
+        if (!form) return "no_form";
+        // تأكد أن الزر غير معطّل
+        btn.disabled = false;
+        // أضف hidden input باسم send حتى يعرف الخادم الإجراء
+        if (!form.querySelector("input[type='hidden'][name='send']")) {
+          const h = document.createElement("input");
+          h.type = "hidden"; h.name = "send"; h.value = btn.value;
+          form.appendChild(h);
+        }
+        form.submit();
+        return "submitted";
+      });
+      addLog(session, `📤 form.submit() result: ${result}`);
+      if (result === "submitted") {
+        btnClicked = true;
+        await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
+        addLog(session, `✅ تم الإرسال — الصفحة: ${page.url()}`);
+      }
+    } catch (e: any) {
+      addLog(session, `↪️ استراتيجية 2 (form.submit) فشلت: ${e.message?.slice(0, 80)}`);
+    }
+  }
+
+  // ── استراتيجية 3: force click ────────────────────────────────────────────
+  if (!btnClicked) {
+    try {
+      const loc = page.locator("input#send, input[name='send']").first();
       if ((await loc.count().catch(() => 0)) > 0) {
         await loc.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
         await loc.click({ force: true, timeout: 8000 });
         btnClicked = true;
-        addLog(session, '✅ تم الضغط على "إرسال التقرير" (force click)');
-      }
-    } catch (e: any) {
-      addLog(session, `↪️ استراتيجية 2 فشلت: ${e.message?.slice(0, 80)}`);
-    }
-  }
-
-  // ── استراتيجية 3: dispatchEvent + click عبر evaluate (يتجاوز Angular guards) ──
-  if (!btnClicked) {
-    try {
-      const clicked = await page.evaluate(() => {
-        const btns = Array.from(document.querySelectorAll("button, [role='button'], input[type='submit']"));
-        const btn = btns.find(b => /إرسال التقرير/i.test(b.textContent ?? "")) as HTMLElement | null;
-        if (!btn) return false;
-        btn.scrollIntoView({ block: "center" });
-        // أزل disabled إن وجد
-        (btn as any).disabled = false;
-        btn.removeAttribute("disabled");
-        // أطلق أحداث Angular
-        btn.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
-        btn.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
-        btn.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-        btn.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-        btn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-        return true;
-      });
-      if (clicked) {
-        btnClicked = true;
-        addLog(session, '✅ تم الضغط على "إرسال التقرير" (dispatchEvent evaluate)');
+        addLog(session, '✅ تم الضغط (force click على input#send)');
       }
     } catch (e: any) {
       addLog(session, `↪️ استراتيجية 3 فشلت: ${e.message?.slice(0, 80)}`);
     }
   }
 
-  // ── استراتيجية 4: Angular submit — ابحث عن (click) handler وشغّله ─────────
+  // ── استراتيجية 4: dispatchEvent + .click() عبر evaluate ──────────────────
   if (!btnClicked) {
     try {
       const clicked = await page.evaluate(() => {
-        const btns = Array.from(document.querySelectorAll("button"));
-        const btn = btns.find(b => /إرسال التقرير/i.test(b.textContent ?? "")) as any;
+        const btn = document.getElementById("send") as HTMLElement | null
+                 || document.querySelector("input[name='send']") as HTMLElement | null;
         if (!btn) return false;
-        // Angular يحتفظ بالـ event listeners في خاصية __zone_symbol__clickfalse
-        const ngClick =
-          btn.__zone_symbol__clickfalse?.[0]?.callback ||
-          btn.__ngContext__?.click ||
-          null;
-        if (ngClick) { ngClick(); return true; }
-        btn.click();
+        btn.scrollIntoView({ block: "center" });
+        (btn as any).disabled = false;
+        btn.removeAttribute("disabled");
+        btn.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+        btn.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+        btn.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+        (btn as any).click?.();
         return true;
       });
       if (clicked) {
         btnClicked = true;
-        addLog(session, '✅ تم الضغط (Angular zone click)');
+        addLog(session, '✅ تم الضغط (dispatchEvent على input#send)');
       }
     } catch (e: any) {
       addLog(session, `↪️ استراتيجية 4 فشلت: ${e.message?.slice(0, 80)}`);
