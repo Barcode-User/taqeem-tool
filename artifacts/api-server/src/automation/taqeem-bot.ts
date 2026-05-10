@@ -4451,10 +4451,34 @@ async function submitAndDownloadCertificate(
   addLog(session, "═══════════════════════════════════════════════");
   addLog(session, "▶ إرسال التقرير — الخطوة 1: الموافقة على البنود");
 
-  // ── 1. انتظار قسم "الإجراءات" ────────────────────────────────────────────
-  await page.waitForSelector("text=الإجراءات", { timeout: 20000 }).catch(() =>
-    addLog(session, "⚠️ قسم الإجراءات لم يظهر خلال 20 ثانية"),
-  );
+  // ── 1. انتظار استقرار الصفحة النهائية (Angular lazy-load) ────────────────
+  addLog(session, `📄 URL الصفحة النهائية: ${page.url()}`);
+
+  // انتظر networkidle كاملاً ثم وقت إضافي لـ Angular
+  await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
+  await page.waitForTimeout(1500);
+
+  // مرر للأسفل لتحميل المحتوى الكسول
+  await page.evaluate(() => window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" }));
+  await page.waitForTimeout(800);
+  await page.evaluate(() => window.scrollTo({ top: document.body.scrollHeight }));
+  await page.waitForTimeout(400);
+
+  // انتظر ظهور قسم "الإجراءات" أو مربع الموافقة (حتى 25 ثانية)
+  const sectionFound = await page.waitForSelector(
+    "text=الإجراءات, mat-checkbox, input[type='checkbox']",
+    { timeout: 25000 }
+  ).then(() => true).catch(() => false);
+
+  if (!sectionFound) {
+    addLog(session, "⚠️ قسم الإجراءات لم يظهر — سجل محتوى الصفحة للتشخيص");
+    const bodyText = await page.evaluate(() => document.body.innerText ?? "").catch(() => "");
+    addLog(session, `📝 محتوى الصفحة: ${bodyText.slice(0, 300)}`);
+  } else {
+    addLog(session, "✅ قسم الإجراءات ظهر");
+  }
+
+  await page.waitForTimeout(500);
 
   // ── 2. تحديد checkbox الموافقة ────────────────────────────────────────────
   const termsLocator = page
@@ -4469,19 +4493,21 @@ async function submitAndDownloadCertificate(
       .isChecked()
       .catch(() => false);
     if (!isChecked) {
+      await termsLocator.first().scrollIntoViewIfNeeded().catch(() => {});
       await termsLocator.first().click({ force: true });
-      await page.waitForTimeout(150);
+      await page.waitForTimeout(300);
     }
     addLog(session, '✅ "لقد قرأت السياسات واللوائح وأوافق عليها" — تم التحديد');
   } else {
     // Fallback: ابحث عن input[type=checkbox] بجوار نص الموافقة
     const fallbackChecked = await page.evaluate(() => {
-      const labels = Array.from(document.querySelectorAll("label, span, p"));
+      const labels = Array.from(document.querySelectorAll("label, span, p, mat-checkbox"));
       const target = labels.find(el => /السياسات|اللوائح|لقد قرأت/i.test(el.textContent ?? ""));
       if (!target) return false;
       const cb =
         target.querySelector<HTMLInputElement>("input[type='checkbox']") ??
-        target.closest("label")?.querySelector<HTMLInputElement>("input[type='checkbox']");
+        target.closest("label")?.querySelector<HTMLInputElement>("input[type='checkbox']") ??
+        (target as HTMLInputElement);
       if (cb && !cb.checked) { cb.click(); return true; }
       return !!cb;
     });
@@ -4489,22 +4515,49 @@ async function submitAndDownloadCertificate(
       ? '✅ terms (fallback) — تم التحديد'
       : '⚠️ checkbox الموافقة لم يُعثر عليه — تابع على مسؤوليتك');
   }
-  await page.waitForTimeout(200);
+  await page.waitForTimeout(400);
 
-  // ── 3. ضغط "إرسال التقرير" ───────────────────────────────────────────────
-  addLog(session, "▶ الخطوة 2: ضغط إرسال التقرير");
+  // ── 3. انتظار ظهور زر "إرسال التقرير" ───────────────────────────────────
+  addLog(session, "▶ الخطوة 2: انتظار زر إرسال التقرير...");
+
+  // انتظر حتى 20 ثانية لظهور الزر
+  const btnAppeared = await page.waitForSelector(
+    "button:has-text('إرسال التقرير')",
+    { timeout: 20000 }
+  ).then(() => true).catch(() => false);
+
+  if (!btnAppeared) {
+    addLog(session, "⚠️ انتهت المهلة — مسح إضافي للصفحة...");
+    await page.evaluate(() => window.scrollTo({ top: document.body.scrollHeight }));
+    await page.waitForTimeout(2000);
+  }
+
   const submitBtn = page.locator("button").filter({ hasText: /إرسال التقرير/i });
   const submitCount = await submitBtn.count().catch(() => 0);
 
   if (submitCount === 0) {
-    addLog(session, '⚠️ زر "إرسال التقرير" غير موجود — الانتظار للمراجعة اليدوية');
-    await updateReport(reportId, { automationStatus: "waiting_review", automationError: null });
-    closeSession(session.sessionId);
-    return;
+    // محاولة أخيرة: بحث عبر evaluate مع scroll
+    const clickedViaJs = await page.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll("button"));
+      const btn = btns.find(b => /إرسال التقرير/i.test(b.textContent ?? ""));
+      if (btn) { btn.scrollIntoView(); btn.click(); return true; }
+      return false;
+    });
+    if (clickedViaJs) {
+      addLog(session, '✅ تم الضغط على "إرسال التقرير" (via JS evaluate)');
+    } else {
+      addLog(session, '⚠️ زر "إرسال التقرير" غير موجود — الانتظار للمراجعة اليدوية');
+      const pageSnap = await page.evaluate(() => document.body.innerText ?? "").catch(() => "");
+      addLog(session, `📝 الأزرار الموجودة: ${pageSnap.slice(0, 300)}`);
+      await updateReport(reportId, { automationStatus: "waiting_review", automationError: null });
+      closeSession(session.sessionId);
+      return;
+    }
+  } else {
+    await submitBtn.first().scrollIntoViewIfNeeded().catch(() => {});
+    await submitBtn.first().click();
+    addLog(session, '✅ تم الضغط على "إرسال التقرير"');
   }
-
-  await submitBtn.first().click();
-  addLog(session, '✅ تم الضغط على "إرسال التقرير"');
 
   // ── 4. انتظار صفحة التأكيد ───────────────────────────────────────────────
   addLog(session, "▶ الخطوة 3: انتظار صفحة التأكيد");
