@@ -4517,46 +4517,118 @@ async function submitAndDownloadCertificate(
   }
   await page.waitForTimeout(400);
 
-  // ── 3. انتظار ظهور زر "إرسال التقرير" ───────────────────────────────────
-  addLog(session, "▶ الخطوة 2: انتظار زر إرسال التقرير...");
+  // ── 3. ضغط زر "إرسال التقرير" — استراتيجيات متعددة ────────────────────
+  addLog(session, "▶ الخطوة 2: ضغط زر إرسال التقرير...");
 
-  // انتظر حتى 20 ثانية لظهور الزر
-  const btnAppeared = await page.waitForSelector(
-    "button:has-text('إرسال التقرير')",
-    { timeout: 20000 }
-  ).then(() => true).catch(() => false);
+  // انتظر Angular يعالج الـ checkbox قبل البحث عن الزر
+  await page.waitForTimeout(800);
 
-  if (!btnAppeared) {
-    addLog(session, "⚠️ انتهت المهلة — مسح إضافي للصفحة...");
-    await page.evaluate(() => window.scrollTo({ top: document.body.scrollHeight }));
-    await page.waitForTimeout(2000);
+  // سجّل جميع الأزرار الموجودة للتشخيص
+  const allBtnTexts: string[] = await page.evaluate(() =>
+    Array.from(document.querySelectorAll("button, [role='button'], input[type='submit']"))
+      .map(el => (el.textContent ?? "").trim())
+      .filter(t => t.length > 0)
+  ).catch(() => []);
+  addLog(session, `📋 الأزرار الموجودة: ${allBtnTexts.join(" | ")}`);
+
+  let btnClicked = false;
+
+  // ── استراتيجية 1: انتظار ظهور الزر ثم Playwright click ──────────────────
+  if (!btnClicked) {
+    try {
+      const btnAppeared = await page.waitForSelector(
+        "button:has-text('إرسال التقرير')",
+        { timeout: 15000 }
+      ).then(() => true).catch(() => false);
+
+      if (btnAppeared) {
+        const loc = page.locator("button").filter({ hasText: /إرسال التقرير/i }).first();
+        await loc.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+        await page.waitForTimeout(300);
+        await loc.click({ timeout: 8000 });
+        btnClicked = true;
+        addLog(session, '✅ تم الضغط على "إرسال التقرير" (Playwright click)');
+      }
+    } catch (e: any) {
+      addLog(session, `↪️ استراتيجية 1 فشلت: ${e.message?.slice(0, 80)}`);
+    }
   }
 
-  const submitBtn = page.locator("button").filter({ hasText: /إرسال التقرير/i });
-  const submitCount = await submitBtn.count().catch(() => 0);
-
-  if (submitCount === 0) {
-    // محاولة أخيرة: بحث عبر evaluate مع scroll
-    const clickedViaJs = await page.evaluate(() => {
-      const btns = Array.from(document.querySelectorAll("button"));
-      const btn = btns.find(b => /إرسال التقرير/i.test(b.textContent ?? ""));
-      if (btn) { btn.scrollIntoView(); btn.click(); return true; }
-      return false;
-    });
-    if (clickedViaJs) {
-      addLog(session, '✅ تم الضغط على "إرسال التقرير" (via JS evaluate)');
-    } else {
-      addLog(session, '⚠️ زر "إرسال التقرير" غير موجود — الانتظار للمراجعة اليدوية');
-      const pageSnap = await page.evaluate(() => document.body.innerText ?? "").catch(() => "");
-      addLog(session, `📝 الأزرار الموجودة: ${pageSnap.slice(0, 300)}`);
-      await updateReport(reportId, { automationStatus: "waiting_review", automationError: null });
-      closeSession(session.sessionId);
-      return;
+  // ── استراتيجية 2: force click (تتجاوز أي overlay أو angular guard) ────────
+  if (!btnClicked) {
+    try {
+      const loc = page.locator("button").filter({ hasText: /إرسال التقرير/i }).first();
+      if ((await loc.count().catch(() => 0)) > 0) {
+        await loc.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+        await loc.click({ force: true, timeout: 8000 });
+        btnClicked = true;
+        addLog(session, '✅ تم الضغط على "إرسال التقرير" (force click)');
+      }
+    } catch (e: any) {
+      addLog(session, `↪️ استراتيجية 2 فشلت: ${e.message?.slice(0, 80)}`);
     }
-  } else {
-    await submitBtn.first().scrollIntoViewIfNeeded().catch(() => {});
-    await submitBtn.first().click();
-    addLog(session, '✅ تم الضغط على "إرسال التقرير"');
+  }
+
+  // ── استراتيجية 3: dispatchEvent + click عبر evaluate (يتجاوز Angular guards) ──
+  if (!btnClicked) {
+    try {
+      const clicked = await page.evaluate(() => {
+        const btns = Array.from(document.querySelectorAll("button, [role='button'], input[type='submit']"));
+        const btn = btns.find(b => /إرسال التقرير/i.test(b.textContent ?? "")) as HTMLElement | null;
+        if (!btn) return false;
+        btn.scrollIntoView({ block: "center" });
+        // أزل disabled إن وجد
+        (btn as any).disabled = false;
+        btn.removeAttribute("disabled");
+        // أطلق أحداث Angular
+        btn.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+        btn.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+        btn.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+        btn.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+        btn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        return true;
+      });
+      if (clicked) {
+        btnClicked = true;
+        addLog(session, '✅ تم الضغط على "إرسال التقرير" (dispatchEvent evaluate)');
+      }
+    } catch (e: any) {
+      addLog(session, `↪️ استراتيجية 3 فشلت: ${e.message?.slice(0, 80)}`);
+    }
+  }
+
+  // ── استراتيجية 4: Angular submit — ابحث عن (click) handler وشغّله ─────────
+  if (!btnClicked) {
+    try {
+      const clicked = await page.evaluate(() => {
+        const btns = Array.from(document.querySelectorAll("button"));
+        const btn = btns.find(b => /إرسال التقرير/i.test(b.textContent ?? "")) as any;
+        if (!btn) return false;
+        // Angular يحتفظ بالـ event listeners في خاصية __zone_symbol__clickfalse
+        const ngClick =
+          btn.__zone_symbol__clickfalse?.[0]?.callback ||
+          btn.__ngContext__?.click ||
+          null;
+        if (ngClick) { ngClick(); return true; }
+        btn.click();
+        return true;
+      });
+      if (clicked) {
+        btnClicked = true;
+        addLog(session, '✅ تم الضغط (Angular zone click)');
+      }
+    } catch (e: any) {
+      addLog(session, `↪️ استراتيجية 4 فشلت: ${e.message?.slice(0, 80)}`);
+    }
+  }
+
+  if (!btnClicked) {
+    addLog(session, '⚠️ جميع الاستراتيجيات فشلت — الانتظار للمراجعة اليدوية');
+    const pageSnap = await page.evaluate(() => document.body.innerText ?? "").catch(() => "");
+    addLog(session, `📝 محتوى الصفحة: ${pageSnap.slice(0, 400)}`);
+    await updateReport(reportId, { automationStatus: "waiting_review", automationError: null });
+    closeSession(session.sessionId);
+    return;
   }
 
   // ── 4. انتظار صفحة التأكيد ───────────────────────────────────────────────
