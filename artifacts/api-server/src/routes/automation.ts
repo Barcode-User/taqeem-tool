@@ -600,8 +600,8 @@ async function _doExtractAndSend(page: any): Promise<{
     let _apiSuccess = false;
     await new Promise<void>((resolve) => {
       const reqOpts = {
-        hostname: "localhost",
-        port: 5000,
+        hostname: "192.168.1.88",
+        port: 4545,
         path: "/External/QrInformationApi",
         method: "POST",
         headers: {
