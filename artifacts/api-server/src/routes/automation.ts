@@ -338,8 +338,9 @@ async function openCertifyReport(reportNumber: string): Promise<void> {
   if (idx !== -1) _certifyState.currentIndex = idx;
 
   // احفظ الرقم من عنوان التاب "586054 - اسم العميل" قبل أي نقر أو تنقل
+  await _certifyReportPage.waitForTimeout(1500);
   const pageTitle: string = await _certifyReportPage.title().catch(() => "");
-  const tabCodeMatch = pageTitle.match(/^(\d{4,})\s*[-–]/);
+  const tabCodeMatch = pageTitle.match(/(\d{4,})/);
   _certifyState.tabCode = tabCodeMatch ? tabCodeMatch[1] : "";
   _certifyLog(`📌 رقم التاب المحفوظ: ${_certifyState.tabCode || "(لم يُعثر في العنوان)"} — العنوان: "${pageTitle}"`);
 
@@ -765,6 +766,14 @@ async function _approveAndExtract(): Promise<{
   if (!_certifyReportPage) throw new Error("لا يوجد تقرير مفتوح في التاب الثاني — افتح تقريراً أولاً");
   const page = _certifyReportPage;
   _certifyLog(`📄 صفحة التقرير: ${page.url()}`);
+
+  // التقط tabCode إذا لم يكن محفوظاً بعد (حالة الفتح اليدوي)
+  if (!_certifyState.tabCode) {
+    const pt: string = await page.title().catch(() => "");
+    const tcm = pt.match(/(\d{4,})/);
+    _certifyState.tabCode = tcm ? tcm[1] : "";
+    _certifyLog(`📌 tabCode (approveAndExtract): ${_certifyState.tabCode || "(لم يُعثر)"} — عنوان: "${pt}"`);
+  }
 
   // 1) سجّل جميع الأزرار الموجودة على الصفحة للتشخيص
   _certifyLog("🔍 قراءة قائمة الأزرار على صفحة التقرير...");
