@@ -28,6 +28,24 @@ const CERTIFY_REPORTS_URL = "https://qima.taqeem.gov.sa/membership/reports/secto
 const CERTIFY_REPORT_BASE = "https://qima.taqeem.gov.sa/report";
 const CERTIFY_OFFICE = "13";
 
+// ─── قراءة ملف الإعدادات data/config.json ────────────────────────────────────
+function _loadConfig(): { qrApiHostname: string; qrApiPort: number } {
+  const defaults = { qrApiHostname: "192.168.1.88", qrApiPort: 4545 };
+  try {
+    const DATA_DIR = process.env.SQLITE_DATA_DIR ?? path.join(process.cwd(), "data");
+    const cfgPath  = path.join(DATA_DIR, "config.json");
+    if (!fs.existsSync(cfgPath)) return defaults;
+    const raw = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+    const qrApiUrl: string = raw.qrApiUrl ?? "";
+    if (!qrApiUrl) return defaults;
+    const m = qrApiUrl.match(/^https?:\/\/([^/:]+):(\d+)/);
+    if (!m) return defaults;
+    return { qrApiHostname: m[1], qrApiPort: Number(m[2]) };
+  } catch {
+    return defaults;
+  }
+}
+
 type CertifyStatus = "idle" | "running" | "ready" | "failed";
 type CertifyState = {
   status: CertifyStatus;
@@ -597,11 +615,14 @@ async function _doExtractAndSend(page: any): Promise<{
 
     _certifyLog(`📦 حجم الطلب الكامل: ${Math.round(fdBuffer.length / 1024)} KB`);
 
+    const { qrApiHostname, qrApiPort } = _loadConfig();
+    _certifyLog(`🌐 QrInformationApi → http://${qrApiHostname}:${qrApiPort}/External/QrInformationApi`);
+
     let _apiSuccess = false;
     await new Promise<void>((resolve) => {
       const reqOpts = {
-        hostname: "192.168.1.88",
-        port: 4545,
+        hostname: qrApiHostname,
+        port: qrApiPort,
         path: "/External/QrInformationApi",
         method: "POST",
         headers: {
