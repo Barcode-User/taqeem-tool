@@ -67,28 +67,12 @@ for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":8080 " 2^>nul') do (
 timeout /t 2 /nobreak >nul
 echo.
 
-REM ─── تثبيت المكتبات ──────────────────────────────────
-echo [build] جاري تثبيت المكتبات...
-call pnpm install --frozen-lockfile 2>nul || call pnpm install
-echo.
-
-REM ─── تثبيت esbuild binary لـ Windows إن لزم ────────────
-if not exist "node_modules\.pnpm\@esbuild+win32-x64@0.27.3" (
-    echo [build] تثبيت esbuild binary لـ Windows...
-    call pnpm add @esbuild/win32-x64 --ignore-scripts 2>nul
+REM ─── تثبيت node_modules إن لم تكن موجودة ────────────
+if not exist "node_modules" (
+    echo [تثبيت] node_modules غير موجودة — جاري التثبيت...
+    call pnpm install --ignore-scripts 2>nul || call npm install --ignore-scripts
     echo.
 )
-
-REM ─── بناء الخادم دائماً ───────────────────────────────
-echo [build] جاري بناء الخادم من المصدر...
-call pnpm --filter @workspace/api-server run build
-if %ERRORLEVEL% NEQ 0 (
-    echo [خطأ] فشل بناء الخادم.
-    pause
-    exit /b 1
-)
-echo [build] تم بناء الخادم بنجاح.
-echo.
 
 REM ─── تثبيت Playwright إن لم يكن موجوداً ─────────────
 if not exist "artifacts\api-server\node_modules\playwright-core" (
@@ -127,14 +111,20 @@ if not exist "%LOCALAPPDATA%\ms-playwright" (
 
 REM ─── التحقق من الملفات المبنية ───────────────────────
 if not exist "artifacts\api-server\dist\index.mjs" (
-    echo [خطأ] الخادم غير موجود بعد البناء.
+    echo.
+    echo [خطأ] الخادم غير موجود.
+    echo       تأكد أن git مثبت وشغّل start.bat مجدداً للتحديث من GitHub.
+    echo.
     pause
     exit /b 1
 )
 echo [1/2] الخادم جاهز.
 
 if not exist "artifacts\taqeem-tool\dist\public\index.html" (
+    echo.
     echo [خطأ] الواجهة غير موجودة.
+    echo       تأكد أن git مثبت وشغّل start.bat مجدداً للتحديث من GitHub.
+    echo.
     pause
     exit /b 1
 )
