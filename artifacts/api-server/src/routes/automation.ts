@@ -375,15 +375,37 @@ async function _doExtractAndSend(page: any): Promise<{
 
   // 1) استخرج رقم DC والقيمة النهائية
   _certifyLog("📋 استخراج بيانات الشهادة...");
-  const extracted: { dcNumber: string; finalValue: string } = await page.evaluate(() => {
+  const extracted: { dcNumber: string; finalValue: string; dcSource: string } = await page.evaluate(() => {
     const fullText = document.body.innerText || "";
+
+    // 1) البحث عن رقم DC في نص الصفحة
     const dcMatch = fullText.match(/DC\d+/i);
-    const dcNumber = dcMatch ? dcMatch[0].toUpperCase() : "";
+    let dcNumber = dcMatch ? dcMatch[0].toUpperCase() : "";
+    let dcSource = dcMatch ? "page_text" : "";
+
+    // 2) إذا لم يُعثر → استخرج الرقم من عنوان التاب "586054 - اسم العميل"
+    if (!dcNumber) {
+      const titleMatch = document.title.match(/^(\d{4,})\s*[-–]/);
+      if (titleMatch) {
+        dcNumber = titleMatch[1];
+        dcSource = "tab_title";
+      }
+    }
+
+    // 3) إذا لم يُعثر → استخرج من URL (/report/1727946)
+    if (!dcNumber) {
+      const urlMatch = window.location.href.match(/\/report\/(\d{5,})/);
+      if (urlMatch) {
+        dcNumber = urlMatch[1];
+        dcSource = "url";
+      }
+    }
+
     const valMatch = fullText.match(/الر[أا]ي النهائي.*?[:：]\s*([\d,،٬]+)/);
     const finalValue = valMatch ? valMatch[1].replace(/[,،٬]/g, "") : "";
-    return { dcNumber, finalValue };
+    return { dcNumber, finalValue, dcSource };
   });
-  _certifyLog(`📌 رقم DC: ${extracted.dcNumber || "(لم يُعثر)"} | القيمة: ${extracted.finalValue || "(لم تُعثر)"}`);
+  _certifyLog(`📌 رقم DC: ${extracted.dcNumber || "(لم يُعثر)"} [مصدر: ${extracted.dcSource || "—"}] | القيمة: ${extracted.finalValue || "(لم تُعثر)"}`);
 
   // 2) مسح QR — استخراج صورة QR كـ base64 + URL المحتوى من رابط الصورة
   _certifyLog("🔍 مسح QR Code...");
