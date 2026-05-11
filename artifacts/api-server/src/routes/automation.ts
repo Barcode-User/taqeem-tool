@@ -623,7 +623,7 @@ async function _doExtractAndSend(page: any): Promise<{
         });
       });
       req.on("error", (err: any) => {
-        _certifyLog(`❌ QrInformationApi فشل: ${err.message?.slice(0, 120)}`);
+        _certifyLog(`❌ QrInformationApi فشل: [${err.code ?? "?"}] ${err.message ?? String(err)}`);
         resolve();
       });
       req.write(fdBuffer);
