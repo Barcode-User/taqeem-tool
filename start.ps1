@@ -53,6 +53,22 @@ if ($gitAvailable) {
     Write-Host ""
 }
 
+# --- إنشاء data\config.json إن لم يكن موجوداً ---
+$dataDir   = Join-Path $root "data"
+$cfgFile   = Join-Path $dataDir "config.json"
+if (-not (Test-Path $dataDir)) { New-Item -ItemType Directory -Path $dataDir -Force | Out-Null }
+if (-not (Test-Path $cfgFile)) {
+    $defaultCfg = @{ qrApiUrl = "http://192.168.1.88:4545" } | ConvertTo-Json
+    Set-Content -Path $cfgFile -Value $defaultCfg -Encoding UTF8
+    Write-Host "[config] تم إنشاء data\config.json بالإعدادات الافتراضية" -ForegroundColor Cyan
+    Write-Host "  يمكنك تعديل qrApiUrl في الملف لتغيير عنوان QrInformationApi" -ForegroundColor Gray
+    Write-Host ""
+} else {
+    $cfgContent = Get-Content $cfgFile -Raw | ConvertFrom-Json
+    Write-Host "[config] QrInformationApi → $($cfgContent.qrApiUrl)" -ForegroundColor Cyan
+    Write-Host ""
+}
+
 # --- قراءة مفتاح OpenAI ---
 $keyFile = Join-Path $root "openai-key.txt"
 if (-not (Test-Path $keyFile)) {
