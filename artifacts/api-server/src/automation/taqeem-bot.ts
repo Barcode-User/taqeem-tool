@@ -4812,10 +4812,20 @@ async function submitAndDownloadCertificate(
       addLog(session, `✅ QRInformationApi: ${resp.status} ${resp.statusText}`);
     } else {
       const body = await resp.text().catch(() => "");
-      addLog(session, `⚠️ QRInformationApi: ${resp.status} — ${body.slice(0, 120)}`);
+      const errMsg = `QRInformationApi: ${resp.status} — ${body.slice(0, 200)}`;
+      addLog(session, `❌ ${errMsg}`);
+      await updateReport(reportId, {
+        automationStatus: "qr_error",
+        automationError: errMsg,
+      });
     }
   } catch (e) {
-    addLog(session, `⚠️ QRInformationApi فشل الاتصال: ${String(e).slice(0, 100)}`);
+    const errMsg = `QRInformationApi فشل الاتصال: ${String(e).slice(0, 100)}`;
+    addLog(session, `❌ ${errMsg}`);
+    await updateReport(reportId, {
+      automationStatus: "qr_error",
+      automationError: errMsg,
+    });
   }
 
   addLog(session, "═══════════════════════════════════════════════");
