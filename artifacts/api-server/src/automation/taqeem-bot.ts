@@ -4803,7 +4803,7 @@ async function submitAndDownloadCertificate(
       formData.append("certificatePath", blob, path.basename(certificatePath));
     }
 
-    const resp = await fetch("http://localhost:8080/External/QrInformationApi", {
+    const resp = await fetch("http://192.168.1.88:4545/External/QrInformationApi", {
       method: "POST",
       body: formData,
     });
