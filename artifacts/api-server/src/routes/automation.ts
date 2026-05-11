@@ -36,6 +36,7 @@ type CertifyState = {
   reportNumbers: string[];
   currentIndex: number;
   openedReport?: string;
+  tabCode?: string;
 };
 
 const CERTIFY_BOT_VERSION = "v6.0 — 2026-05-07 — download certificate PDF via شهادة التسجيل";
@@ -335,6 +336,13 @@ async function openCertifyReport(reportNumber: string): Promise<void> {
   _certifyState.openedReport = reportNumber;
   const idx = _certifyState.reportNumbers.indexOf(reportNumber);
   if (idx !== -1) _certifyState.currentIndex = idx;
+
+  // احفظ الرقم من عنوان التاب "586054 - اسم العميل" قبل أي نقر أو تنقل
+  const pageTitle: string = await _certifyReportPage.title().catch(() => "");
+  const tabCodeMatch = pageTitle.match(/^(\d{4,})\s*[-–]/);
+  _certifyState.tabCode = tabCodeMatch ? tabCodeMatch[1] : "";
+  _certifyLog(`📌 رقم التاب المحفوظ: ${_certifyState.tabCode || "(لم يُعثر في العنوان)"} — العنوان: "${pageTitle}"`);
+
   _certifyLog(`✅ التقرير ${reportNumber} مفتوح (${_certifyState.currentIndex + 1} من ${_certifyState.reportNumbers.length})`);
   // حدّد checkbox الموافقة تلقائياً
   await _checkPolicyCheckbox(_certifyReportPage);
@@ -375,28 +383,21 @@ async function _doExtractAndSend(page: any): Promise<{
 
   // 1) استخرج رقم DC والقيمة النهائية
   _certifyLog("📋 استخراج بيانات الشهادة...");
-  const extracted: { dcNumber: string; finalValue: string; dcSource: string } = await page.evaluate(() => {
+  const extracted: { dcNumber: string; finalValue: string } = await page.evaluate(() => {
     const fullText = document.body.innerText || "";
 
-    // 1) البحث عن رقم DC في نص الصفحة
+    // البحث عن رقم DC في نص الصفحة فقط
     const dcMatch = fullText.match(/DC\d+/i);
-    let dcNumber = dcMatch ? dcMatch[0].toUpperCase() : "";
-    let dcSource = dcMatch ? "page_text" : "";
-
-    // 2) إذا لم يُعثر → استخرج الرقم من عنوان التاب "586054 - اسم العميل"
-    if (!dcNumber) {
-      const titleMatch = document.title.match(/^(\d{4,})\s*[-–]/);
-      if (titleMatch) {
-        dcNumber = titleMatch[1];
-        dcSource = "tab_title";
-      }
-    }
-
+    const dcNumber = dcMatch ? dcMatch[0].toUpperCase() : "";
     const valMatch = fullText.match(/الر[أا]ي النهائي.*?[:：]\s*([\d,،٬]+)/);
     const finalValue = valMatch ? valMatch[1].replace(/[,،٬]/g, "") : "";
-    return { dcNumber, finalValue, dcSource };
+    return { dcNumber, finalValue };
   });
-  _certifyLog(`📌 رقم DC: ${extracted.dcNumber || "(لم يُعثر)"} [مصدر: ${extracted.dcSource || "—"}] | القيمة: ${extracted.finalValue || "(لم تُعثر)"}`);
+
+  // إذا لم يُعثر على DC → استخدم الرقم المحفوظ من عنوان التاب (تم حفظه عند فتح الصفحة قبل أي نقر)
+  const finalDcNumber = extracted.dcNumber || _certifyState.tabCode || "";
+  const dcSource = extracted.dcNumber ? "page_text" : (_certifyState.tabCode ? "tab_title_saved" : "none");
+  _certifyLog(`📌 رقم DC: ${finalDcNumber || "(لم يُعثر)"} [مصدر: ${dcSource}] | القيمة: ${extracted.finalValue || "(لم تُعثر)"} | tabCode المحفوظ: ${_certifyState.tabCode || "—"}`);
 
   // 2) مسح QR — استخراج صورة QR كـ base64 + URL المحتوى من رابط الصورة
   _certifyLog("🔍 مسح QR Code...");
@@ -566,7 +567,7 @@ async function _doExtractAndSend(page: any): Promise<{
     const FormDataLib = require("form-data");
     const http = require("http") as typeof import("http");
     const fd = new FormDataLib();
-    fd.append("reportCode",         extracted.dcNumber  || "");
+    fd.append("reportCode",         finalDcNumber       || "");
     fd.append("taqeemReportNumber", reportNumber        || "");
     fd.append("taqeemSubmittedAt",  submittedAt         || "");
     fd.append("qrCodeBase64",       qrBase64            || "");
@@ -634,11 +635,11 @@ async function _doExtractAndSend(page: any): Promise<{
     if (_apiSuccess) {
       const certifiedAt = new Date().toISOString();
       insertCertifiedReport({
-        reportCode:         extracted.dcNumber  || reportNumber || "",
+        reportCode:         finalDcNumber       || reportNumber || "",
         taqeemReportNumber: reportNumber        || "",
         certifiedAt,
       }).then(() => {
-        _certifyLog(`💾 تم حفظ التقرير ${extracted.dcNumber || reportNumber} في سجل التقارير المعمدة`);
+        _certifyLog(`💾 تم حفظ التقرير ${finalDcNumber || reportNumber} في سجل التقارير المعمدة`);
       }).catch((e: any) => {
         _certifyLog(`⚠️ فشل حفظ السجل: ${e?.message ?? e}`);
       });
@@ -685,7 +686,7 @@ async function _doExtractAndSend(page: any): Promise<{
     _certifyLog(`❌ QrInformationApi خطأ عام: ${e.message?.slice(0, 120)}`);
   }
 
-  return { dcNumber: extracted.dcNumber, finalValue: extracted.finalValue, reportNumber, qrBase64 };
+  return { dcNumber: finalDcNumber, finalValue: extracted.finalValue, reportNumber, qrBase64 };
 
   } finally {
     // أطلق القفل دائماً عند الانتهاء
