@@ -337,12 +337,17 @@ async function openCertifyReport(reportNumber: string): Promise<void> {
   const idx = _certifyState.reportNumbers.indexOf(reportNumber);
   if (idx !== -1) _certifyState.currentIndex = idx;
 
-  // احفظ الرقم من عنوان التاب "586054 - اسم العميل" قبل أي نقر أو تنقل
-  await _certifyReportPage.waitForTimeout(1500);
+  // انتظر حتى تضبط السبا عنوان الصفحة بالرقم (مثل "586054 - اسم العميل")
+  try {
+    await _certifyReportPage.waitForFunction(
+      () => /\d{4,}/.test(document.title),
+      { timeout: 10000 }
+    );
+  } catch { /* إذا انقضت المهلة نكمل */ }
   const pageTitle: string = await _certifyReportPage.title().catch(() => "");
   const tabCodeMatch = pageTitle.match(/(\d{4,})/);
   _certifyState.tabCode = tabCodeMatch ? tabCodeMatch[1] : "";
-  _certifyLog(`📌 رقم التاب المحفوظ: ${_certifyState.tabCode || "(لم يُعثر في العنوان)"} — العنوان: "${pageTitle}"`);
+  _certifyLog(`📌 رقم التاب المحفوظ: ${_certifyState.tabCode || "(لم يُعثر)"} — العنوان: "${pageTitle}"`);
 
   _certifyLog(`✅ التقرير ${reportNumber} مفتوح (${_certifyState.currentIndex + 1} من ${_certifyState.reportNumbers.length})`);
   // حدّد checkbox الموافقة تلقائياً
@@ -775,8 +780,11 @@ async function _approveAndExtract(): Promise<{
   const page = _certifyReportPage;
   _certifyLog(`📄 صفحة التقرير: ${page.url()}`);
 
-  // التقط tabCode إذا لم يكن محفوظاً بعد (حالة الفتح اليدوي)
+  // التقط tabCode إذا لم يكن محفوظاً بعد (انتظر حتى تضبط السبا العنوان)
   if (!_certifyState.tabCode) {
+    try {
+      await page.waitForFunction(() => /\d{4,}/.test(document.title), { timeout: 8000 });
+    } catch { /* نكمل */ }
     const pt: string = await page.title().catch(() => "");
     const tcm = pt.match(/(\d{4,})/);
     _certifyState.tabCode = tcm ? tcm[1] : "";
