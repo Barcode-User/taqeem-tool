@@ -414,6 +414,7 @@ export default function Dashboard() {
                     const fs          = ds?.fieldScores ?? null;
                     const avgScore    = ds?.averageScore ?? null;
                     const isFailed    = (report as any).automationStatus === "failed";
+                    const isQrError   = (report as any).automationStatus === "qr_error";
                     const isSelected  = selectedIds.has(report.id!);
 
                     return (
@@ -437,7 +438,10 @@ export default function Dashboard() {
                         {/* رقم التقرير */}
                         <TableCell className="font-medium">
                           <Link href={`/reports/${report.id}`}>
-                            <div className="py-1 text-primary hover:underline">{report.reportNumber || "—"}</div>
+                            <div className={`py-1 hover:underline ${isQrError ? "text-red-600 font-bold" : "text-primary"}`}>
+                              {report.reportNumber || "—"}
+                              {isQrError && <span className="mr-1 text-xs">(خطأ QR)</span>}
+                            </div>
                           </Link>
                           <FieldScore score={fs?.reportNumber} />
                         </TableCell>
