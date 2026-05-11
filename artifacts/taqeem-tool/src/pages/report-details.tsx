@@ -978,6 +978,7 @@ export default function ReportDetails() {
                   automationData.automationStatus === "completed" ? "bg-green-50 border border-green-200 text-green-800" :
                   automationData.automationStatus === "failed" ? "bg-red-50 border border-red-200 text-red-800" :
                   automationData.automationStatus === "incomplete" ? "bg-orange-50 border border-orange-300 text-orange-900" :
+                  automationData.automationStatus === "qr_error" ? "bg-red-50 border border-red-400 text-red-900" :
                   automationData.isStale ? "bg-yellow-50 border border-yellow-300 text-yellow-800" :
                   automationData.automationStatus === "running" ? "bg-blue-50 border border-blue-200 text-blue-800" :
                   "bg-muted border"
@@ -987,6 +988,7 @@ export default function ReportDetails() {
                   {(automationData.automationStatus === "completed" || automationData.automationStatus === "submitted_taqeem") && <Check className="h-5 w-5 shrink-0" />}
                   {automationData.automationStatus === "failed" && !automationData.isStale && <AlertCircle className="h-5 w-5 shrink-0" />}
                   {automationData.automationStatus === "incomplete" && !automationData.isStale && <AlertCircle className="h-5 w-5 shrink-0" />}
+                  {automationData.automationStatus === "qr_error" && !automationData.isStale && <AlertCircle className="h-5 w-5 shrink-0 text-red-600" />}
                   <div>
                     <p className="font-semibold text-sm">
                       {automationData.isStale && "⚠️ توقفت عملية الرفع (أُعيد تشغيل الخادم) — اضغط «ابدأ الرفع» مجدداً"}
@@ -995,6 +997,7 @@ export default function ReportDetails() {
                       {automationData.automationStatus === "completed" && "✅ اكتملت العملية بنجاح!"}
                       {!automationData.isStale && automationData.automationStatus === "failed" && "❌ فشلت العملية"}
                       {!automationData.isStale && automationData.automationStatus === "incomplete" && "⚠️ غير مكتمل الرفع"}
+                      {!automationData.isStale && automationData.automationStatus === "qr_error" && "❌ خطأ في إرسال بيانات QR للنظام الخارجي"}
                     </p>
                     {automationData.automationError && !automationData.isStale && (
                       <p className="text-xs mt-1 opacity-80">{automationData.automationError}</p>
