@@ -392,15 +392,6 @@ async function _doExtractAndSend(page: any): Promise<{
       }
     }
 
-    // 3) إذا لم يُعثر → استخرج من URL (/report/1727946)
-    if (!dcNumber) {
-      const urlMatch = window.location.href.match(/\/report\/(\d{5,})/);
-      if (urlMatch) {
-        dcNumber = urlMatch[1];
-        dcSource = "url";
-      }
-    }
-
     const valMatch = fullText.match(/الر[أا]ي النهائي.*?[:：]\s*([\d,،٬]+)/);
     const finalValue = valMatch ? valMatch[1].replace(/[,،٬]/g, "") : "";
     return { dcNumber, finalValue, dcSource };
