@@ -706,7 +706,7 @@ function _watchForCertificatePage(page: any): void {
       await new Promise(r => setTimeout(r, 2000));
       if (_certifyExtracting) { consecutiveFails = 0; continue; }
       try {
-        const result: { hasQR: boolean; url: string } = await page.evaluate(() => {
+        const result: { hasQR: boolean; url: string; title: string } = await page.evaluate(() => {
           const hasQR = Array.from(document.querySelectorAll("img")).some((img: any) =>
             img.src && (
               img.src.includes("qr") ||
@@ -716,9 +716,17 @@ function _watchForCertificatePage(page: any): void {
               img.src.includes("qrcode")
             )
           );
-          return { hasQR, url: window.location.href };
+          return { hasQR, url: window.location.href, title: document.title };
         });
         consecutiveFails = 0;
+        // احفظ tabCode من عنوان الصفحة كلما كانت على رابط التقرير
+        if (!_certifyState.tabCode && result.url.includes("/report/")) {
+          const m = result.title.match(/(\d{4,})/);
+          if (m) {
+            _certifyState.tabCode = m[1];
+            _certifyLog(`📌 tabCode (polling): ${_certifyState.tabCode} — عنوان: "${result.title}"`);
+          }
+        }
         if (result.hasQR && !_certifyExtracting) {
           _certifyLog(`🎯 QR مكتشف على: ${result.url} — جارٍ الاستخراج...`);
           try {
