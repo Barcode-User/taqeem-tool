@@ -337,17 +337,10 @@ async function openCertifyReport(reportNumber: string): Promise<void> {
   const idx = _certifyState.reportNumbers.indexOf(reportNumber);
   if (idx !== -1) _certifyState.currentIndex = idx;
 
-  // انتظر حتى تضبط السبا عنوان الصفحة بالرقم (مثل "586054 - اسم العميل")
-  try {
-    await _certifyReportPage.waitForFunction(
-      () => /\d{4,}/.test(document.title),
-      { timeout: 10000 }
-    );
-  } catch { /* إذا انقضت المهلة نكمل */ }
-  const pageTitle: string = await _certifyReportPage.title().catch(() => "");
-  const tabCodeMatch = pageTitle.match(/(\d{4,})/);
-  _certifyState.tabCode = tabCodeMatch ? tabCodeMatch[1] : "";
-  _certifyLog(`📌 رقم التاب المحفوظ: ${_certifyState.tabCode || "(لم يُعثر)"} — العنوان: "${pageTitle}"`);
+  // انتظر ثانيتين ثم التقط الرقم من الصفحة
+  await _certifyReportPage.waitForTimeout(2000);
+  _certifyState.tabCode = await _captureTabCode(_certifyReportPage, "openReport");
+  _certifyLog(`📌 tabCode بعد فتح الصفحة: ${_certifyState.tabCode || "(لم يُعثر)"}`);
 
   _certifyLog(`✅ التقرير ${reportNumber} مفتوح (${_certifyState.currentIndex + 1} من ${_certifyState.reportNumbers.length})`);
   // حدّد checkbox الموافقة تلقائياً
@@ -701,6 +694,50 @@ async function _doExtractAndSend(page: any): Promise<{
 }
 
 
+// ── التقاط رقم التاب من الصفحة (يبحث في كل الأماكن) ──────────────────────
+async function _captureTabCode(page: any, caller = ""): Promise<string> {
+  try {
+    const data: { title: string; titleTag: string; bodyNums: string[] } =
+      await page.evaluate(() => {
+        const title    = document.title || "";
+        const titleTag = document.querySelector("title")?.textContent || "";
+        // ابحث عن أرقام 5-7 خانات في أول 2000 حرف من نص الصفحة
+        const bodyText = (document.body?.innerText || "").slice(0, 2000);
+        const bodyNums = Array.from(bodyText.matchAll(/\b(\d{5,7})\b/g)).map((m: any) => m[1]);
+        return { title, titleTag, bodyNums };
+      });
+
+    _certifyLog(`🔍 [${caller}] title="${data.title}" | titleTag="${data.titleTag}" | أرقام الصفحة: ${data.bodyNums.slice(0,5).join(", ") || "لا شيء"}`);
+
+    // 1) ابحث في عنوان المستند
+    let m = data.title.match(/(\d{4,})/);
+    if (m) { _certifyLog(`✅ [${caller}] tabCode من title: ${m[1]}`); return m[1]; }
+
+    // 2) ابحث في تاج <title>
+    m = data.titleTag.match(/(\d{4,})/);
+    if (m) { _certifyLog(`✅ [${caller}] tabCode من titleTag: ${m[1]}`); return m[1]; }
+
+    // 3) ابحث في نص الصفحة (أول رقم 5-7 خانات)
+    if (data.bodyNums.length > 0) {
+      const code = data.bodyNums[0];
+      _certifyLog(`✅ [${caller}] tabCode من نص الصفحة: ${code}`);
+      return code;
+    }
+  } catch (e: any) {
+    _certifyLog(`⚠️ [${caller}] _captureTabCode خطأ: ${e.message?.slice(0, 80)}`);
+  }
+
+  // 4) آخر محاولة: Playwright page.title() مباشرة
+  try {
+    const t = await page.title();
+    const m = t.match(/(\d{4,})/);
+    if (m) { _certifyLog(`✅ [${caller}] tabCode من page.title(): ${m[1]}`); return m[1]; }
+    _certifyLog(`⚠️ [${caller}] page.title()="${t}" — لا أرقام`);
+  } catch { /* تجاهل */ }
+
+  return "";
+}
+
 // ── مراقب Polling: يفحص كل ثانيتين إن ظهر QR (يعمل مع SPA والضغط اليدوي) ──
 function _watchForCertificatePage(page: any): void {
   (async () => {
@@ -724,13 +761,10 @@ function _watchForCertificatePage(page: any): void {
           return { hasQR, url: window.location.href, title: document.title };
         });
         consecutiveFails = 0;
-        // احفظ tabCode من عنوان الصفحة كلما كانت على رابط التقرير
+        // احفظ tabCode كلما كانت الصفحة على رابط التقرير
         if (!_certifyState.tabCode && result.url.includes("/report/")) {
-          const m = result.title.match(/(\d{4,})/);
-          if (m) {
-            _certifyState.tabCode = m[1];
-            _certifyLog(`📌 tabCode (polling): ${_certifyState.tabCode} — عنوان: "${result.title}"`);
-          }
+          const code = await _captureTabCode(page, "polling");
+          if (code) _certifyState.tabCode = code;
         }
         if (result.hasQR && !_certifyExtracting) {
           _certifyLog(`🎯 QR مكتشف على: ${result.url} — جارٍ الاستخراج...`);
@@ -780,15 +814,10 @@ async function _approveAndExtract(): Promise<{
   const page = _certifyReportPage;
   _certifyLog(`📄 صفحة التقرير: ${page.url()}`);
 
-  // التقط tabCode إذا لم يكن محفوظاً بعد (انتظر حتى تضبط السبا العنوان)
+  // التقط tabCode إذا لم يكن محفوظاً بعد
   if (!_certifyState.tabCode) {
-    try {
-      await page.waitForFunction(() => /\d{4,}/.test(document.title), { timeout: 8000 });
-    } catch { /* نكمل */ }
-    const pt: string = await page.title().catch(() => "");
-    const tcm = pt.match(/(\d{4,})/);
-    _certifyState.tabCode = tcm ? tcm[1] : "";
-    _certifyLog(`📌 tabCode (approveAndExtract): ${_certifyState.tabCode || "(لم يُعثر)"} — عنوان: "${pt}"`);
+    _certifyState.tabCode = await _captureTabCode(page, "approveAndExtract");
+    _certifyLog(`📌 tabCode (approveAndExtract): ${_certifyState.tabCode || "(لم يُعثر)"}`);
   }
 
   // 1) سجّل جميع الأزرار الموجودة على الصفحة للتشخيص
