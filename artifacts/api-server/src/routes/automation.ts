@@ -30,7 +30,7 @@ const CERTIFY_OFFICE = "13";
 
 // ─── قراءة ملف الإعدادات data/config.json ────────────────────────────────────
 function _loadConfig(): { qrApiHostname: string; qrApiPort: number } {
-  const defaults = { qrApiHostname: "192.168.1.88", qrApiPort: 4545 };
+  const defaults = { qrApiHostname: "localhost", qrApiPort: 5000 };
   try {
     const DATA_DIR = process.env.SQLITE_DATA_DIR ?? path.join(process.cwd(), "data");
     const cfgPath  = path.join(DATA_DIR, "config.json");
