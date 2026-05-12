@@ -29,33 +29,28 @@ const CERTIFY_REPORT_BASE = "https://qima.taqeem.gov.sa/report";
 const CERTIFY_OFFICE = "13";
 
 // ─── قراءة ملف الإعدادات data/config.json ────────────────────────────────────
-function _loadConfig(): { qrApiHostname: string; qrApiPort: number } {
-  const defaults = { qrApiHostname: "localhost", qrApiPort: 5000 };
+function _loadConfig(): { qrApiHostname: string; qrApiPort: number; debugMsg: string } {
+  const defaults = { qrApiHostname: "localhost", qrApiPort: 5000, debugMsg: "" };
   try {
     const DATA_DIR = process.env.SQLITE_DATA_DIR ?? path.join(process.cwd(), "data");
     const cfgPath  = path.join(DATA_DIR, "config.json");
     if (!fs.existsSync(cfgPath)) {
-      _certifyLog(`⚙️ config.json غير موجود: ${cfgPath} — استخدام الافتراضي localhost:5000`);
-      return defaults;
+      return { ...defaults, debugMsg: `config.json غير موجود (${cfgPath}) — افتراضي: localhost:5000` };
     }
     // إزالة BOM إن وُجد (PowerShell يكتب UTF-8 with BOM أحياناً)
     const text = fs.readFileSync(cfgPath, "utf8").replace(/^\uFEFF/, "").trim();
-    _certifyLog(`⚙️ config.json: ${cfgPath}\n   المحتوى: ${text.slice(0, 200)}`);
     const raw = JSON.parse(text);
     const qrApiUrl: string = (raw.qrApiUrl ?? "").trim();
     if (!qrApiUrl) {
-      _certifyLog("⚙️ qrApiUrl فارغ — استخدام الافتراضي localhost:5000");
-      return defaults;
+      return { ...defaults, debugMsg: `config.json موجود لكن qrApiUrl فارغ — افتراضي: localhost:5000` };
     }
     const m = qrApiUrl.match(/^https?:\/\/([^/:]+):(\d+)/);
     if (!m) {
-      _certifyLog(`⚙️ qrApiUrl لا يطابق النمط المتوقع: "${qrApiUrl}"`);
-      return defaults;
+      return { ...defaults, debugMsg: `qrApiUrl لا يطابق النمط http://host:port — القيمة: "${qrApiUrl}"` };
     }
-    return { qrApiHostname: m[1], qrApiPort: Number(m[2]) };
+    return { qrApiHostname: m[1], qrApiPort: Number(m[2]), debugMsg: `قُرئ من config.json: ${qrApiUrl}` };
   } catch (e: any) {
-    _certifyLog(`⚙️ خطأ في قراءة config.json: ${e.message}`);
-    return defaults;
+    return { ...defaults, debugMsg: `خطأ في قراءة config.json: ${e.message}` };
   }
 }
 
@@ -628,7 +623,8 @@ async function _doExtractAndSend(page: any): Promise<{
 
     _certifyLog(`📦 حجم الطلب الكامل: ${Math.round(fdBuffer.length / 1024)} KB`);
 
-    const { qrApiHostname, qrApiPort } = _loadConfig();
+    const { qrApiHostname, qrApiPort, debugMsg } = _loadConfig();
+    _certifyLog(`⚙️ ${debugMsg}`);
     _certifyLog(`🌐 QrInformationApi → http://${qrApiHostname}:${qrApiPort}/External/QrInformationApi`);
 
     let _apiSuccess = false;
