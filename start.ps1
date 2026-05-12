@@ -59,7 +59,7 @@ $cfgFile   = Join-Path $dataDir "config.json"
 if (-not (Test-Path $dataDir)) { New-Item -ItemType Directory -Path $dataDir -Force | Out-Null }
 if (-not (Test-Path $cfgFile)) {
     $defaultCfg = @{ qrApiUrl = "http://localhost:5000" } | ConvertTo-Json
-    Set-Content -Path $cfgFile -Value $defaultCfg -Encoding UTF8
+    [System.IO.File]::WriteAllText($cfgFile, $defaultCfg, [System.Text.UTF8Encoding]::new($false))
     Write-Host "[config] تم إنشاء data\config.json بالإعدادات الافتراضية" -ForegroundColor Cyan
     Write-Host "  يمكنك تعديل qrApiUrl في الملف لتغيير عنوان QrInformationApi" -ForegroundColor Gray
     Write-Host ""
