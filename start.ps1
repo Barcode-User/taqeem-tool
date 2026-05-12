@@ -18,38 +18,61 @@ if ($gitAvailable) {
     git fetch origin main
     git reset --hard origin/main
     Write-Host ""
-} elseif (-not (Test-Path $serverFile) -or -not (Test-Path $frontendFile)) {
-    Write-Host "[update] Git not found. Downloading from GitHub..." -ForegroundColor Yellow
-    $zipUrl  = "https://github.com/Barcode-User/taqeem-tool/archive/refs/heads/main.zip"
-    $zipTemp = "$env:TEMP\taqeem-update.zip"
-    $extTemp = "$env:TEMP\taqeem-extract"
+} else {
+    # بدون Git: تحقق من آخر commit على GitHub وقارنه بالنسخة المحلية
+    $shaFile  = Join-Path $root "data\.version"
+    $localSha = if (Test-Path $shaFile) { (Get-Content $shaFile -Raw).Trim() } else { "" }
+    $remoteSha = ""
     try {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        Invoke-WebRequest -Uri $zipUrl -OutFile $zipTemp -UseBasicParsing
-        if (Test-Path $extTemp) { Remove-Item $extTemp -Recurse -Force }
-        Expand-Archive -Path $zipTemp -DestinationPath $extTemp -Force
-        Remove-Item $zipTemp -Force
-        $src = Join-Path $extTemp "taqeem-tool-main"
-        foreach ($p in @("artifacts\api-server\dist", "artifacts\taqeem-tool\dist", "start.ps1", "start.bat", "update.ps1")) {
-            $from = Join-Path $src $p
-            $to   = Join-Path $root $p
-            if (Test-Path $from) {
-                $dir = Split-Path $to
-                if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-                Copy-Item -Path $from -Destination $to -Recurse -Force
-                Write-Host "  OK: $p" -ForegroundColor Green
-            }
-        }
-        Remove-Item $extTemp -Recurse -Force
+        $apiResp   = Invoke-WebRequest -Uri "https://api.github.com/repos/Barcode-User/taqeem-tool/commits/main" `
+                       -UseBasicParsing -Headers @{ "User-Agent" = "taqeem-updater" } -TimeoutSec 8
+        $remoteSha = ($apiResp.Content | ConvertFrom-Json).sha
     } catch {
-        Write-Host "[ERROR] Download failed: $_" -ForegroundColor Red
-        Write-Host "  Download manually from: https://github.com/Barcode-User/taqeem-tool" -ForegroundColor Yellow
-        Read-Host "Press Enter to exit"
-        exit 1
+        Write-Host "[update] تعذّر التحقق من GitHub — $($_.Exception.Message.Split([char]10)[0])" -ForegroundColor Gray
     }
-    Write-Host ""
-} else {
-    Write-Host "[update] Files present, skipping update." -ForegroundColor Gray
+
+    $needsUpdate = (-not (Test-Path $serverFile)) -or (-not (Test-Path $frontendFile)) -or ($remoteSha -and $remoteSha -ne $localSha)
+
+    if ($needsUpdate) {
+        if ($remoteSha -and $remoteSha -ne $localSha) {
+            Write-Host "[update] إصدار جديد متوفر — جارٍ التحديث..." -ForegroundColor Yellow
+        } else {
+            Write-Host "[update] Git غير مثبت — تحميل الملفات من GitHub..." -ForegroundColor Yellow
+        }
+        $zipUrl  = "https://github.com/Barcode-User/taqeem-tool/archive/refs/heads/main.zip"
+        $zipTemp = "$env:TEMP\taqeem-update.zip"
+        $extTemp = "$env:TEMP\taqeem-extract"
+        try {
+            Invoke-WebRequest -Uri $zipUrl -OutFile $zipTemp -UseBasicParsing
+            if (Test-Path $extTemp) { Remove-Item $extTemp -Recurse -Force }
+            Expand-Archive -Path $zipTemp -DestinationPath $extTemp -Force
+            Remove-Item $zipTemp -Force
+            $src = Join-Path $extTemp "taqeem-tool-main"
+            foreach ($p in @("artifacts\api-server\dist", "artifacts\taqeem-tool\dist", "start.ps1", "start.bat", "update.ps1")) {
+                $from = Join-Path $src $p
+                $to   = Join-Path $root $p
+                if (Test-Path $from) {
+                    $dir = Split-Path $to
+                    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+                    Copy-Item -Path $from -Destination $to -Recurse -Force
+                    Write-Host "  OK: $p" -ForegroundColor Green
+                }
+            }
+            Remove-Item $extTemp -Recurse -Force
+            # حفظ الـ SHA الجديد
+            $dataDir2 = Join-Path $root "data"
+            if (-not (Test-Path $dataDir2)) { New-Item -ItemType Directory -Path $dataDir2 -Force | Out-Null }
+            if ($remoteSha) { Set-Content -Path $shaFile -Value $remoteSha -NoNewline }
+            Write-Host "[update] تم التحديث بنجاح ✓" -ForegroundColor Green
+        } catch {
+            Write-Host "[ERROR] فشل التحميل: $_" -ForegroundColor Red
+            Write-Host "  حمّل يدوياً من: https://github.com/Barcode-User/taqeem-tool" -ForegroundColor Yellow
+            if (-not (Test-Path $serverFile)) { Read-Host "Press Enter to exit"; exit 1 }
+        }
+    } else {
+        Write-Host "[update] النسخة محدّثة ($($localSha.Substring(0,[Math]::Min(7,$localSha.Length))))" -ForegroundColor Green
+    }
     Write-Host ""
 }
 
