@@ -34,14 +34,27 @@ function _loadConfig(): { qrApiHostname: string; qrApiPort: number } {
   try {
     const DATA_DIR = process.env.SQLITE_DATA_DIR ?? path.join(process.cwd(), "data");
     const cfgPath  = path.join(DATA_DIR, "config.json");
-    if (!fs.existsSync(cfgPath)) return defaults;
-    const raw = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
-    const qrApiUrl: string = raw.qrApiUrl ?? "";
-    if (!qrApiUrl) return defaults;
+    if (!fs.existsSync(cfgPath)) {
+      _certifyLog(`⚙️ config.json غير موجود: ${cfgPath} — استخدام الافتراضي localhost:5000`);
+      return defaults;
+    }
+    // إزالة BOM إن وُجد (PowerShell يكتب UTF-8 with BOM أحياناً)
+    const text = fs.readFileSync(cfgPath, "utf8").replace(/^\uFEFF/, "").trim();
+    _certifyLog(`⚙️ config.json: ${cfgPath}\n   المحتوى: ${text.slice(0, 200)}`);
+    const raw = JSON.parse(text);
+    const qrApiUrl: string = (raw.qrApiUrl ?? "").trim();
+    if (!qrApiUrl) {
+      _certifyLog("⚙️ qrApiUrl فارغ — استخدام الافتراضي localhost:5000");
+      return defaults;
+    }
     const m = qrApiUrl.match(/^https?:\/\/([^/:]+):(\d+)/);
-    if (!m) return defaults;
+    if (!m) {
+      _certifyLog(`⚙️ qrApiUrl لا يطابق النمط المتوقع: "${qrApiUrl}"`);
+      return defaults;
+    }
     return { qrApiHostname: m[1], qrApiPort: Number(m[2]) };
-  } catch {
+  } catch (e: any) {
+    _certifyLog(`⚙️ خطأ في قراءة config.json: ${e.message}`);
     return defaults;
   }
 }
