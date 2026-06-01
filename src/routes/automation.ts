@@ -1154,6 +1154,32 @@ router.post("/automation/certify/stop", async (_req, res) => {
   res.json({ message: "تم إغلاق جلسة التعميد." });
 });
 
+// POST /api/automation/certify/reorder  { reportNumbers: string[] }
+// يُعيد ترتيب الطابور — يقبل القائمة الجديدة كاملةً بعد إعادة الترتيب
+router.post("/automation/certify/reorder", (req, res) => {
+  const { reportNumbers } = req.body ?? {};
+  if (!Array.isArray(reportNumbers)) {
+    res.status(400).json({ error: "reportNumbers يجب أن تكون مصفوفة" });
+    return;
+  }
+  // تحقق أن الأرقام نفسها موجودة (لا إضافة أو حذف)
+  const current = new Set(_certifyState.reportNumbers);
+  const incoming = new Set(reportNumbers.map(String));
+  const sameItems = [...current].every(n => incoming.has(n)) && [...incoming].every(n => current.has(n));
+  if (!sameItems) {
+    res.status(400).json({ error: "القائمة تحتوي على تقارير مختلفة عن الطابور الحالي" });
+    return;
+  }
+  // حدّث الترتيب مع الحفاظ على currentIndex صحيح
+  const openedReport = _certifyState.openedReport;
+  _certifyState.reportNumbers = reportNumbers.map(String);
+  if (openedReport) {
+    const newIdx = _certifyState.reportNumbers.indexOf(openedReport);
+    if (newIdx !== -1) _certifyState.currentIndex = newIdx;
+  }
+  res.json({ reportNumbers: _certifyState.reportNumbers, currentIndex: _certifyState.currentIndex });
+});
+
 // POST /api/automation/certify/open  { reportNumber }
 router.post("/automation/certify/open", async (req, res) => {
   const { reportNumber } = req.body ?? {};
