@@ -291273,6 +291273,27 @@ router2.post("/automation/certify/stop", async (_req, res) => {
   await stopCertifySession();
   res.json({ message: "\u062A\u0645 \u0625\u063A\u0644\u0627\u0642 \u062C\u0644\u0633\u0629 \u0627\u0644\u062A\u0639\u0645\u064A\u062F." });
 });
+router2.post("/automation/certify/reorder", (req, res) => {
+  const { reportNumbers } = req.body ?? {};
+  if (!Array.isArray(reportNumbers)) {
+    res.status(400).json({ error: "reportNumbers \u064A\u062C\u0628 \u0623\u0646 \u062A\u0643\u0648\u0646 \u0645\u0635\u0641\u0648\u0641\u0629" });
+    return;
+  }
+  const current = new Set(_certifyState.reportNumbers);
+  const incoming = new Set(reportNumbers.map(String));
+  const sameItems = [...current].every((n) => incoming.has(n)) && [...incoming].every((n) => current.has(n));
+  if (!sameItems) {
+    res.status(400).json({ error: "\u0627\u0644\u0642\u0627\u0626\u0645\u0629 \u062A\u062D\u062A\u0648\u064A \u0639\u0644\u0649 \u062A\u0642\u0627\u0631\u064A\u0631 \u0645\u062E\u062A\u0644\u0641\u0629 \u0639\u0646 \u0627\u0644\u0637\u0627\u0628\u0648\u0631 \u0627\u0644\u062D\u0627\u0644\u064A" });
+    return;
+  }
+  const openedReport = _certifyState.openedReport;
+  _certifyState.reportNumbers = reportNumbers.map(String);
+  if (openedReport) {
+    const newIdx = _certifyState.reportNumbers.indexOf(openedReport);
+    if (newIdx !== -1) _certifyState.currentIndex = newIdx;
+  }
+  res.json({ reportNumbers: _certifyState.reportNumbers, currentIndex: _certifyState.currentIndex });
+});
 router2.post("/automation/certify/open", async (req, res) => {
   const { reportNumber } = req.body ?? {};
   if (!reportNumber) {
