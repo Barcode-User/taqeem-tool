@@ -6,6 +6,7 @@ import {
   insertReport,
   getReportById,
   getReportsByAutomationStatus,
+  listReports,
   updateReport,
   insertCertifiedReport,
 } from "@workspace/db";
@@ -25,6 +26,22 @@ import { hasPendingQueue, MAX_CONCURRENT, processQueue } from "../automation/que
 // CERTIFY BOT STATE — مدمج مباشرة لتجنب مشاكل الاستيراد على Windows
 // ─────────────────────────────────────────────────────────────────────────────
 const CERTIFY_REPORTS_URL = "https://qima.taqeem.gov.sa/membership/reports/sector/1";
+
+// ─── ترتيب الطابور: التقارير ذات الأولوية أولاً ─────────────────────────────
+async function _sortByPriority(numbers: string[]): Promise<string[]> {
+  try {
+    const all = await listReports();
+    const prioritySet = new Set(
+      all.filter((r: any) => r.isPriority).map((r: any) => r.reportNumber).filter(Boolean)
+    );
+    if (prioritySet.size === 0) return numbers;
+    const priority = numbers.filter(n => prioritySet.has(n));
+    const rest     = numbers.filter(n => !prioritySet.has(n));
+    return [...priority, ...rest];
+  } catch {
+    return numbers;
+  }
+}
 const CERTIFY_REPORT_BASE = "https://qima.taqeem.gov.sa/report";
 const CERTIFY_OFFICE = "13";
 
@@ -260,7 +277,8 @@ async function startCertifySession(): Promise<void> {
       _certifyLog("⚠️ لم تظهر بيانات خلال 15 ثانية — سيُقرأ الجدول على أي حال");
     }
 
-    const numbers: string[] = await _extractReportNumbers(_certifyPage);
+    const rawNumbers: string[] = await _extractReportNumbers(_certifyPage);
+    const numbers = await _sortByPriority(rawNumbers);
 
     _certifyState.reportNumbers = numbers;
     _certifyState.currentIndex = 0;
@@ -1030,10 +1048,11 @@ async function _autoRefreshLoop(): Promise<void> {
         continue;
       }
 
-      _certifyLog(`✅ وُجد ${numbers.length} تقرير جديد على الشاشة — بدء الاعتماد...`);
-      _certifyState.reportNumbers = numbers;
+      const sortedNumbers = await _sortByPriority(numbers);
+      _certifyLog(`✅ وُجد ${sortedNumbers.length} تقرير جديد على الشاشة — بدء الاعتماد...`);
+      _certifyState.reportNumbers = sortedNumbers;
       _certifyState.currentIndex = 0;
-      await openCertifyReport(numbers[0]);
+      await openCertifyReport(sortedNumbers[0]);
       _certifyState.status = "approving";
       await _approveAndExtract();
       // عند انتهاء هذه الدفعة ستُطلق _autoRefreshLoop من جديد تلقائياً
@@ -1242,8 +1261,9 @@ router.post("/automation/certify/refresh", async (_req, res) => {
       }
       return results;
     }).catch(() => [] as string[]);
-    _certifyState.reportNumbers = numbers;
-    res.json({ reportNumbers: numbers, count: numbers.length });
+    const sortedRefresh = await _sortByPriority(numbers);
+    _certifyState.reportNumbers = sortedRefresh;
+    res.json({ reportNumbers: sortedRefresh, count: sortedRefresh.length });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
