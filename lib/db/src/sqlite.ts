@@ -153,6 +153,7 @@ function getDb(): DatabaseSync {
   addIfMissing("QrCodeBase64",              "TEXT");
   addIfMissing("CertificatePath",           "TEXT");
   addIfMissing("TaqeemSubmittedAt",         "TEXT");
+  addIfMissing("IsPriority",                "INTEGER DEFAULT 0");
 
   // ─── جدول datasystem ──────────────────────────────────────────────────────
   _db.exec(`
@@ -375,6 +376,7 @@ function rowToReport(row: any): Report {
     qrCodeBase64: str(row.QrCodeBase64),
     certificatePath: str(row.CertificatePath),
     taqeemSubmittedAt: str(row.TaqeemSubmittedAt),
+    isPriority: row.IsPriority === 1,
     createdAt: new Date(row.CreatedAt),
     updatedAt: new Date(row.UpdatedAt),
   };
@@ -526,6 +528,7 @@ export async function sqliteUpdateReport(id: number, data: Partial<InsertReport>
     automationStatus: "AutomationStatus", automationError: "AutomationError",
     automationSessionId: "AutomationSessionId", qrCodeBase64: "QrCodeBase64",
     certificatePath: "CertificatePath", taqeemSubmittedAt: "TaqeemSubmittedAt",
+    isPriority: "IsPriority",
   };
 
   const sets: string[] = ["UpdatedAt = ?"];
@@ -534,7 +537,10 @@ export async function sqliteUpdateReport(id: number, data: Partial<InsertReport>
   for (const [key, col] of Object.entries(fieldMap)) {
     if (key in data) {
       sets.push(`${col} = ?`);
-      values.push((data as any)[key] ?? null);
+      let val = (data as any)[key] ?? null;
+      // تحويل boolean → integer (SQLite لا يقبل boolean مباشرةً)
+      if (typeof val === "boolean") val = val ? 1 : 0;
+      values.push(val);
     }
   }
 
