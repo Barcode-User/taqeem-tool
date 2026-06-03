@@ -46332,6 +46332,18 @@ async function sqliteDeleteReport(id) {
   const db = getDb();
   db.prepare("DELETE FROM Reports WHERE Id = ?").run(id);
 }
+async function sqliteTogglePriority(id) {
+  const db = getDb();
+  try {
+    db.exec("ALTER TABLE Reports ADD COLUMN IsPriority INTEGER DEFAULT 0");
+  } catch {
+  }
+  const row = db.prepare("SELECT IsPriority FROM Reports WHERE Id = ?").get(id);
+  if (!row) return null;
+  const newVal = row.IsPriority === 1 ? 0 : 1;
+  db.prepare("UPDATE Reports SET IsPriority = ?, UpdatedAt = ? WHERE Id = ?").run(newVal, (/* @__PURE__ */ new Date()).toISOString(), id);
+  return { isPriority: newVal === 1 };
+}
 async function sqliteGetReportStats() {
   const db = getDb();
   const row = db.prepare(`
@@ -46410,7 +46422,7 @@ var init_sqlite = __esm({
 });
 
 // ../../lib/db/src/index.ts
-var isPostgres, listReports, getReportById, getReportsByAutomationStatus, insertReport, updateReport, deleteReport, getReportStats, sqliteInsertDataSystem2, sqliteGetDataSystemById2, sqliteGetDataSystemByReportId2, sqliteListDataSystem2, sqliteUpdateDataSystemLinkedReport2, insertCertifiedReport, listCertifiedReports;
+var isPostgres, listReports, getReportById, getReportsByAutomationStatus, insertReport, updateReport, deleteReport, getReportStats, sqliteTogglePriority2, sqliteInsertDataSystem2, sqliteGetDataSystemById2, sqliteGetDataSystemByReportId2, sqliteListDataSystem2, sqliteUpdateDataSystemLinkedReport2, insertCertifiedReport, listCertifiedReports;
 var init_src = __esm({
   "../../lib/db/src/index.ts"() {
     "use strict";
@@ -46431,6 +46443,7 @@ var init_src = __esm({
     updateReport = isPostgres ? pgUpdateReport : sqliteUpdateReport;
     deleteReport = isPostgres ? pgDeleteReport : sqliteDeleteReport;
     getReportStats = isPostgres ? pgGetReportStats : sqliteGetReportStats;
+    sqliteTogglePriority2 = sqliteTogglePriority;
     sqliteInsertDataSystem2 = sqliteInsertDataSystem;
     sqliteGetDataSystemById2 = sqliteGetDataSystemById;
     sqliteGetDataSystemByReportId2 = sqliteGetDataSystemByReportId;
@@ -299692,22 +299705,21 @@ router3.patch("/reports/:id/status", async (req, res) => {
   }
 });
 router3.patch("/reports/:id/priority", async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "Invalid ID" });
+    return;
+  }
   try {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      res.status(400).json({ error: "Invalid ID" });
-      return;
-    }
-    const report = await getReportById(id);
-    if (!report) {
+    const result = await sqliteTogglePriority2(id);
+    if (result === null) {
       res.status(404).json({ error: "Report not found" });
       return;
     }
-    const updated = await updateReport(id, { isPriority: !report.isPriority });
-    res.json({ id, isPriority: updated.isPriority });
+    res.json({ id, isPriority: result.isPriority });
   } catch (err) {
-    req.log.error({ err }, "Failed to toggle priority");
-    res.status(500).json({ error: "Internal server error" });
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
   }
 });
 router3.get("/reports/:id/qr-information", async (req, res) => {
