@@ -45653,7 +45653,7 @@ function getDb() {
   addIfMissing("QrCodeBase64", "TEXT");
   addIfMissing("CertificatePath", "TEXT");
   addIfMissing("TaqeemSubmittedAt", "TEXT");
-  addIfMissing("IsPriority", "INTEGER NOT NULL DEFAULT 0");
+  addIfMissing("IsPriority", "INTEGER DEFAULT 0");
   _db.exec(`
     CREATE TABLE IF NOT EXISTS datasystem (
       Id                        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46099,7 +46099,9 @@ async function sqliteUpdateReport(id, data) {
   for (const [key, col] of Object.entries(fieldMap)) {
     if (key in data) {
       sets.push(`${col} = ?`);
-      values.push(data[key] ?? null);
+      let val = data[key] ?? null;
+      if (typeof val === "boolean") val = val ? 1 : 0;
+      values.push(val);
     }
   }
   values.push(id);
