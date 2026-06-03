@@ -94,6 +94,7 @@ export interface Report {
   qrCodeBase64: string | null;
   certificatePath: string | null;
   taqeemSubmittedAt: string | null;
+  isPriority: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
