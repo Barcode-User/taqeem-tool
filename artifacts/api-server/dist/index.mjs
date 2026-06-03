@@ -45653,6 +45653,7 @@ function getDb() {
   addIfMissing("QrCodeBase64", "TEXT");
   addIfMissing("CertificatePath", "TEXT");
   addIfMissing("TaqeemSubmittedAt", "TEXT");
+  addIfMissing("IsPriority", "INTEGER DEFAULT 0");
   _db.exec(`
     CREATE TABLE IF NOT EXISTS datasystem (
       Id                        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -45866,6 +45867,7 @@ function rowToReport2(row) {
     qrCodeBase64: str2(row.QrCodeBase64),
     certificatePath: str2(row.CertificatePath),
     taqeemSubmittedAt: str2(row.TaqeemSubmittedAt),
+    isPriority: row.IsPriority === 1,
     createdAt: new Date(row.CreatedAt),
     updatedAt: new Date(row.UpdatedAt)
   };
@@ -46089,14 +46091,17 @@ async function sqliteUpdateReport(id, data) {
     automationSessionId: "AutomationSessionId",
     qrCodeBase64: "QrCodeBase64",
     certificatePath: "CertificatePath",
-    taqeemSubmittedAt: "TaqeemSubmittedAt"
+    taqeemSubmittedAt: "TaqeemSubmittedAt",
+    isPriority: "IsPriority"
   };
   const sets = ["UpdatedAt = ?"];
   const values = [now];
   for (const [key, col] of Object.entries(fieldMap)) {
     if (key in data) {
       sets.push(`${col} = ?`);
-      values.push(data[key] ?? null);
+      let val = data[key] ?? null;
+      if (typeof val === "boolean") val = val ? 1 : 0;
+      values.push(val);
     }
   }
   values.push(id);
@@ -290333,6 +290338,20 @@ init_queue_processor();
 import * as fs4 from "fs";
 import * as path4 from "path";
 var CERTIFY_REPORTS_URL = "https://qima.taqeem.gov.sa/membership/reports/sector/1";
+async function _sortByPriority(numbers) {
+  try {
+    const all = await listReports();
+    const prioritySet = new Set(
+      all.filter((r) => r.isPriority).map((r) => r.reportNumber).filter(Boolean)
+    );
+    if (prioritySet.size === 0) return numbers;
+    const priority = numbers.filter((n) => prioritySet.has(n));
+    const rest = numbers.filter((n) => !prioritySet.has(n));
+    return [...priority, ...rest];
+  } catch {
+    return numbers;
+  }
+}
 var CERTIFY_REPORT_BASE = "https://qima.taqeem.gov.sa/report";
 var CERTIFY_OFFICE = "13";
 function _loadConfig() {
@@ -290523,7 +290542,8 @@ async function startCertifySession() {
     } catch {
       _certifyLog("\u26A0\uFE0F \u0644\u0645 \u062A\u0638\u0647\u0631 \u0628\u064A\u0627\u0646\u0627\u062A \u062E\u0644\u0627\u0644 15 \u062B\u0627\u0646\u064A\u0629 \u2014 \u0633\u064A\u064F\u0642\u0631\u0623 \u0627\u0644\u062C\u062F\u0648\u0644 \u0639\u0644\u0649 \u0623\u064A \u062D\u0627\u0644");
     }
-    const numbers = await _extractReportNumbers(_certifyPage);
+    const rawNumbers = await _extractReportNumbers(_certifyPage);
+    const numbers = await _sortByPriority(rawNumbers);
     _certifyState.reportNumbers = numbers;
     _certifyState.currentIndex = 0;
     if (numbers.length > 0) {
@@ -291168,10 +291188,11 @@ async function _autoRefreshLoop() {
         await new Promise((r) => setTimeout(r, 3e4));
         continue;
       }
-      _certifyLog(`\u2705 \u0648\u064F\u062C\u062F ${numbers.length} \u062A\u0642\u0631\u064A\u0631 \u062C\u062F\u064A\u062F \u0639\u0644\u0649 \u0627\u0644\u0634\u0627\u0634\u0629 \u2014 \u0628\u062F\u0621 \u0627\u0644\u0627\u0639\u062A\u0645\u0627\u062F...`);
-      _certifyState.reportNumbers = numbers;
+      const sortedNumbers = await _sortByPriority(numbers);
+      _certifyLog(`\u2705 \u0648\u064F\u062C\u062F ${sortedNumbers.length} \u062A\u0642\u0631\u064A\u0631 \u062C\u062F\u064A\u062F \u0639\u0644\u0649 \u0627\u0644\u0634\u0627\u0634\u0629 \u2014 \u0628\u062F\u0621 \u0627\u0644\u0627\u0639\u062A\u0645\u0627\u062F...`);
+      _certifyState.reportNumbers = sortedNumbers;
       _certifyState.currentIndex = 0;
-      await openCertifyReport(numbers[0]);
+      await openCertifyReport(sortedNumbers[0]);
       _certifyState.status = "approving";
       await _approveAndExtract();
       break;
@@ -291273,6 +291294,27 @@ router2.post("/automation/certify/stop", async (_req, res) => {
   await stopCertifySession();
   res.json({ message: "\u062A\u0645 \u0625\u063A\u0644\u0627\u0642 \u062C\u0644\u0633\u0629 \u0627\u0644\u062A\u0639\u0645\u064A\u062F." });
 });
+router2.post("/automation/certify/reorder", (req, res) => {
+  const { reportNumbers } = req.body ?? {};
+  if (!Array.isArray(reportNumbers)) {
+    res.status(400).json({ error: "reportNumbers \u064A\u062C\u0628 \u0623\u0646 \u062A\u0643\u0648\u0646 \u0645\u0635\u0641\u0648\u0641\u0629" });
+    return;
+  }
+  const current = new Set(_certifyState.reportNumbers);
+  const incoming = new Set(reportNumbers.map(String));
+  const sameItems = [...current].every((n) => incoming.has(n)) && [...incoming].every((n) => current.has(n));
+  if (!sameItems) {
+    res.status(400).json({ error: "\u0627\u0644\u0642\u0627\u0626\u0645\u0629 \u062A\u062D\u062A\u0648\u064A \u0639\u0644\u0649 \u062A\u0642\u0627\u0631\u064A\u0631 \u0645\u062E\u062A\u0644\u0641\u0629 \u0639\u0646 \u0627\u0644\u0637\u0627\u0628\u0648\u0631 \u0627\u0644\u062D\u0627\u0644\u064A" });
+    return;
+  }
+  const openedReport = _certifyState.openedReport;
+  _certifyState.reportNumbers = reportNumbers.map(String);
+  if (openedReport) {
+    const newIdx = _certifyState.reportNumbers.indexOf(openedReport);
+    if (newIdx !== -1) _certifyState.currentIndex = newIdx;
+  }
+  res.json({ reportNumbers: _certifyState.reportNumbers, currentIndex: _certifyState.currentIndex });
+});
 router2.post("/automation/certify/open", async (req, res) => {
   const { reportNumber } = req.body ?? {};
   if (!reportNumber) {
@@ -291328,8 +291370,9 @@ router2.post("/automation/certify/refresh", async (_req, res) => {
       }
       return results;
     }).catch(() => []);
-    _certifyState.reportNumbers = numbers;
-    res.json({ reportNumbers: numbers, count: numbers.length });
+    const sortedRefresh = await _sortByPriority(numbers);
+    _certifyState.reportNumbers = sortedRefresh;
+    res.json({ reportNumbers: sortedRefresh, count: sortedRefresh.length });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -299645,6 +299688,25 @@ router3.patch("/reports/:id/status", async (req, res) => {
     res.json(report);
   } catch (err) {
     req.log.error({ err }, "Failed to update report status");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+router3.patch("/reports/:id/priority", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) {
+      res.status(400).json({ error: "Invalid ID" });
+      return;
+    }
+    const report = await getReportById(id);
+    if (!report) {
+      res.status(404).json({ error: "Report not found" });
+      return;
+    }
+    const updated = await updateReport(id, { isPriority: !report.isPriority });
+    res.json({ id, isPriority: updated.isPriority });
+  } catch (err) {
+    req.log.error({ err }, "Failed to toggle priority");
     res.status(500).json({ error: "Internal server error" });
   }
 });
