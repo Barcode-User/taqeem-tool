@@ -300500,7 +300500,26 @@ var logger = (0, import_pino.default)({
 });
 
 // src/app.ts
+init_src();
 var app = (0, import_express7.default)();
+app.get("/api/v3", (_req, res) => res.json({ v: 3, priority: true, ts: Date.now() }));
+app.patch("/api/prio/:id", async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "Invalid ID" });
+    return;
+  }
+  try {
+    const result = await sqliteTogglePriority2(id);
+    if (!result) {
+      res.status(404).json({ error: "Report not found" });
+      return;
+    }
+    res.json({ id, isPriority: result.isPriority });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
 app.use(
   (0, import_pino_http.default)({
     logger,
