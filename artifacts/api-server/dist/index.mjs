@@ -45045,6 +45045,9 @@ var require_multer = __commonJS({
 });
 
 // ../../lib/db/src/types.ts
+function isConfigured() {
+  return true;
+}
 var init_types = __esm({
   "../../lib/db/src/types.ts"() {
     "use strict";
@@ -45312,6 +45315,12 @@ async function pgGetReportsByAutomationStatus(automationStatus) {
   const r = await pool.query("SELECT id, report_number FROM reports WHERE automation_status = $1 ORDER BY created_at ASC", [automationStatus]);
   return r.rows.map((row) => ({ id: row.id, reportNumber: row.report_number ?? null }));
 }
+async function pgGetReportAutomationStatus(id) {
+  const pool = await withTable();
+  const r = await pool.query("SELECT automation_status FROM reports WHERE id = $1", [id]);
+  if (!r.rows[0]) return null;
+  return { automationStatus: r.rows[0].automation_status ?? "idle" };
+}
 async function pgInsertReport(data) {
   const pool = await withTable();
   const cols = [];
@@ -45381,6 +45390,11 @@ async function pgGetReportStats() {
     weekQueued: Number(row?.week_queued ?? 0),
     weekFailed: Number(row?.week_failed ?? 0)
   };
+}
+async function pgHasPendingQueue() {
+  const pool = await withTable();
+  const r = await pool.query("SELECT COUNT(*) AS cnt FROM reports WHERE automation_status = 'queued'");
+  return Number(r.rows[0]?.cnt ?? 0);
 }
 async function ensureCertifiedTable() {
   const pool = getPgPool();
@@ -45887,6 +45901,12 @@ async function sqliteGetReportsByAutomationStatus(status) {
   const rows = db.prepare("SELECT * FROM Reports WHERE AutomationStatus = ?").all(status);
   return rows.map(rowToReport2);
 }
+async function sqliteGetReportAutomationStatus(id) {
+  const db = getDb();
+  const row = db.prepare("SELECT AutomationStatus, AutomationError FROM Reports WHERE Id = ?").get(id);
+  if (!row) return null;
+  return { automationStatus: row.AutomationStatus, automationError: row.AutomationError };
+}
 async function sqliteInsertReport(data) {
   const db = getDb();
   const now = (/* @__PURE__ */ new Date()).toISOString();
@@ -46375,6 +46395,11 @@ async function sqliteGetReportStats() {
     weekFailed: Number(row?.week_failed ?? 0)
   };
 }
+async function sqliteHasPendingQueue() {
+  const db = getDb();
+  const rows = db.prepare("SELECT Id FROM Reports WHERE AutomationStatus = 'queued'").all();
+  return rows.length;
+}
 function ensureCertifiedTable2(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS CertifiedReports (
@@ -46422,7 +46447,28 @@ var init_sqlite = __esm({
 });
 
 // ../../lib/db/src/index.ts
-var isPostgres, listReports, getReportById, getReportsByAutomationStatus, insertReport, updateReport, deleteReport, getReportStats, sqliteTogglePriority2, sqliteInsertDataSystem2, sqliteGetDataSystemById2, sqliteGetDataSystemByReportId2, sqliteListDataSystem2, sqliteUpdateDataSystemLinkedReport2, insertCertifiedReport, listCertifiedReports;
+var src_exports = {};
+__export(src_exports, {
+  deleteReport: () => deleteReport,
+  getReportAutomationStatus: () => getReportAutomationStatus,
+  getReportById: () => getReportById,
+  getReportStats: () => getReportStats,
+  getReportsByAutomationStatus: () => getReportsByAutomationStatus,
+  hasPendingQueueDb: () => hasPendingQueueDb,
+  insertCertifiedReport: () => insertCertifiedReport,
+  insertReport: () => insertReport,
+  isConfigured: () => isConfigured,
+  listCertifiedReports: () => listCertifiedReports,
+  listReports: () => listReports,
+  sqliteGetDataSystemById: () => sqliteGetDataSystemById2,
+  sqliteGetDataSystemByReportId: () => sqliteGetDataSystemByReportId2,
+  sqliteInsertDataSystem: () => sqliteInsertDataSystem2,
+  sqliteListDataSystem: () => sqliteListDataSystem2,
+  sqliteTogglePriority: () => sqliteTogglePriority2,
+  sqliteUpdateDataSystemLinkedReport: () => sqliteUpdateDataSystemLinkedReport2,
+  updateReport: () => updateReport
+});
+var isPostgres, listReports, getReportById, getReportsByAutomationStatus, getReportAutomationStatus, insertReport, updateReport, deleteReport, getReportStats, hasPendingQueueDb, sqliteTogglePriority2, sqliteInsertDataSystem2, sqliteGetDataSystemById2, sqliteGetDataSystemByReportId2, sqliteListDataSystem2, sqliteUpdateDataSystemLinkedReport2, insertCertifiedReport, listCertifiedReports;
 var init_src = __esm({
   "../../lib/db/src/index.ts"() {
     "use strict";
@@ -46439,10 +46485,12 @@ var init_src = __esm({
     listReports = isPostgres ? pgListReports : sqliteListReports;
     getReportById = isPostgres ? pgGetReportById : sqliteGetReportById;
     getReportsByAutomationStatus = isPostgres ? pgGetReportsByAutomationStatus : sqliteGetReportsByAutomationStatus;
+    getReportAutomationStatus = isPostgres ? pgGetReportAutomationStatus : sqliteGetReportAutomationStatus;
     insertReport = isPostgres ? pgInsertReport : sqliteInsertReport;
     updateReport = isPostgres ? pgUpdateReport : sqliteUpdateReport;
     deleteReport = isPostgres ? pgDeleteReport : sqliteDeleteReport;
     getReportStats = isPostgres ? pgGetReportStats : sqliteGetReportStats;
+    hasPendingQueueDb = isPostgres ? pgHasPendingQueue : sqliteHasPendingQueue;
     sqliteTogglePriority2 = sqliteTogglePriority;
     sqliteInsertDataSystem2 = sqliteInsertDataSystem;
     sqliteGetDataSystemById2 = sqliteGetDataSystemById;
@@ -299702,6 +299750,24 @@ router3.patch("/reports/:id/status", async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "Failed to update report status");
     res.status(500).json({ error: "Internal server error" });
+  }
+});
+router3.get("/reports/diag", async (_req, res) => {
+  const steps = [];
+  try {
+    steps.push(`BUILD_TIME: 2026-06-04T09:00:00Z`);
+    steps.push(`Node: ${process.version}`);
+    steps.push(`DB_MODE: ${process.env.DATABASE_URL?.startsWith("postgres") ? "PostgreSQL" : "SQLite"}`);
+    const { sqliteTogglePriority: _t } = await Promise.resolve().then(() => (init_src(), src_exports));
+    steps.push(`sqliteTogglePriority: LOADED`);
+    const reports = await listReports();
+    steps.push(`Total reports: ${reports.length}`);
+    if (reports.length > 0) {
+      steps.push(`First report id: ${reports[0].id} isPriority: ${reports[0].isPriority}`);
+    }
+    res.json({ ok: true, steps });
+  } catch (err) {
+    res.status(500).json({ ok: false, steps, error: String(err) });
   }
 });
 router3.patch("/reports/:id/priority", async (req, res) => {
