@@ -45169,6 +45169,7 @@ async function ensureTable() {
       qr_code_base64 TEXT,
       certificate_path TEXT,
       taqeem_submitted_at VARCHAR(50),
+      is_priority BOOLEAN NOT NULL DEFAULT FALSE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
@@ -45190,7 +45191,8 @@ async function ensureTable() {
     "ALTER TABLE reports ADD COLUMN IF NOT EXISTS valuation_hypothesis VARCHAR(255)",
     "ALTER TABLE reports ADD COLUMN IF NOT EXISTS market_approach_percentage NUMERIC(5,2)",
     "ALTER TABLE reports ADD COLUMN IF NOT EXISTS income_approach_percentage NUMERIC(5,2)",
-    "ALTER TABLE reports ADD COLUMN IF NOT EXISTS cost_approach_percentage NUMERIC(5,2)"
+    "ALTER TABLE reports ADD COLUMN IF NOT EXISTS cost_approach_percentage NUMERIC(5,2)",
+    "ALTER TABLE reports ADD COLUMN IF NOT EXISTS is_priority BOOLEAN NOT NULL DEFAULT FALSE"
   ];
   for (const sql of newCols) await pool.query(sql).catch(() => {
   });
@@ -45296,13 +45298,14 @@ function rowToReport(row) {
     qrCodeBase64: str2(row.qr_code_base64),
     certificatePath: str2(row.certificate_path),
     taqeemSubmittedAt: str2(row.taqeem_submitted_at),
+    isPriority: row.is_priority === true || row.is_priority === 1,
     createdAt: row.created_at instanceof Date ? row.created_at : new Date(row.created_at),
     updatedAt: row.updated_at instanceof Date ? row.updated_at : new Date(row.updated_at)
   };
 }
 async function pgListReports() {
   const pool = await withTable();
-  const r = await pool.query("SELECT * FROM reports ORDER BY created_at DESC");
+  const r = await pool.query("SELECT * FROM reports ORDER BY is_priority DESC, created_at DESC");
   return r.rows.map(rowToReport);
 }
 async function pgGetReportById(id) {
@@ -45312,7 +45315,7 @@ async function pgGetReportById(id) {
 }
 async function pgGetReportsByAutomationStatus(automationStatus) {
   const pool = await withTable();
-  const r = await pool.query("SELECT id, report_number FROM reports WHERE automation_status = $1 ORDER BY created_at ASC", [automationStatus]);
+  const r = await pool.query("SELECT id, report_number FROM reports WHERE automation_status = $1 ORDER BY is_priority DESC, created_at ASC", [automationStatus]);
   return r.rows.map((row) => ({ id: row.id, reportNumber: row.report_number ?? null }));
 }
 async function pgGetReportAutomationStatus(id) {
@@ -45528,7 +45531,8 @@ var init_pg = __esm({
       automationSessionId: "automation_session_id",
       qrCodeBase64: "qr_code_base64",
       certificatePath: "certificate_path",
-      taqeemSubmittedAt: "taqeem_submitted_at"
+      taqeemSubmittedAt: "taqeem_submitted_at",
+      isPriority: "is_priority"
     };
   }
 });
@@ -45888,7 +45892,7 @@ function rowToReport2(row) {
 }
 async function sqliteListReports() {
   const db = getDb();
-  const rows = db.prepare("SELECT * FROM Reports ORDER BY CreatedAt DESC").all();
+  const rows = db.prepare("SELECT * FROM Reports ORDER BY IsPriority DESC, CreatedAt DESC").all();
   return rows.map(rowToReport2);
 }
 async function sqliteGetReportById(id) {
@@ -45898,7 +45902,7 @@ async function sqliteGetReportById(id) {
 }
 async function sqliteGetReportsByAutomationStatus(status) {
   const db = getDb();
-  const rows = db.prepare("SELECT * FROM Reports WHERE AutomationStatus = ?").all(status);
+  const rows = db.prepare("SELECT * FROM Reports WHERE AutomationStatus = ? ORDER BY IsPriority DESC, CreatedAt ASC").all(status);
   return rows.map(rowToReport2);
 }
 async function sqliteGetReportAutomationStatus(id) {
