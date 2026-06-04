@@ -300507,6 +300507,7 @@ var logger = (0, import_pino.default)({
 init_src();
 var app = (0, import_express7.default)();
 app.get("/api/v3", (_req, res) => res.json({ v: 3, priority: true, ts: Date.now() }));
+app.get("/api/v4", (_req, res) => res.json({ v: 4, priority: true, ordering: true, ts: Date.now() }));
 app.patch("/api/prio/:id", async (req, res) => {
   const id = parseInt(req.params.id);
   if (isNaN(id)) {
