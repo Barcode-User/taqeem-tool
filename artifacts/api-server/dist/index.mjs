@@ -45315,7 +45315,7 @@ async function pgGetReportById(id) {
 }
 async function pgGetReportsByAutomationStatus(automationStatus) {
   const pool = await withTable();
-  const r = await pool.query("SELECT id, report_number FROM reports WHERE automation_status = $1 ORDER BY is_priority ASC, created_at ASC", [automationStatus]);
+  const r = await pool.query("SELECT id, report_number FROM reports WHERE automation_status = $1 ORDER BY is_priority DESC, created_at ASC", [automationStatus]);
   return r.rows.map((row) => ({ id: row.id, reportNumber: row.report_number ?? null }));
 }
 async function pgGetReportAutomationStatus(id) {
@@ -45902,7 +45902,7 @@ async function sqliteGetReportById(id) {
 }
 async function sqliteGetReportsByAutomationStatus(status) {
   const db = getDb();
-  const rows = db.prepare("SELECT * FROM Reports WHERE AutomationStatus = ? ORDER BY IsPriority ASC, CreatedAt ASC").all(status);
+  const rows = db.prepare("SELECT * FROM Reports WHERE AutomationStatus = ? ORDER BY IsPriority DESC, CreatedAt ASC").all(status);
   return rows.map(rowToReport2);
 }
 async function sqliteGetReportAutomationStatus(id) {
