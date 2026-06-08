@@ -290937,6 +290937,7 @@ async function _doExtractAndSend(page) {
       _certifyLog(`\u2699\uFE0F ${debugMsg}`);
       _certifyLog(`\u{1F310} QrInformationApi \u2192 http://${qrApiHostname}:${qrApiPort}/External/QrInformationApi`);
       let _apiSuccess = false;
+      let _apiErrorMsg = "";
       await new Promise((resolve) => {
         const reqOpts = {
           hostname: qrApiHostname,
@@ -290956,38 +290957,39 @@ async function _doExtractAndSend(page) {
           });
           res.on("end", () => {
             if (res.statusCode >= 200 && res.statusCode < 300) {
-              _certifyLog(`\u2705 QrInformationApi: ${res.statusCode} \u2014 ${body.slice(0, 200)}`);
+              let parsed = null;
               try {
-                if (JSON.parse(body).success === true) _apiSuccess = true;
+                parsed = JSON.parse(body);
               } catch {
               }
+              if (parsed?.success === true) {
+                _apiSuccess = true;
+                _certifyLog(`\u2705 QrInformationApi: ${res.statusCode} \u2014 success: true`);
+              } else if (parsed?.success === false) {
+                const reason = parsed.message ?? parsed.error ?? parsed.msg ?? body.slice(0, 200);
+                _apiErrorMsg = `QrInformationApi: success=false \u2014 ${reason}`;
+                _certifyLog(`\u274C ${_apiErrorMsg}`);
+              } else {
+                _apiSuccess = true;
+                _certifyLog(`\u2705 QrInformationApi: ${res.statusCode} \u2014 ${body.slice(0, 200)}`);
+              }
             } else {
-              _certifyLog(`\u26A0\uFE0F QrInformationApi: ${res.statusCode} \u2014 ${body.slice(0, 400)}`);
+              _apiErrorMsg = `QrInformationApi: HTTP ${res.statusCode} \u2014 ${body.slice(0, 200)}`;
+              _certifyLog(`\u274C ${_apiErrorMsg}`);
             }
             resolve();
           });
         });
         req.on("error", (err) => {
-          _certifyLog(`\u274C QrInformationApi \u0641\u0634\u0644: [${err.code ?? "?"}] ${err.message ?? String(err)}`);
+          _apiErrorMsg = `QrInformationApi \u0641\u0634\u0644 \u0627\u0644\u0627\u062A\u0635\u0627\u0644: [${err.code ?? "?"}] ${err.message ?? String(err)}`;
+          _certifyLog(`\u274C ${_apiErrorMsg}`);
           resolve();
         });
         req.write(fdBuffer);
         req.end();
       });
-      if (_apiSuccess) {
-        const certifiedAt = (/* @__PURE__ */ new Date()).toISOString();
-        insertCertifiedReport({
-          reportCode: finalDcNumber || reportNumber || "",
-          taqeemReportNumber: reportNumber || "",
-          certifiedAt
-        }).then(() => {
-          _certifyLog(`\u{1F4BE} \u062A\u0645 \u062D\u0641\u0638 \u0627\u0644\u062A\u0642\u0631\u064A\u0631 ${finalDcNumber || reportNumber} \u0641\u064A \u0633\u062C\u0644 \u0627\u0644\u062A\u0642\u0627\u0631\u064A\u0631 \u0627\u0644\u0645\u0639\u0645\u062F\u0629`);
-        }).catch((e) => {
-          _certifyLog(`\u26A0\uFE0F \u0641\u0634\u0644 \u062D\u0641\u0638 \u0627\u0644\u0633\u062C\u0644: ${e?.message ?? e}`);
-        });
-      }
-      if (_apiSuccess) {
-        _certifyLog("\u{1F504} \u0646\u062C\u062D \u0627\u0644\u0625\u0631\u0633\u0627\u0644 \u2014 \u0625\u063A\u0644\u0627\u0642 \u062A\u0627\u0628 \u0627\u0644\u062A\u0642\u0631\u064A\u0631 \u0648\u0627\u0644\u0627\u0646\u062A\u0642\u0627\u0644 \u0644\u0644\u062A\u0627\u0644\u064A...");
+      const _goToNextReport = async (label) => {
+        _certifyLog(`\u{1F504} ${label} \u2014 \u0627\u0644\u0627\u0646\u062A\u0642\u0627\u0644 \u0644\u0644\u062A\u0642\u0631\u064A\u0631 \u0627\u0644\u062A\u0627\u0644\u064A...`);
         setTimeout(async () => {
           try {
             if (_certifyReportPage) {
@@ -291019,9 +291021,48 @@ async function _doExtractAndSend(page) {
             _certifyLog(`\u274C \u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u0627\u0646\u062A\u0642\u0627\u0644 \u0644\u0644\u062A\u0642\u0631\u064A\u0631 \u0627\u0644\u062A\u0627\u0644\u064A: ${e.message}`);
           }
         }, 1e3);
+      };
+      if (_apiSuccess) {
+        const certifiedAt = (/* @__PURE__ */ new Date()).toISOString();
+        insertCertifiedReport({
+          reportCode: finalDcNumber || reportNumber || "",
+          taqeemReportNumber: reportNumber || "",
+          certifiedAt
+        }).then(() => {
+          _certifyLog(`\u{1F4BE} \u062A\u0645 \u062D\u0641\u0638 \u0627\u0644\u062A\u0642\u0631\u064A\u0631 ${finalDcNumber || reportNumber} \u0641\u064A \u0633\u062C\u0644 \u0627\u0644\u062A\u0642\u0627\u0631\u064A\u0631 \u0627\u0644\u0645\u0639\u0645\u062F\u0629`);
+        }).catch((e) => {
+          _certifyLog(`\u26A0\uFE0F \u0641\u0634\u0644 \u062D\u0641\u0638 \u0627\u0644\u0633\u062C\u0644: ${e?.message ?? e}`);
+        });
+        await _goToNextReport("\u0646\u062C\u062D \u0627\u0644\u0625\u0631\u0633\u0627\u0644");
+      } else {
+        try {
+          const allReports = await listReports();
+          const failed = allReports.find((r) => r.reportNumber === reportNumber);
+          if (failed?.id) {
+            await updateReport(failed.id, {
+              automationStatus: "qr_error",
+              automationError: _apiErrorMsg || "QrInformationApi: \u0641\u0634\u0644 \u063A\u064A\u0631 \u0645\u062D\u062F\u062F"
+            });
+            _certifyLog(`\u{1F534} \u062A\u0645 \u0648\u0636\u0639 \u062A\u0642\u0631\u064A\u0631 ${reportNumber} \u0628\u0627\u0644\u0644\u0648\u0646 \u0627\u0644\u0623\u062D\u0645\u0631 (qr_error)`);
+          }
+        } catch (dbErr) {
+          _certifyLog(`\u26A0\uFE0F \u0641\u0634\u0644 \u062A\u062D\u062F\u064A\u062B \u062D\u0627\u0644\u0629 \u0627\u0644\u062A\u0642\u0631\u064A\u0631 \u0641\u064A DB: ${dbErr.message}`);
+        }
+        await _goToNextReport(`\u0641\u0634\u0644 QrInformationApi \u2014 \u062A\u062C\u0627\u0648\u0632 ${reportNumber}`);
       }
     } catch (e) {
       _certifyLog(`\u274C QrInformationApi \u062E\u0637\u0623 \u0639\u0627\u0645: ${e.message?.slice(0, 120)}`);
+      try {
+        const allReports = await listReports();
+        const failed = allReports.find((r) => r.reportNumber === reportNumber);
+        if (failed?.id) {
+          await updateReport(failed.id, {
+            automationStatus: "qr_error",
+            automationError: `QrInformationApi \u062E\u0637\u0623 \u0639\u0627\u0645: ${e.message?.slice(0, 120)}`
+          });
+        }
+      } catch {
+      }
     }
     return { dcNumber: finalDcNumber, finalValue: extracted.finalValue, reportNumber, qrBase64 };
   } finally {
