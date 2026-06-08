@@ -50002,20 +50002,33 @@ ${pageTextAfterSubmit.slice(0, 400)}`);
       method: "POST",
       body: formData
     });
-    if (resp.ok) {
-      addLog(session, `\u2705 QRInformationApi: ${resp.status} ${resp.statusText}`);
-    } else {
-      const body = await resp.text().catch(() => "");
-      const errMsg = `QRInformationApi: ${resp.status} \u2014 ${body.slice(0, 200)}`;
-      addLog(session, `\u274C ${errMsg}`);
+    const rawBody = await resp.text().catch(() => "");
+    let qrJson = null;
+    try {
+      qrJson = JSON.parse(rawBody);
+    } catch {
+    }
+    if (!resp.ok) {
+      const errMsg = `QrInformationApi: HTTP ${resp.status} \u2014 ${rawBody.slice(0, 200)}`;
+      addLog(session, `\u274C ${errMsg} \u2014 \u0633\u064A\u062A\u0645 \u062A\u062C\u0627\u0648\u0632 \u0647\u0630\u0627 \u0627\u0644\u062A\u0642\u0631\u064A\u0631 \u0648\u0627\u0644\u0627\u0646\u062A\u0642\u0627\u0644 \u0644\u0644\u062A\u0627\u0644\u064A`);
       await updateReport(reportId, {
         automationStatus: "qr_error",
         automationError: errMsg
       });
+    } else if (qrJson !== null && qrJson.success === false) {
+      const reason = qrJson.message ?? qrJson.error ?? qrJson.msg ?? JSON.stringify(qrJson).slice(0, 200);
+      const errMsg = `QrInformationApi: success=false \u2014 ${reason}`;
+      addLog(session, `\u274C ${errMsg} \u2014 \u0633\u064A\u062A\u0645 \u062A\u062C\u0627\u0648\u0632 \u0647\u0630\u0627 \u0627\u0644\u062A\u0642\u0631\u064A\u0631 \u0648\u0627\u0644\u0627\u0646\u062A\u0642\u0627\u0644 \u0644\u0644\u062A\u0627\u0644\u064A`);
+      await updateReport(reportId, {
+        automationStatus: "qr_error",
+        automationError: errMsg
+      });
+    } else {
+      addLog(session, `\u2705 QRInformationApi: ${resp.status} ${resp.statusText}${qrJson?.success === true ? " (success: true)" : ""}`);
     }
   } catch (e) {
-    const errMsg = `QRInformationApi \u0641\u0634\u0644 \u0627\u0644\u0627\u062A\u0635\u0627\u0644: ${String(e).slice(0, 100)}`;
-    addLog(session, `\u274C ${errMsg}`);
+    const errMsg = `QrInformationApi \u0641\u0634\u0644 \u0627\u0644\u0627\u062A\u0635\u0627\u0644: ${String(e).slice(0, 100)}`;
+    addLog(session, `\u274C ${errMsg} \u2014 \u0633\u064A\u062A\u0645 \u062A\u062C\u0627\u0648\u0632 \u0647\u0630\u0627 \u0627\u0644\u062A\u0642\u0631\u064A\u0631 \u0648\u0627\u0644\u0627\u0646\u062A\u0642\u0627\u0644 \u0644\u0644\u062A\u0627\u0644\u064A`);
     await updateReport(reportId, {
       automationStatus: "qr_error",
       automationError: errMsg
