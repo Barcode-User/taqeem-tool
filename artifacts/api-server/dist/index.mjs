@@ -47264,6 +47264,13 @@ var init_taqeem_session_store = __esm({
         sharedContext: null,
         storageStateFile: path2.join(UPLOADS_DIR, "taqeem-session-certifier.json"),
         sessionMetaFile: path2.join(UPLOADS_DIR, "taqeem-session-certifier.meta.json")
+      },
+      qima: {
+        activeFlow: null,
+        sharedBrowser: null,
+        sharedContext: null,
+        storageStateFile: path2.join(UPLOADS_DIR, "taqeem-session-qima.json"),
+        sessionMetaFile: path2.join(UPLOADS_DIR, "taqeem-session-qima.meta.json")
       }
     };
   }
@@ -291353,7 +291360,8 @@ var diskStorage = import_multer.default.diskStorage({
 });
 var upload = (0, import_multer.default)({ storage: diskStorage, limits: { fileSize: 20 * 1024 * 1024 } });
 router2.get("/automation/session-status", async (req, res) => {
-  const role = req.query.role === "certifier" ? "certifier" : "entry";
+  const raw = req.query.role;
+  const role = raw === "certifier" ? "certifier" : raw === "qima" ? "qima" : "entry";
   const status = getLoginStatus(role);
   const pendingCount = role === "entry" ? await hasPendingQueue().catch(() => 0) : 0;
   res.json({ ...status, pendingQueueCount: pendingCount });
@@ -291361,7 +291369,7 @@ router2.get("/automation/session-status", async (req, res) => {
 router2.post("/automation/login", async (req, res) => {
   try {
     const { username, password, role: rawRole } = req.body;
-    const role = rawRole === "certifier" ? "certifier" : "entry";
+    const role = rawRole === "certifier" ? "certifier" : rawRole === "qima" ? "qima" : "entry";
     if (!username || !password) {
       res.status(400).json({ error: "username and password are required" });
       return;
@@ -291375,7 +291383,7 @@ router2.post("/automation/login", async (req, res) => {
 });
 router2.post("/automation/login-otp", (req, res) => {
   const { loginId, otp, role: rawRole } = req.body;
-  const role = rawRole === "certifier" ? "certifier" : "entry";
+  const role = rawRole === "certifier" ? "certifier" : rawRole === "qima" ? "qima" : "entry";
   if (!loginId || !otp) {
     res.status(400).json({ error: "loginId and otp are required" });
     return;
@@ -291750,6 +291758,183 @@ router2.post("/automation/retry-bulk", async (req, res) => {
     req.log.error({ err }, "Failed to retry bulk");
     res.status(500).json({ error: err.message || "Internal server error" });
   }
+});
+router2.post("/automation/open-qima-browser", async (_req, res) => {
+  try {
+    const { chromium: chromium2 } = await import("playwright");
+    res.json({ message: "\u062C\u0627\u0631\u064D \u0641\u062A\u062D \u0627\u0644\u0645\u062A\u0635\u0641\u062D..." });
+    (async () => {
+      try {
+        const browser = await chromium2.launch({
+          headless: false,
+          channel: "chrome",
+          args: ["--start-maximized"]
+        });
+        const context = await browser.newContext({ viewport: null });
+        const page = await context.newPage();
+        await page.goto("https://qima.taqeem.gov.sa", { waitUntil: "domcontentloaded", timeout: 6e4 });
+      } catch (err) {
+        console.error("[open-qima-browser]", err.message);
+      }
+    })();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+var QIMA_REQUESTS_URL = "https://qima.taqeem.gov.sa/qaym/request/13/tab";
+var _qimaState = { status: "idle", logs: [], assignedRequests: [], openedCount: 0 };
+var _qimaPage = null;
+var _qimaCleanup = null;
+function _qimaLog(msg) {
+  _qimaState.logs.push(`[${(/* @__PURE__ */ new Date()).toISOString()}] ${msg}`);
+  console.log(`[QimaBot] ${msg}`);
+}
+function getQimaStatus() {
+  return { ..._qimaState, logs: [..._qimaState.logs] };
+}
+async function stopQimaSession() {
+  _qimaState.status = "idle";
+  if (_qimaPage) {
+    try {
+      await _qimaPage.close();
+    } catch {
+    }
+    _qimaPage = null;
+  }
+  if (_qimaCleanup) {
+    try {
+      await _qimaCleanup();
+    } catch {
+    }
+    _qimaCleanup = null;
+  }
+  _qimaLog("\u{1F6D1} \u062A\u0645 \u0625\u063A\u0644\u0627\u0642 \u062C\u0644\u0633\u0629 QIMA");
+}
+async function startQimaSession() {
+  if (_qimaState.status === "running") return;
+  if (_qimaCleanup) {
+    try {
+      await _qimaCleanup();
+    } catch {
+    }
+    _qimaCleanup = null;
+  }
+  _qimaState = { status: "running", logs: [], assignedRequests: [], openedCount: 0 };
+  _qimaLog("\u0628\u062F\u0621 \u062C\u0644\u0633\u0629 QIMA...");
+  try {
+    const session = await createIsolatedContextForRole("qima");
+    if (!session) {
+      _qimaState.status = "failed";
+      _qimaState.error = "\u0644\u0627 \u062A\u0648\u062C\u062F \u062C\u0644\u0633\u0629 \u0642\u064A\u0645\u0629 \u2014 \u0633\u062C\u0651\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 \u0623\u0648\u0644\u0627\u064B \u0645\u0646 \u0635\u0641\u062D\u0629 \u062C\u0644\u0633\u0629 \u062A\u0642\u064A\u064A\u0645";
+      _qimaLog("\u274C " + _qimaState.error);
+      return;
+    }
+    _qimaCleanup = session.cleanup;
+    const context = session.context;
+    _qimaLog("\u{1F4C2} \u0641\u062A\u062D \u0635\u0641\u062D\u0629 \u0627\u0644\u0637\u0644\u0628\u0627\u062A...");
+    _qimaPage = await context.newPage();
+    try {
+      await _qimaPage.goto(QIMA_REQUESTS_URL, { waitUntil: "domcontentloaded", timeout: 6e4 });
+    } catch (navErr) {
+      _qimaState.status = "failed";
+      _qimaState.error = `\u0644\u0627 \u064A\u0645\u0643\u0646 \u0627\u0644\u0648\u0635\u0648\u0644 \u0644\u0644\u0645\u0648\u0642\u0639 \u2014 \u062A\u0623\u0643\u062F \u0623\u0646 \u0627\u0644\u0623\u062A\u0645\u062A\u0629 \u062A\u0639\u0645\u0644 \u0639\u0644\u0649 \u062C\u0647\u0627\u0632\u0643 \u0627\u0644\u0645\u062D\u0644\u064A. (${navErr.message})`;
+      _qimaLog("\u274C " + _qimaState.error);
+      if (_qimaCleanup) {
+        try {
+          await _qimaCleanup();
+        } catch {
+        }
+        _qimaCleanup = null;
+      }
+      _qimaPage = null;
+      return;
+    }
+    _qimaLog(`\u{1F4C4} \u0627\u0644\u0635\u0641\u062D\u0629: ${_qimaPage.url()}`);
+    _qimaLog("\u23F3 \u0627\u0646\u062A\u0638\u0627\u0631 \u062A\u062D\u0645\u064A\u0644 \u0627\u0644\u062C\u062F\u0648\u0644...");
+    try {
+      await _qimaPage.waitForSelector("table tbody tr, tbody tr", { timeout: 2e4 });
+      _qimaLog("\u2705 \u062A\u0645 \u062A\u062D\u0645\u064A\u0644 \u0627\u0644\u062C\u062F\u0648\u0644");
+    } catch {
+      _qimaLog("\u26A0\uFE0F \u0644\u0645 \u064A\u0638\u0647\u0631 \u0627\u0644\u062C\u062F\u0648\u0644 \u062E\u0644\u0627\u0644 20 \u062B\u0627\u0646\u064A\u0629 \u2014 \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0629 \u0639\u0644\u0649 \u0623\u064A \u062D\u0627\u0644");
+    }
+    await _qimaPage.waitForTimeout(2e3);
+    _qimaLog("\u{1F50D} \u0627\u0644\u0628\u062D\u062B \u0639\u0646 \u0637\u0644\u0628\u0627\u062A \u0628\u062D\u0627\u0644\u0629 '\u0645\u0633\u0646\u062F \u062A\u0644\u0642\u0627\u0626\u064A\u064B\u0627'...");
+    const assignedLinks = await _qimaPage.evaluate(() => {
+      const results = [];
+      const rows = Array.from(document.querySelectorAll("table tbody tr, tbody tr"));
+      for (const row of rows) {
+        const cells = Array.from(row.querySelectorAll("td"));
+        if (cells.length < 2) continue;
+        const rowText = (row.textContent || "").replace(/[أإآا]/g, "\u0627").replace(/[ةه]/g, "\u0647").replace(/\s+/g, " ");
+        if (!rowText.includes("\u0645\u0633\u0646\u062F") || !rowText.includes("\u062A\u0644\u0642\u0627\u064A")) continue;
+        const links = Array.from(row.querySelectorAll("a[href]"));
+        for (const link of links) {
+          if (link.href && !results.includes(link.href)) {
+            results.push(link.href);
+          }
+        }
+        if (links.length === 0) {
+          const numCell = cells[0];
+          const num = (numCell?.textContent || "").trim();
+          if (/^\d{5,10}$/.test(num)) {
+            const url = `https://qima.taqeem.gov.sa/qaym/request/${num}/tab`;
+            if (!results.includes(url)) results.push(url);
+          }
+        }
+      }
+      return results;
+    }).catch(() => []);
+    _qimaState.assignedRequests = assignedLinks;
+    _qimaLog(`\u{1F4CB} \u0648\u064F\u062C\u062F ${assignedLinks.length} \u0637\u0644\u0628 \u0628\u062D\u0627\u0644\u0629 '\u0645\u0633\u0646\u062F \u062A\u0644\u0642\u0627\u0626\u064A\u064B\u0627'`);
+    if (assignedLinks.length === 0) {
+      _qimaLog("\u26A0\uFE0F \u0644\u0645 \u064A\u064F\u0639\u062B\u0631 \u0639\u0644\u0649 \u0637\u0644\u0628\u0627\u062A \u0645\u0633\u0646\u062F\u0629 \u2014 \u0642\u062F \u062A\u0643\u0648\u0646 \u0627\u0644\u0635\u0641\u062D\u0629 \u0641\u0627\u0631\u063A\u0629 \u0623\u0648 \u0627\u0644\u062C\u0644\u0633\u0629 \u0645\u0646\u062A\u0647\u064A\u0629");
+      _qimaState.status = "ready";
+      return;
+    }
+    for (let i = 0; i < assignedLinks.length; i++) {
+      const url = assignedLinks[i];
+      _qimaLog(`\u{1F517} \u0641\u062A\u062D \u0637\u0644\u0628 ${i + 1}/${assignedLinks.length}: ${url}`);
+      try {
+        const tabPage = await context.newPage();
+        await tabPage.goto(url, { waitUntil: "domcontentloaded", timeout: 3e4 });
+        _qimaState.openedCount++;
+        _qimaLog(`\u2705 \u062A\u0645 \u0641\u062A\u062D \u0627\u0644\u0637\u0644\u0628 ${i + 1}`);
+      } catch (e) {
+        _qimaLog(`\u26A0\uFE0F \u0641\u0634\u0644 \u0641\u062A\u062D \u0627\u0644\u0637\u0644\u0628 ${i + 1}: ${e.message?.slice(0, 80)}`);
+      }
+    }
+    _qimaState.status = "ready";
+    _qimaLog(`\u{1F389} \u0627\u0643\u062A\u0645\u0644 \u2014 \u062A\u0645 \u0641\u062A\u062D ${_qimaState.openedCount} \u0645\u0646 ${assignedLinks.length} \u0637\u0644\u0628`);
+  } catch (err) {
+    _qimaState.status = "failed";
+    _qimaState.error = err.message;
+    _qimaLog("\u274C \u062E\u0637\u0623: " + err.message);
+    if (_qimaCleanup) {
+      try {
+        await _qimaCleanup();
+      } catch {
+      }
+      _qimaCleanup = null;
+    }
+    _qimaPage = null;
+  }
+}
+router2.get("/automation/qima/status", (_req, res) => {
+  res.json(getQimaStatus());
+});
+router2.post("/automation/qima/start", async (_req, res) => {
+  try {
+    startQimaSession().catch(
+      (err) => console.error("[qima-start] unexpected error:", err)
+    );
+    res.json({ message: "\u062C\u0627\u0631\u064D \u0641\u062A\u062D \u0627\u0644\u0645\u062A\u0635\u0641\u062D \u0648\u0627\u0644\u0628\u062D\u062B \u0639\u0646 \u0627\u0644\u0637\u0644\u0628\u0627\u062A \u0627\u0644\u0645\u0633\u0646\u062F\u0629 \u062A\u0644\u0642\u0627\u0626\u064A\u0627\u064B..." });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+router2.post("/automation/qima/stop", async (_req, res) => {
+  await stopQimaSession();
+  res.json({ message: "\u062A\u0645 \u0625\u063A\u0644\u0627\u0642 \u062C\u0644\u0633\u0629 QIMA." });
 });
 router2.get("/automation/queue", async (_req, res) => {
   try {
