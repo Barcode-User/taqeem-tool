@@ -6,6 +6,7 @@ import {
   insertReport,
   getReportById,
   getReportsByAutomationStatus,
+  listReports,
   updateReport,
   insertCertifiedReport,
 } from "@workspace/db";
@@ -25,6 +26,22 @@ import { hasPendingQueue, MAX_CONCURRENT, processQueue } from "../automation/que
 // CERTIFY BOT STATE — مدمج مباشرة لتجنب مشاكل الاستيراد على Windows
 // ─────────────────────────────────────────────────────────────────────────────
 const CERTIFY_REPORTS_URL = "https://qima.taqeem.gov.sa/membership/reports/sector/1";
+
+// ─── ترتيب الطابور: التقارير ذات الأولوية أولاً ─────────────────────────────
+async function _sortByPriority(numbers: string[]): Promise<string[]> {
+  try {
+    const all = await listReports();
+    const prioritySet = new Set(
+      all.filter((r: any) => r.isPriority).map((r: any) => r.reportNumber).filter(Boolean)
+    );
+    if (prioritySet.size === 0) return numbers;
+    const priority = numbers.filter(n => prioritySet.has(n));
+    const rest     = numbers.filter(n => !prioritySet.has(n));
+    return [...priority, ...rest];
+  } catch {
+    return numbers;
+  }
+}
 const CERTIFY_REPORT_BASE = "https://qima.taqeem.gov.sa/report";
 const CERTIFY_OFFICE = "13";
 
@@ -260,7 +277,8 @@ async function startCertifySession(): Promise<void> {
       _certifyLog("⚠️ لم تظهر بيانات خلال 15 ثانية — سيُقرأ الجدول على أي حال");
     }
 
-    const numbers: string[] = await _extractReportNumbers(_certifyPage);
+    const rawNumbers: string[] = await _extractReportNumbers(_certifyPage);
+    const numbers = await _sortByPriority(rawNumbers);
 
     _certifyState.reportNumbers = numbers;
     _certifyState.currentIndex = 0;
@@ -628,6 +646,7 @@ async function _doExtractAndSend(page: any): Promise<{
     _certifyLog(`🌐 QrInformationApi → http://${qrApiHostname}:${qrApiPort}/External/QrInformationApi`);
 
     let _apiSuccess = false;
+    let _apiErrorMsg = "";
     await new Promise<void>((resolve) => {
       const reqOpts = {
         hostname: qrApiHostname,
@@ -644,21 +663,67 @@ async function _doExtractAndSend(page: any): Promise<{
         res.on("data", (chunk: any) => { body += chunk; });
         res.on("end", () => {
           if (res.statusCode >= 200 && res.statusCode < 300) {
-            _certifyLog(`✅ QrInformationApi: ${res.statusCode} — ${body.slice(0, 200)}`);
-            try { if (JSON.parse(body).success === true) _apiSuccess = true; } catch {}
+            let parsed: any = null;
+            try { parsed = JSON.parse(body); } catch {}
+            if (parsed?.success === true) {
+              _apiSuccess = true;
+              _certifyLog(`✅ QrInformationApi: ${res.statusCode} — success: true`);
+            } else if (parsed?.success === false) {
+              const reason = parsed.message ?? parsed.error ?? parsed.msg ?? body.slice(0, 200);
+              _apiErrorMsg = `QrInformationApi: success=false — ${reason}`;
+              _certifyLog(`❌ ${_apiErrorMsg}`);
+            } else {
+              // استجابة HTTP 2xx بدون حقل success واضح — نعتبرها نجاح
+              _apiSuccess = true;
+              _certifyLog(`✅ QrInformationApi: ${res.statusCode} — ${body.slice(0, 200)}`);
+            }
           } else {
-            _certifyLog(`⚠️ QrInformationApi: ${res.statusCode} — ${body.slice(0, 400)}`);
+            _apiErrorMsg = `QrInformationApi: HTTP ${res.statusCode} — ${body.slice(0, 200)}`;
+            _certifyLog(`❌ ${_apiErrorMsg}`);
           }
           resolve();
         });
       });
       req.on("error", (err: any) => {
-        _certifyLog(`❌ QrInformationApi فشل: [${err.code ?? "?"}] ${err.message ?? String(err)}`);
+        _apiErrorMsg = `QrInformationApi فشل الاتصال: [${err.code ?? "?"}] ${err.message ?? String(err)}`;
+        _certifyLog(`❌ ${_apiErrorMsg}`);
         resolve();
       });
       req.write(fdBuffer);
       req.end();
     });
+
+    // ── دالة مشتركة للانتقال للتقرير التالي (تُستخدم عند النجاح والفشل) ────
+    const _goToNextReport = async (label: string) => {
+      _certifyLog(`🔄 ${label} — الانتقال للتقرير التالي...`);
+      setTimeout(async () => {
+        try {
+          if (_certifyReportPage) {
+            try {
+              await _certifyReportPage.goto("about:blank", { timeout: 5000 });
+              _certifyLog("🔒 تم مسح تاب التقرير المنتهي");
+            } catch {}
+          }
+          const next = await nextCertifyReport();
+          if (!next) {
+            if (_certifyReportPage) {
+              try { await _certifyReportPage.close(); } catch {}
+              _certifyReportPage = null;
+              _certifyLog("🔒 تم إغلاق تاب التقرير (لا توجد تقارير إضافية)");
+            }
+            _autoRefreshLoop().catch(e =>
+              _certifyLog(`❌ خطأ في حلقة التحديث: ${e.message}`)
+            );
+            return;
+          }
+          _certifyLog(`📂 تقرير ${next.reportNumber} (${next.index} من ${next.total}) — انتظار تحميل الصفحة...`);
+          await new Promise(r => setTimeout(r, 3000));
+          await _approveAndExtract();
+        } catch (e: any) {
+          _certifyLog(`❌ خطأ في الانتقال للتقرير التالي: ${e.message}`);
+        }
+      }, 1000);
+    };
 
     // ── حفظ السجل في جدول التقارير المعمدة ─────────────────────────────────
     if (_apiSuccess) {
@@ -672,47 +737,38 @@ async function _doExtractAndSend(page: any): Promise<{
       }).catch((e: any) => {
         _certifyLog(`⚠️ فشل حفظ السجل: ${e?.message ?? e}`);
       });
-    }
 
-    // ── إذا نجح الإرسال انتقل للتقرير التالي تلقائياً ──────────────────────
-    if (_apiSuccess) {
-      _certifyLog("🔄 نجح الإرسال — إغلاق تاب التقرير والانتقال للتالي...");
-      // setTimeout لكسر سلسلة الاستدعاءات وتجنب التعشيش العميق
-      setTimeout(async () => {
-        try {
-          // ── انقل تاب التقرير لصفحة فارغة (يبدو للمستخدم أنه أُغلق بصرياً)
-          // openCertifyReport ستغلقه فعلياً حين تفتح التالي — تجنباً لخطأ "page closed"
-          if (_certifyReportPage) {
-            try {
-              await _certifyReportPage.goto("about:blank", { timeout: 5000 });
-              _certifyLog("🔒 تم مسح تاب التقرير المنتهي");
-            } catch {}
-          }
-
-          const next = await nextCertifyReport();
-          if (!next) {
-            // لا توجد تقارير إضافية — أغلق تاب التقرير ثم ابدأ حلقة الانتظار
-            if (_certifyReportPage) {
-              try { await _certifyReportPage.close(); } catch {}
-              _certifyReportPage = null;
-              _certifyLog("🔒 تم إغلاق تاب التقرير (لا توجد تقارير إضافية)");
-            }
-            _autoRefreshLoop().catch(e =>
-              _certifyLog(`❌ خطأ في حلقة التحديث: ${e.message}`)
-            );
-            return;
-          }
-          // nextCertifyReport → openCertifyReport أغلقت القديم وفتحت الجديد بأمان
-          _certifyLog(`📂 تقرير ${next.reportNumber} (${next.index} من ${next.total}) — انتظار تحميل الصفحة...`);
-          await new Promise(r => setTimeout(r, 3000));
-          await _approveAndExtract();
-        } catch (e: any) {
-          _certifyLog(`❌ خطأ في الانتقال للتقرير التالي: ${e.message}`);
+      await _goToNextReport("نجح الإرسال");
+    } else {
+      // ── فشل QrInformationApi → لوّن التقرير أحمر وانتقل للتالي ────────────
+      try {
+        const allReports = await listReports();
+        const failed = allReports.find(r => r.reportNumber === reportNumber);
+        if (failed?.id) {
+          await updateReport(failed.id, {
+            automationStatus: "qr_error",
+            automationError:  _apiErrorMsg || "QrInformationApi: فشل غير محدد",
+          });
+          _certifyLog(`🔴 تم وضع تقرير ${reportNumber} باللون الأحمر (qr_error)`);
         }
-      }, 1000);
+      } catch (dbErr: any) {
+        _certifyLog(`⚠️ فشل تحديث حالة التقرير في DB: ${dbErr.message}`);
+      }
+      await _goToNextReport(`فشل QrInformationApi — تجاوز ${reportNumber}`);
     }
   } catch (e: any) {
     _certifyLog(`❌ QrInformationApi خطأ عام: ${e.message?.slice(0, 120)}`);
+    // حتى في حالة خطأ عام — حاول الانتقال للتالي
+    try {
+      const allReports = await listReports();
+      const failed = allReports.find(r => r.reportNumber === reportNumber);
+      if (failed?.id) {
+        await updateReport(failed.id, {
+          automationStatus: "qr_error",
+          automationError:  `QrInformationApi خطأ عام: ${e.message?.slice(0, 120)}`,
+        });
+      }
+    } catch {}
   }
 
   return { dcNumber: finalDcNumber, finalValue: extracted.finalValue, reportNumber, qrBase64 };
@@ -1030,10 +1086,11 @@ async function _autoRefreshLoop(): Promise<void> {
         continue;
       }
 
-      _certifyLog(`✅ وُجد ${numbers.length} تقرير جديد على الشاشة — بدء الاعتماد...`);
-      _certifyState.reportNumbers = numbers;
+      const sortedNumbers = await _sortByPriority(numbers);
+      _certifyLog(`✅ وُجد ${sortedNumbers.length} تقرير جديد على الشاشة — بدء الاعتماد...`);
+      _certifyState.reportNumbers = sortedNumbers;
       _certifyState.currentIndex = 0;
-      await openCertifyReport(numbers[0]);
+      await openCertifyReport(sortedNumbers[0]);
       _certifyState.status = "approving";
       await _approveAndExtract();
       // عند انتهاء هذه الدفعة ستُطلق _autoRefreshLoop من جديد تلقائياً
@@ -1073,9 +1130,10 @@ const upload = multer({ storage: diskStorage, limits: { fileSize: 20 * 1024 * 10
 // SESSION MANAGEMENT
 // ─────────────────────────────────────────────────────────────────────────────
 
-// GET /api/automation/session-status?role=entry|certifier
+// GET /api/automation/session-status?role=entry|certifier|qima
 router.get("/automation/session-status", async (req, res) => {
-  const role = req.query.role === "certifier" ? "certifier" : "entry";
+  const raw = req.query.role;
+  const role = raw === "certifier" ? "certifier" : raw === "qima" ? "qima" : "entry";
   const status = getLoginStatus(role);
   const pendingCount = role === "entry" ? await hasPendingQueue().catch(() => 0) : 0;
   res.json({ ...status, pendingQueueCount: pendingCount });
@@ -1085,7 +1143,7 @@ router.get("/automation/session-status", async (req, res) => {
 router.post("/automation/login", async (req, res) => {
   try {
     const { username, password, role: rawRole } = req.body;
-    const role = rawRole === "certifier" ? "certifier" : "entry";
+    const role = rawRole === "certifier" ? "certifier" : rawRole === "qima" ? "qima" : "entry";
     if (!username || !password) {
       res.status(400).json({ error: "username and password are required" });
       return;
@@ -1101,7 +1159,7 @@ router.post("/automation/login", async (req, res) => {
 // POST /api/automation/login-otp  { loginId, otp, role? }
 router.post("/automation/login-otp", (req, res) => {
   const { loginId, otp, role: rawRole } = req.body;
-  const role = rawRole === "certifier" ? "certifier" : "entry";
+  const role = rawRole === "certifier" ? "certifier" : rawRole === "qima" ? "qima" : "entry";
   if (!loginId || !otp) {
     res.status(400).json({ error: "loginId and otp are required" });
     return;
@@ -1152,6 +1210,32 @@ router.post("/automation/certify/start", async (_req, res) => {
 router.post("/automation/certify/stop", async (_req, res) => {
   await stopCertifySession();
   res.json({ message: "تم إغلاق جلسة التعميد." });
+});
+
+// POST /api/automation/certify/reorder  { reportNumbers: string[] }
+// يُعيد ترتيب الطابور — يقبل القائمة الجديدة كاملةً بعد إعادة الترتيب
+router.post("/automation/certify/reorder", (req, res) => {
+  const { reportNumbers } = req.body ?? {};
+  if (!Array.isArray(reportNumbers)) {
+    res.status(400).json({ error: "reportNumbers يجب أن تكون مصفوفة" });
+    return;
+  }
+  // تحقق أن الأرقام نفسها موجودة (لا إضافة أو حذف)
+  const current = new Set(_certifyState.reportNumbers);
+  const incoming = new Set(reportNumbers.map(String));
+  const sameItems = [...current].every(n => incoming.has(n)) && [...incoming].every(n => current.has(n));
+  if (!sameItems) {
+    res.status(400).json({ error: "القائمة تحتوي على تقارير مختلفة عن الطابور الحالي" });
+    return;
+  }
+  // حدّث الترتيب مع الحفاظ على currentIndex صحيح
+  const openedReport = _certifyState.openedReport;
+  _certifyState.reportNumbers = reportNumbers.map(String);
+  if (openedReport) {
+    const newIdx = _certifyState.reportNumbers.indexOf(openedReport);
+    if (newIdx !== -1) _certifyState.currentIndex = newIdx;
+  }
+  res.json({ reportNumbers: _certifyState.reportNumbers, currentIndex: _certifyState.currentIndex });
 });
 
 // POST /api/automation/certify/open  { reportNumber }
@@ -1216,8 +1300,9 @@ router.post("/automation/certify/refresh", async (_req, res) => {
       }
       return results;
     }).catch(() => [] as string[]);
-    _certifyState.reportNumbers = numbers;
-    res.json({ reportNumbers: numbers, count: numbers.length });
+    const sortedRefresh = await _sortByPriority(numbers);
+    _certifyState.reportNumbers = sortedRefresh;
+    res.json({ reportNumbers: sortedRefresh, count: sortedRefresh.length });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -1548,6 +1633,205 @@ router.post("/automation/retry-bulk", async (req, res) => {
     req.log.error({ err }, "Failed to retry bulk");
     res.status(500).json({ error: err.message || "Internal server error" });
   }
+});
+
+// POST /api/automation/open-qima-browser — فتح المتصفح بجلسة جديدة على موقع قيمة
+router.post("/automation/open-qima-browser", async (_req, res) => {
+  try {
+    const { chromium } = await import("playwright");
+    res.json({ message: "جارٍ فتح المتصفح..." });
+    // نفتح في الخلفية بعد إرسال الرد
+    (async () => {
+      try {
+        const browser = await chromium.launch({
+          headless: false,
+          channel: "chrome",
+          args: ["--start-maximized"],
+        });
+        const context = await browser.newContext({ viewport: null });
+        const page = await context.newPage();
+        await page.goto("https://qima.taqeem.gov.sa", { waitUntil: "domcontentloaded", timeout: 60000 });
+      } catch (err: any) {
+        console.error("[open-qima-browser]", err.message);
+      }
+    })();
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// QIMA BOT — يفتح الطلبات المسندة تلقائياً
+// ─────────────────────────────────────────────────────────────────────────────
+
+const QIMA_REQUESTS_URL = "https://qima.taqeem.gov.sa/qaym/request/13/tab";
+
+type QimaStatus = "idle" | "running" | "ready" | "failed";
+type QimaState = {
+  status: QimaStatus;
+  error?: string;
+  logs: string[];
+  assignedRequests: string[];
+  openedCount: number;
+};
+
+let _qimaState: QimaState = { status: "idle", logs: [], assignedRequests: [], openedCount: 0 };
+let _qimaPage: any = null;
+let _qimaCleanup: (() => Promise<void>) | null = null;
+
+function _qimaLog(msg: string) {
+  _qimaState.logs.push(`[${new Date().toISOString()}] ${msg}`);
+  console.log(`[QimaBot] ${msg}`);
+}
+
+function getQimaStatus(): QimaState {
+  return { ..._qimaState, logs: [..._qimaState.logs] };
+}
+
+async function stopQimaSession(): Promise<void> {
+  _qimaState.status = "idle";
+  if (_qimaPage) { try { await _qimaPage.close(); } catch {} _qimaPage = null; }
+  if (_qimaCleanup) { try { await _qimaCleanup(); } catch {} _qimaCleanup = null; }
+  _qimaLog("🛑 تم إغلاق جلسة QIMA");
+}
+
+async function startQimaSession(): Promise<void> {
+  if (_qimaState.status === "running") return;
+  if (_qimaCleanup) { try { await _qimaCleanup(); } catch {} _qimaCleanup = null; }
+
+  _qimaState = { status: "running", logs: [], assignedRequests: [], openedCount: 0 };
+  _qimaLog("بدء جلسة QIMA...");
+
+  try {
+    const session = await createIsolatedContextForRole("qima");
+    if (!session) {
+      _qimaState.status = "failed";
+      _qimaState.error = "لا توجد جلسة قيمة — سجّل الدخول أولاً من صفحة جلسة تقييم";
+      _qimaLog("❌ " + _qimaState.error);
+      return;
+    }
+
+    _qimaCleanup = session.cleanup;
+    const context = session.context;
+
+    _qimaLog("📂 فتح صفحة الطلبات...");
+    _qimaPage = await context.newPage();
+
+    try {
+      await _qimaPage.goto(QIMA_REQUESTS_URL, { waitUntil: "domcontentloaded", timeout: 60000 });
+    } catch (navErr: any) {
+      _qimaState.status = "failed";
+      _qimaState.error = `لا يمكن الوصول للموقع — تأكد أن الأتمتة تعمل على جهازك المحلي. (${navErr.message})`;
+      _qimaLog("❌ " + _qimaState.error);
+      if (_qimaCleanup) { try { await _qimaCleanup(); } catch {} _qimaCleanup = null; }
+      _qimaPage = null;
+      return;
+    }
+
+    _qimaLog(`📄 الصفحة: ${_qimaPage.url()}`);
+
+    // انتظر ظهور الجدول
+    _qimaLog("⏳ انتظار تحميل الجدول...");
+    try {
+      await _qimaPage.waitForSelector("table tbody tr, tbody tr", { timeout: 20000 });
+      _qimaLog("✅ تم تحميل الجدول");
+    } catch {
+      _qimaLog("⚠️ لم يظهر الجدول خلال 20 ثانية — المحاولة على أي حال");
+    }
+
+    // انتظر ثانيتين إضافيتين للـ Angular rendering
+    await _qimaPage.waitForTimeout(2000);
+
+    // استخرج روابط الطلبات ذات حالة "مسند تلقائيًا"
+    _qimaLog("🔍 البحث عن طلبات بحالة 'مسند تلقائيًا'...");
+    const assignedLinks: string[] = await _qimaPage.evaluate(() => {
+      const results: string[] = [];
+      const rows = Array.from(document.querySelectorAll("table tbody tr, tbody tr"));
+      for (const row of rows) {
+        const cells = Array.from(row.querySelectorAll("td"));
+        if (cells.length < 2) continue;
+        // "مسند تلقائيًا" — ابحث في نص الصف كاملاً
+        const rowText = (row.textContent || "")
+          .replace(/[أإآا]/g, "ا")
+          .replace(/[ةه]/g, "ه")
+          .replace(/\s+/g, " ");
+        if (!rowText.includes("مسند") || !rowText.includes("تلقاي")) continue;
+        // ابحث عن أي رابط في الصف يحتوي على رقم طلب
+        const links = Array.from(row.querySelectorAll("a[href]")) as HTMLAnchorElement[];
+        for (const link of links) {
+          if (link.href && !results.includes(link.href)) {
+            results.push(link.href);
+          }
+        }
+        // fallback: اقرأ نص الرقم وابنِ الرابط
+        if (links.length === 0) {
+          const numCell = cells[0];
+          const num = (numCell?.textContent || "").trim();
+          if (/^\d{5,10}$/.test(num)) {
+            const url = `https://qima.taqeem.gov.sa/qaym/request/${num}/tab`;
+            if (!results.includes(url)) results.push(url);
+          }
+        }
+      }
+      return results;
+    }).catch(() => [] as string[]);
+
+    _qimaState.assignedRequests = assignedLinks;
+    _qimaLog(`📋 وُجد ${assignedLinks.length} طلب بحالة 'مسند تلقائيًا'`);
+
+    if (assignedLinks.length === 0) {
+      _qimaLog("⚠️ لم يُعثر على طلبات مسندة — قد تكون الصفحة فارغة أو الجلسة منتهية");
+      _qimaState.status = "ready";
+      return;
+    }
+
+    // افتح كل طلب في تاب جديد
+    for (let i = 0; i < assignedLinks.length; i++) {
+      const url = assignedLinks[i];
+      _qimaLog(`🔗 فتح طلب ${i + 1}/${assignedLinks.length}: ${url}`);
+      try {
+        const tabPage = await context.newPage();
+        await tabPage.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+        _qimaState.openedCount++;
+        _qimaLog(`✅ تم فتح الطلب ${i + 1}`);
+      } catch (e: any) {
+        _qimaLog(`⚠️ فشل فتح الطلب ${i + 1}: ${e.message?.slice(0, 80)}`);
+      }
+    }
+
+    _qimaState.status = "ready";
+    _qimaLog(`🎉 اكتمل — تم فتح ${_qimaState.openedCount} من ${assignedLinks.length} طلب`);
+
+  } catch (err: any) {
+    _qimaState.status = "failed";
+    _qimaState.error = err.message;
+    _qimaLog("❌ خطأ: " + err.message);
+    if (_qimaCleanup) { try { await _qimaCleanup(); } catch {} _qimaCleanup = null; }
+    _qimaPage = null;
+  }
+}
+
+// GET /api/automation/qima/status
+router.get("/automation/qima/status", (_req, res) => {
+  res.json(getQimaStatus());
+});
+
+// POST /api/automation/qima/start
+router.post("/automation/qima/start", async (_req, res) => {
+  try {
+    startQimaSession().catch(err =>
+      console.error("[qima-start] unexpected error:", err)
+    );
+    res.json({ message: "جارٍ فتح المتصفح والبحث عن الطلبات المسندة تلقائياً..." });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/automation/qima/stop
+router.post("/automation/qima/stop", async (_req, res) => {
+  await stopQimaSession();
+  res.json({ message: "تم إغلاق جلسة QIMA." });
 });
 
 // GET /api/automation/queue — عرض الطلبات المعلقة في الطابور
