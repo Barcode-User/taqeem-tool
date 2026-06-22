@@ -2,6 +2,8 @@ import { Router } from "express";
 import multer from "multer";
 import * as fs from "fs";
 import * as path from "path";
+import * as http from "http";
+import * as https from "https";
 import {
   insertReport,
   getReportById,
@@ -1695,6 +1697,260 @@ async function stopQimaSession(): Promise<void> {
   _qimaLog("🛑 تم إغلاق جلسة QIMA");
 }
 
+// ── قراءة DocumenQaimh من config.json ────────────────────────────────────────
+function _loadDocumenQaimhConfig(): string {
+  try {
+    const DATA_DIR = process.env.SQLITE_DATA_DIR ?? path.join(process.cwd(), "data");
+    const cfgPath = path.join(DATA_DIR, "config.json");
+    if (!fs.existsSync(cfgPath)) return "";
+    const text = fs.readFileSync(cfgPath, "utf8").replace(/^\uFEFF/, "").trim();
+    const raw = JSON.parse(text);
+    return (raw.DocumenQaimh ?? "").trim();
+  } catch { return ""; }
+}
+
+// ── استخراج رقم الطلب من URL ──────────────────────────────────────────────────
+function _extractRequestId(url: string): string {
+  const m = url.match(/\/request\/(\d+)/);
+  return m ? m[1] : "";
+}
+
+// ── استخراج قيمة حقل من نص الصفحة ────────────────────────────────────────────
+function _extractFieldFromText(text: string, label: string): string {
+  const lines = text.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    const colonLabel = label + ":";
+    if (line.startsWith(colonLabel)) {
+      const val = line.slice(colonLabel.length).trim();
+      if (val && val.length > 0) return val;
+      return (lines[i + 1] || "").trim();
+    }
+    if (line === label) {
+      return (lines[i + 1] || "").trim();
+    }
+  }
+  return "";
+}
+
+// ── استخراج بيانات الطلب من صفحة قيمة ────────────────────────────────────────
+async function _extractQimaRequestData(page: any, requestId: string): Promise<Record<string, string>> {
+  const rawText: string = await page.evaluate(
+    () => (document.body as HTMLElement).innerText || ""
+  ).catch(() => "");
+
+  const f = (label: string) => _extractFieldFromText(rawText, label);
+  // تنظيف المساحة (إزالة "متر مربع")
+  const areaRaw = f("المساحة");
+  const area = areaRaw.replace(/\s*متر.*$/, "").trim();
+
+  return {
+    MessageID: requestId,
+    ClientName: f("اسم العميل"),
+    BeneficiaryPhone: f("رقم جوال العميل"),
+    IDNumber: requestId,
+    ReferenceNumber: requestId,
+    City: f("المدينة"),
+    District: f("الحي"),
+    Region: f("المنطقة"),
+    Purpose: f("الغرض من طلب التقييم"),
+    ReportType: f("الغرض من طلب التقييم"),
+    EmailDate: "",
+    FullSubject: "",
+    SenderEmail: "",
+    ProjectCode: "PRJ25050940",
+    PropertyCode: "",
+    PrimeryCode: requestId,
+    MainMessageID: "",
+    ForwarderEmail: "",
+    BankCode: "2486",
+    Age: f("عمر الأصل"),
+    PropArea: area,
+    PlanNumber: f("رقم المخطط"),
+    ItemNumber: f("رقم القطعة"),
+    Street: f("الشارع"),
+    SakNo: f("رقم صك الملكية"),
+    ReceiveDate: f("تاريخ التسليم"),
+    LicenceNo: f("رقم رخصة البناء"),
+    Estateusedfor: f("استخدام/قطاع الأصل محل التقييم"),
+    OwnershipName: f("اسم مالك العقار"),
+    OwnershipPhone: f("رقم جوال مالك العقار"),
+    Source: "Qimah",
+    Chanel: "Web",
+  };
+}
+
+// ── تحميل ملفي رخصة البناء ومستندات العقار ────────────────────────────────────
+async function _downloadQimaFiles(page: any): Promise<{
+  licenseFile: Buffer | null; licenseName: string;
+  docFile: Buffer | null; docName: string;
+}> {
+  const result = {
+    licenseFile: null as Buffer | null, licenseName: "",
+    docFile: null as Buffer | null, docName: "",
+  };
+
+  // اجمع روابط التنزيل مع السياق النصي المحيط بها
+  const links: { href: string; contextLabel: string }[] = await page.evaluate(() => {
+    const out: { href: string; contextLabel: string }[] = [];
+    const anchors = Array.from(document.querySelectorAll("a"));
+    for (const a of anchors) {
+      const txt = (a.textContent || "").trim();
+      if (txt !== "تنزيل" && txt !== "تحميل" && !txt.includes("تنزيل")) continue;
+      if (!a.href) continue;
+      // اقرأ النص القريب من الرابط لتحديد نوعه
+      const parentText = (a.closest("div, tr, td, span, p, li")?.textContent || "").trim().slice(0, 80);
+      out.push({ href: a.href, contextLabel: parentText });
+    }
+    return out;
+  }).catch(() => [] as { href: string; contextLabel: string }[]);
+
+  _qimaLog(`🔗 وُجد ${links.length} رابط تنزيل`);
+  if (links.length === 0) return result;
+
+  // حمّل كل رابط وصنّفه
+  for (let i = 0; i < Math.min(links.length, 4); i++) {
+    const { href, contextLabel } = links[i];
+    try {
+      _qimaLog(`📥 جارٍ تحميل: ${contextLabel.slice(0, 40)}...`);
+      const [download] = await Promise.all([
+        page.waitForEvent("download", { timeout: 20000 }),
+        page.evaluate((u: string) => {
+          const a = document.createElement("a"); a.href = u; a.click();
+        }, href),
+      ]);
+      const dlPath = await download.path();
+      if (!dlPath) continue;
+      const buf = fs.readFileSync(dlPath);
+      const name = download.suggestedFilename() || `file${i + 1}.pdf`;
+      _qimaLog(`📄 تم تحميل: ${name} (${Math.round(buf.length / 1024)} KB)`);
+
+      // صنّف: رخصة بناء أم مستند عقار؟
+      const ctxNorm = contextLabel.replace(/[أإآا]/g, "ا").replace(/[ةه]/g, "ه");
+      const isLicense = ctxNorm.includes("رخص") || ctxNorm.includes("بناء");
+      if (isLicense && !result.licenseFile) {
+        result.licenseFile = buf; result.licenseName = name;
+      } else if (!result.docFile) {
+        result.docFile = buf; result.docName = name;
+      }
+    } catch (e: any) {
+      _qimaLog(`⚠️ فشل تحميل رابط ${i + 1}: ${e.message?.slice(0, 60)}`);
+    }
+  }
+  return result;
+}
+
+// ── إرسال البيانات والملفات للـ API الخارجي (multipart POST) ──────────────────
+async function _sendToDocumenQaimhApi(
+  apiBaseUrl: string,
+  data: Record<string, string>,
+  licenseFile: Buffer | null, licenseName: string,
+  docFile: Buffer | null, docName: string,
+): Promise<{ success: boolean; message: string }> {
+  const endpoint = apiBaseUrl.replace(/\/$/, "") + "/External/QaimhInformationApi";
+  _qimaLog(`📤 إرسال إلى: ${endpoint}`);
+
+  const boundary = "----QimaBoundary" + Date.now().toString(36);
+  const parts: Buffer[] = [];
+
+  const addFile = (fieldName: string, filename: string, content: Buffer) => {
+    if (!content || content.length === 0) return;
+    const mime = filename.toLowerCase().endsWith(".pdf") ? "application/pdf" : "application/octet-stream";
+    parts.push(Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="${fieldName}"; filename="${filename}"\r\nContent-Type: ${mime}\r\n\r\n`
+    ));
+    parts.push(content);
+    parts.push(Buffer.from("\r\n"));
+  };
+
+  const addField = (fieldName: string, value: string) => {
+    parts.push(Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="${fieldName}"\r\n\r\n${value}\r\n`
+    ));
+  };
+
+  if (licenseFile) addFile("certificatelisinc", licenseName || "license.pdf", licenseFile);
+  if (docFile) addFile("DocumentAqr", docName || "document.pdf", docFile);
+  addField("Data", JSON.stringify(data));
+  parts.push(Buffer.from(`--${boundary}--\r\n`));
+
+  const body = Buffer.concat(parts);
+
+  return new Promise((resolve) => {
+    try {
+      const urlObj = new URL(endpoint);
+      const lib = urlObj.protocol === "https:" ? https : http;
+      const options = {
+        hostname: urlObj.hostname,
+        port: urlObj.port ? Number(urlObj.port) : (urlObj.protocol === "https:" ? 443 : 80),
+        path: urlObj.pathname + urlObj.search,
+        method: "POST",
+        headers: {
+          "Content-Type": `multipart/form-data; boundary=${boundary}`,
+          "Content-Length": body.length,
+        },
+      };
+      const req = lib.request(options, (res: any) => {
+        let d = "";
+        res.on("data", (c: any) => d += c);
+        res.on("end", () => {
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            resolve({ success: true, message: `HTTP ${res.statusCode}: ${d.slice(0, 120)}` });
+          } else {
+            resolve({ success: false, message: `HTTP ${res.statusCode}: ${d.slice(0, 200)}` });
+          }
+        });
+      });
+      req.on("error", (e: any) => resolve({ success: false, message: e.message }));
+      req.setTimeout(30000, () => { req.destroy(); resolve({ success: false, message: "timeout بعد 30 ثانية" }); });
+      req.write(body);
+      req.end();
+    } catch (e: any) {
+      resolve({ success: false, message: e.message });
+    }
+  });
+}
+
+// ── معالجة طلب واحد: استخراج + تحميل + إرسال ─────────────────────────────────
+async function _processQimaRequest(tabPage: any, requestUrl: string): Promise<void> {
+  const requestId = _extractRequestId(requestUrl);
+  _qimaLog(`⚙️ معالجة طلب #${requestId}...`);
+
+  // انتظر تحميل المحتوى
+  try {
+    await tabPage.waitForLoadState("networkidle", { timeout: 15000 });
+  } catch {
+    await tabPage.waitForTimeout(3000);
+  }
+
+  // استخرج البيانات
+  const data = await _extractQimaRequestData(tabPage, requestId);
+  _qimaLog(`📊 العميل: ${data.ClientName || "?"} | المدينة: ${data.City || "?"} | المنطقة: ${data.Region || "?"}`);
+  _qimaLog(`🏠 المساحة: ${data.PropArea || "?"} | رقم المخطط: ${data.PlanNumber || "?"} | رقم القطعة: ${data.ItemNumber || "?"}`);
+
+  // حمّل الملفات
+  const { licenseFile, licenseName, docFile, docName } = await _downloadQimaFiles(tabPage);
+
+  // تحقق من وجود إعداد الـ API
+  const apiBaseUrl = _loadDocumenQaimhConfig();
+  if (!apiBaseUrl) {
+    _qimaLog("⚠️ DocumenQaimh غير مُعرَّف في config.json — تم الاستخراج فقط ولن يُرسَل");
+    return;
+  }
+
+  // أرسل للـ API
+  const apiResult = await _sendToDocumenQaimhApi(
+    apiBaseUrl, data,
+    licenseFile, licenseName,
+    docFile, docName,
+  );
+  if (apiResult.success) {
+    _qimaLog(`✅ تم الإرسال لـ API: ${apiResult.message}`);
+  } else {
+    _qimaLog(`❌ فشل الإرسال لـ API: ${apiResult.message}`);
+  }
+}
+
 async function startQimaSession(): Promise<void> {
   if (_qimaState.status === "running") return;
   if (_qimaCleanup) { try { await _qimaCleanup(); } catch {} _qimaCleanup = null; }
@@ -1785,7 +2041,7 @@ async function startQimaSession(): Promise<void> {
       return;
     }
 
-    // افتح كل طلب في تاب جديد
+    // افتح كل طلب في تاب جديد ومعالجته (استخراج + تحميل + إرسال)
     for (let i = 0; i < assignedLinks.length; i++) {
       const url = assignedLinks[i];
       _qimaLog(`🔗 فتح طلب ${i + 1}/${assignedLinks.length}: ${url}`);
@@ -1793,14 +2049,16 @@ async function startQimaSession(): Promise<void> {
         const tabPage = await context.newPage();
         await tabPage.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
         _qimaState.openedCount++;
-        _qimaLog(`✅ تم فتح الطلب ${i + 1}`);
+        _qimaLog(`✅ تم فتح الطلب ${i + 1} — جارٍ استخراج البيانات...`);
+        // استخراج البيانات + تحميل الملفات + إرسالها للـ API
+        await _processQimaRequest(tabPage, url);
       } catch (e: any) {
-        _qimaLog(`⚠️ فشل فتح الطلب ${i + 1}: ${e.message?.slice(0, 80)}`);
+        _qimaLog(`⚠️ فشل معالجة الطلب ${i + 1}: ${e.message?.slice(0, 80)}`);
       }
     }
 
     _qimaState.status = "ready";
-    _qimaLog(`🎉 اكتمل — تم فتح ${_qimaState.openedCount} من ${assignedLinks.length} طلب`);
+    _qimaLog(`🎉 اكتمل — تمت معالجة ${_qimaState.openedCount} من ${assignedLinks.length} طلب`);
 
   } catch (err: any) {
     _qimaState.status = "failed";
