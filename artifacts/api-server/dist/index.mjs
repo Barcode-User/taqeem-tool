@@ -20884,7 +20884,7 @@ var require_application = __commonJS({
     var finalhandler = require_finalhandler();
     var debug = require_src()("express:application");
     var View = require_view();
-    var http = __require("node:http");
+    var http2 = __require("node:http");
     var methods = require_utils3().methods;
     var compileETag = require_utils3().compileETag;
     var compileQueryParser = require_utils3().compileQueryParser;
@@ -21117,7 +21117,7 @@ var require_application = __commonJS({
       tryRender(view, renderOptions, done);
     };
     app2.listen = function listen() {
-      var server = http.createServer(this);
+      var server = http2.createServer(this);
       var args = slice.call(arguments);
       if (typeof args[args.length - 1] === "function") {
         var done = args[args.length - 1] = once(args[args.length - 1]);
@@ -21892,12 +21892,12 @@ var require_request = __commonJS({
     var accepts = require_accepts();
     var isIP = __require("node:net").isIP;
     var typeis = require_type_is();
-    var http = __require("node:http");
+    var http2 = __require("node:http");
     var fresh = require_fresh();
     var parseRange = require_range_parser();
     var parse = require_parseurl();
     var proxyaddr = require_proxy_addr();
-    var req = Object.create(http.IncomingMessage.prototype);
+    var req = Object.create(http2.IncomingMessage.prototype);
     module.exports = req;
     req.get = req.header = function header(name) {
       if (!name) {
@@ -22945,7 +22945,7 @@ var require_response = __commonJS({
     var deprecate = require_depd()("express");
     var encodeUrl = require_encodeurl();
     var escapeHtml = require_escape_html();
-    var http = __require("node:http");
+    var http2 = __require("node:http");
     var onFinished = require_on_finished();
     var mime = require_mime_types();
     var path10 = __require("node:path");
@@ -22961,7 +22961,7 @@ var require_response = __commonJS({
     var resolve = path10.resolve;
     var vary = require_vary();
     var { Buffer: Buffer2 } = __require("node:buffer");
-    var res = Object.create(http.ServerResponse.prototype);
+    var res = Object.create(http2.ServerResponse.prototype);
     module.exports = res;
     res.status = function status(code) {
       if (!Number.isInteger(code)) {
@@ -50628,8 +50628,8 @@ var require_form_data = __commonJS({
     var CombinedStream = require_combined_stream();
     var util = __require("util");
     var path10 = __require("path");
-    var http = __require("http");
-    var https = __require("https");
+    var http2 = __require("http");
+    var https2 = __require("https");
     var parseUrl = __require("url").parse;
     var fs9 = __require("fs");
     var Stream2 = __require("stream").Stream;
@@ -50898,9 +50898,9 @@ var require_form_data = __commonJS({
       }
       options.headers = this.getHeaders(params.headers);
       if (options.protocol === "https:") {
-        request = https.request(options);
+        request = https2.request(options);
       } else {
-        request = http.request(options);
+        request = http2.request(options);
       }
       this.getLength(function(err, length) {
         if (err && err !== "Unknown stream") {
@@ -112062,8 +112062,8 @@ var require_pdf = __commonJS({
               }
             }
             var fs9 = __require("fs");
-            var http = __require("http");
-            var https = __require("https");
+            var http2 = __require("http");
+            var https2 = __require("https");
             var url = __require("url");
             var PDFNodeStream = (function() {
               function PDFNodeStream2(options) {
@@ -112342,9 +112342,9 @@ var require_pdf = __commonJS({
                 };
                 _this5._request = null;
                 if (_this5._url.protocol === "http:") {
-                  _this5._request = http.request(createRequestOptions(_this5._url, stream.httpHeaders), handleResponse);
+                  _this5._request = http2.request(createRequestOptions(_this5._url, stream.httpHeaders), handleResponse);
                 } else {
-                  _this5._request = https.request(createRequestOptions(_this5._url, stream.httpHeaders), handleResponse);
+                  _this5._request = https2.request(createRequestOptions(_this5._url, stream.httpHeaders), handleResponse);
                 }
                 _this5._request.on("error", function(reason) {
                   _this5._errored = true;
@@ -112372,11 +112372,11 @@ var require_pdf = __commonJS({
                 _this6._httpHeaders["Range"] = "bytes=" + start + "-" + (end - 1);
                 _this6._request = null;
                 if (_this6._url.protocol === "http:") {
-                  _this6._request = http.request(createRequestOptions(_this6._url, _this6._httpHeaders), function(response) {
+                  _this6._request = http2.request(createRequestOptions(_this6._url, _this6._httpHeaders), function(response) {
                     _this6._setReadableStream(response);
                   });
                 } else {
-                  _this6._request = https.request(createRequestOptions(_this6._url, _this6._httpHeaders), function(response) {
+                  _this6._request = https2.request(createRequestOptions(_this6._url, _this6._httpHeaders), function(response) {
                     _this6._setReadableStream(response);
                   });
                 }
@@ -173898,8 +173898,8 @@ var require_pdf2 = __commonJS({
               }
             }
             var fs9 = __require("fs");
-            var http = __require("http");
-            var https = __require("https");
+            var http2 = __require("http");
+            var https2 = __require("https");
             var url = __require("url");
             var PDFNodeStream = (function() {
               function PDFNodeStream2(options) {
@@ -174178,9 +174178,9 @@ var require_pdf2 = __commonJS({
                 };
                 _this5._request = null;
                 if (_this5._url.protocol === "http:") {
-                  _this5._request = http.request(createRequestOptions(_this5._url, stream.httpHeaders), handleResponse);
+                  _this5._request = http2.request(createRequestOptions(_this5._url, stream.httpHeaders), handleResponse);
                 } else {
-                  _this5._request = https.request(createRequestOptions(_this5._url, stream.httpHeaders), handleResponse);
+                  _this5._request = https2.request(createRequestOptions(_this5._url, stream.httpHeaders), handleResponse);
                 }
                 _this5._request.on("error", function(reason) {
                   _this5._errored = true;
@@ -174208,11 +174208,11 @@ var require_pdf2 = __commonJS({
                 _this6._httpHeaders["Range"] = "bytes=" + start + "-" + (end - 1);
                 _this6._request = null;
                 if (_this6._url.protocol === "http:") {
-                  _this6._request = http.request(createRequestOptions(_this6._url, _this6._httpHeaders), function(response) {
+                  _this6._request = http2.request(createRequestOptions(_this6._url, _this6._httpHeaders), function(response) {
                     _this6._setReadableStream(response);
                   });
                 } else {
-                  _this6._request = https.request(createRequestOptions(_this6._url, _this6._httpHeaders), function(response) {
+                  _this6._request = https2.request(createRequestOptions(_this6._url, _this6._httpHeaders), function(response) {
                     _this6._setReadableStream(response);
                   });
                 }
@@ -288908,8 +288908,8 @@ var require_pdf4 = __commonJS({
               }
             }
             var fs9 = __require("fs");
-            var http = __require("http");
-            var https = __require("https");
+            var http2 = __require("http");
+            var https2 = __require("https");
             var url = __require("url");
             var fileUriRegex = /^file:\/\/\/[a-zA-Z]:\//;
             function parseUrl(sourceUrl) {
@@ -289209,9 +289209,9 @@ var require_pdf4 = __commonJS({
                 };
                 _this5._request = null;
                 if (_this5._url.protocol === "http:") {
-                  _this5._request = http.request(createRequestOptions(_this5._url, stream.httpHeaders), handleResponse);
+                  _this5._request = http2.request(createRequestOptions(_this5._url, stream.httpHeaders), handleResponse);
                 } else {
-                  _this5._request = https.request(createRequestOptions(_this5._url, stream.httpHeaders), handleResponse);
+                  _this5._request = https2.request(createRequestOptions(_this5._url, stream.httpHeaders), handleResponse);
                 }
                 _this5._request.on("error", function(reason) {
                   _this5._errored = true;
@@ -289239,11 +289239,11 @@ var require_pdf4 = __commonJS({
                 _this6._httpHeaders["Range"] = "bytes=" + start + "-" + (end - 1);
                 _this6._request = null;
                 if (_this6._url.protocol === "http:") {
-                  _this6._request = http.request(createRequestOptions(_this6._url, _this6._httpHeaders), function(response) {
+                  _this6._request = http2.request(createRequestOptions(_this6._url, _this6._httpHeaders), function(response) {
                     _this6._setReadableStream(response);
                   });
                 } else {
-                  _this6._request = https.request(createRequestOptions(_this6._url, _this6._httpHeaders), function(response) {
+                  _this6._request = https2.request(createRequestOptions(_this6._url, _this6._httpHeaders), function(response) {
                     _this6._setReadableStream(response);
                   });
                 }
@@ -290422,6 +290422,8 @@ init_taqeem_session_store();
 init_queue_processor();
 import * as fs4 from "fs";
 import * as path4 from "path";
+import * as http from "http";
+import * as https from "https";
 var CERTIFY_REPORTS_URL = "https://qima.taqeem.gov.sa/membership/reports/sector/1";
 async function _sortByPriority(numbers) {
   try {
@@ -290913,7 +290915,7 @@ async function _doExtractAndSend(page) {
     _certifyLog("\u{1F4E1} \u0625\u0631\u0633\u0627\u0644 \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A + PDF \u0644\u0640 QrInformationApi...");
     try {
       const FormDataLib = require_form_data();
-      const http = __require("http");
+      const http2 = __require("http");
       const fd = new FormDataLib();
       fd.append("reportCode", finalDcNumber || "");
       fd.append("taqeemReportNumber", reportNumber || "");
@@ -290957,7 +290959,7 @@ async function _doExtractAndSend(page) {
             // ضروري لـ ASP.NET IFormFile
           }
         };
-        const req = http.request(reqOpts, (res) => {
+        const req = http2.request(reqOpts, (res) => {
           let body = "";
           res.on("data", (chunk) => {
             body += chunk;
@@ -291810,6 +291812,234 @@ async function stopQimaSession() {
   }
   _qimaLog("\u{1F6D1} \u062A\u0645 \u0625\u063A\u0644\u0627\u0642 \u062C\u0644\u0633\u0629 QIMA");
 }
+function _loadDocumenQaimhConfig() {
+  try {
+    const DATA_DIR2 = process.env.SQLITE_DATA_DIR ?? path4.join(process.cwd(), "data");
+    const cfgPath = path4.join(DATA_DIR2, "config.json");
+    if (!fs4.existsSync(cfgPath)) return "";
+    const text = fs4.readFileSync(cfgPath, "utf8").replace(/^\uFEFF/, "").trim();
+    const raw = JSON.parse(text);
+    return (raw.DocumenQaimh ?? "").trim();
+  } catch {
+    return "";
+  }
+}
+function _extractRequestId(url) {
+  const m = url.match(/\/request\/(\d+)/);
+  return m ? m[1] : "";
+}
+function _extractFieldFromText(text, label) {
+  const lines = text.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    const colonLabel = label + ":";
+    if (line.startsWith(colonLabel)) {
+      const val = line.slice(colonLabel.length).trim();
+      if (val && val.length > 0) return val;
+      return (lines[i + 1] || "").trim();
+    }
+    if (line === label) {
+      return (lines[i + 1] || "").trim();
+    }
+  }
+  return "";
+}
+async function _extractQimaRequestData(page, requestId) {
+  const rawText = await page.evaluate(
+    () => document.body.innerText || ""
+  ).catch(() => "");
+  const f = (label) => _extractFieldFromText(rawText, label);
+  const areaRaw = f("\u0627\u0644\u0645\u0633\u0627\u062D\u0629");
+  const area = areaRaw.replace(/\s*متر.*$/, "").trim();
+  return {
+    MessageID: requestId,
+    ClientName: f("\u0627\u0633\u0645 \u0627\u0644\u0639\u0645\u064A\u0644"),
+    BeneficiaryPhone: f("\u0631\u0642\u0645 \u062C\u0648\u0627\u0644 \u0627\u0644\u0639\u0645\u064A\u0644"),
+    IDNumber: requestId,
+    ReferenceNumber: requestId,
+    City: f("\u0627\u0644\u0645\u062F\u064A\u0646\u0629"),
+    District: f("\u0627\u0644\u062D\u064A"),
+    Region: f("\u0627\u0644\u0645\u0646\u0637\u0642\u0629"),
+    Purpose: f("\u0627\u0644\u063A\u0631\u0636 \u0645\u0646 \u0637\u0644\u0628 \u0627\u0644\u062A\u0642\u064A\u064A\u0645"),
+    ReportType: f("\u0627\u0644\u063A\u0631\u0636 \u0645\u0646 \u0637\u0644\u0628 \u0627\u0644\u062A\u0642\u064A\u064A\u0645"),
+    EmailDate: "",
+    FullSubject: "",
+    SenderEmail: "",
+    ProjectCode: "PRJ25050940",
+    PropertyCode: "",
+    PrimeryCode: requestId,
+    MainMessageID: "",
+    ForwarderEmail: "",
+    BankCode: "2486",
+    Age: f("\u0639\u0645\u0631 \u0627\u0644\u0623\u0635\u0644"),
+    PropArea: area,
+    PlanNumber: f("\u0631\u0642\u0645 \u0627\u0644\u0645\u062E\u0637\u0637"),
+    ItemNumber: f("\u0631\u0642\u0645 \u0627\u0644\u0642\u0637\u0639\u0629"),
+    Street: f("\u0627\u0644\u0634\u0627\u0631\u0639"),
+    SakNo: f("\u0631\u0642\u0645 \u0635\u0643 \u0627\u0644\u0645\u0644\u0643\u064A\u0629"),
+    ReceiveDate: f("\u062A\u0627\u0631\u064A\u062E \u0627\u0644\u062A\u0633\u0644\u064A\u0645"),
+    LicenceNo: f("\u0631\u0642\u0645 \u0631\u062E\u0635\u0629 \u0627\u0644\u0628\u0646\u0627\u0621"),
+    Estateusedfor: f("\u0627\u0633\u062A\u062E\u062F\u0627\u0645/\u0642\u0637\u0627\u0639 \u0627\u0644\u0623\u0635\u0644 \u0645\u062D\u0644 \u0627\u0644\u062A\u0642\u064A\u064A\u0645"),
+    OwnershipName: f("\u0627\u0633\u0645 \u0645\u0627\u0644\u0643 \u0627\u0644\u0639\u0642\u0627\u0631"),
+    OwnershipPhone: f("\u0631\u0642\u0645 \u062C\u0648\u0627\u0644 \u0645\u0627\u0644\u0643 \u0627\u0644\u0639\u0642\u0627\u0631"),
+    Source: "Qimah",
+    Chanel: "Web"
+  };
+}
+async function _downloadQimaFiles(page) {
+  const result = {
+    licenseFile: null,
+    licenseName: "",
+    docFile: null,
+    docName: ""
+  };
+  const links = await page.evaluate(() => {
+    const out = [];
+    const anchors = Array.from(document.querySelectorAll("a"));
+    for (const a of anchors) {
+      const txt = (a.textContent || "").trim();
+      if (txt !== "\u062A\u0646\u0632\u064A\u0644" && txt !== "\u062A\u062D\u0645\u064A\u0644" && !txt.includes("\u062A\u0646\u0632\u064A\u0644")) continue;
+      if (!a.href) continue;
+      const parentText = (a.closest("div, tr, td, span, p, li")?.textContent || "").trim().slice(0, 80);
+      out.push({ href: a.href, contextLabel: parentText });
+    }
+    return out;
+  }).catch(() => []);
+  _qimaLog(`\u{1F517} \u0648\u064F\u062C\u062F ${links.length} \u0631\u0627\u0628\u0637 \u062A\u0646\u0632\u064A\u0644`);
+  if (links.length === 0) return result;
+  for (let i = 0; i < Math.min(links.length, 4); i++) {
+    const { href, contextLabel } = links[i];
+    try {
+      _qimaLog(`\u{1F4E5} \u062C\u0627\u0631\u064D \u062A\u062D\u0645\u064A\u0644: ${contextLabel.slice(0, 40)}...`);
+      const [download] = await Promise.all([
+        page.waitForEvent("download", { timeout: 2e4 }),
+        page.evaluate((u) => {
+          const a = document.createElement("a");
+          a.href = u;
+          a.click();
+        }, href)
+      ]);
+      const dlPath = await download.path();
+      if (!dlPath) continue;
+      const buf = fs4.readFileSync(dlPath);
+      const name = download.suggestedFilename() || `file${i + 1}.pdf`;
+      _qimaLog(`\u{1F4C4} \u062A\u0645 \u062A\u062D\u0645\u064A\u0644: ${name} (${Math.round(buf.length / 1024)} KB)`);
+      const ctxNorm = contextLabel.replace(/[أإآا]/g, "\u0627").replace(/[ةه]/g, "\u0647");
+      const isLicense = ctxNorm.includes("\u0631\u062E\u0635") || ctxNorm.includes("\u0628\u0646\u0627\u0621");
+      if (isLicense && !result.licenseFile) {
+        result.licenseFile = buf;
+        result.licenseName = name;
+      } else if (!result.docFile) {
+        result.docFile = buf;
+        result.docName = name;
+      }
+    } catch (e) {
+      _qimaLog(`\u26A0\uFE0F \u0641\u0634\u0644 \u062A\u062D\u0645\u064A\u0644 \u0631\u0627\u0628\u0637 ${i + 1}: ${e.message?.slice(0, 60)}`);
+    }
+  }
+  return result;
+}
+async function _sendToDocumenQaimhApi(apiBaseUrl, data, licenseFile, licenseName, docFile, docName) {
+  const endpoint = apiBaseUrl.replace(/\/$/, "") + "/External/QaimhInformationApi";
+  _qimaLog(`\u{1F4E4} \u0625\u0631\u0633\u0627\u0644 \u0625\u0644\u0649: ${endpoint}`);
+  const boundary = "----QimaBoundary" + Date.now().toString(36);
+  const parts = [];
+  const addFile = (fieldName, filename, content) => {
+    if (!content || content.length === 0) return;
+    const mime = filename.toLowerCase().endsWith(".pdf") ? "application/pdf" : "application/octet-stream";
+    parts.push(Buffer.from(
+      `--${boundary}\r
+Content-Disposition: form-data; name="${fieldName}"; filename="${filename}"\r
+Content-Type: ${mime}\r
+\r
+`
+    ));
+    parts.push(content);
+    parts.push(Buffer.from("\r\n"));
+  };
+  const addField = (fieldName, value) => {
+    parts.push(Buffer.from(
+      `--${boundary}\r
+Content-Disposition: form-data; name="${fieldName}"\r
+\r
+${value}\r
+`
+    ));
+  };
+  if (licenseFile) addFile("certificatelisinc", licenseName || "license.pdf", licenseFile);
+  if (docFile) addFile("DocumentAqr", docName || "document.pdf", docFile);
+  addField("Data", JSON.stringify(data));
+  parts.push(Buffer.from(`--${boundary}--\r
+`));
+  const body = Buffer.concat(parts);
+  return new Promise((resolve) => {
+    try {
+      const urlObj = new URL(endpoint);
+      const lib = urlObj.protocol === "https:" ? https : http;
+      const options = {
+        hostname: urlObj.hostname,
+        port: urlObj.port ? Number(urlObj.port) : urlObj.protocol === "https:" ? 443 : 80,
+        path: urlObj.pathname + urlObj.search,
+        method: "POST",
+        headers: {
+          "Content-Type": `multipart/form-data; boundary=${boundary}`,
+          "Content-Length": body.length
+        }
+      };
+      const req = lib.request(options, (res) => {
+        let d = "";
+        res.on("data", (c) => d += c);
+        res.on("end", () => {
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            resolve({ success: true, message: `HTTP ${res.statusCode}: ${d.slice(0, 120)}` });
+          } else {
+            resolve({ success: false, message: `HTTP ${res.statusCode}: ${d.slice(0, 200)}` });
+          }
+        });
+      });
+      req.on("error", (e) => resolve({ success: false, message: e.message }));
+      req.setTimeout(3e4, () => {
+        req.destroy();
+        resolve({ success: false, message: "timeout \u0628\u0639\u062F 30 \u062B\u0627\u0646\u064A\u0629" });
+      });
+      req.write(body);
+      req.end();
+    } catch (e) {
+      resolve({ success: false, message: e.message });
+    }
+  });
+}
+async function _processQimaRequest(tabPage, requestUrl) {
+  const requestId = _extractRequestId(requestUrl);
+  _qimaLog(`\u2699\uFE0F \u0645\u0639\u0627\u0644\u062C\u0629 \u0637\u0644\u0628 #${requestId}...`);
+  try {
+    await tabPage.waitForLoadState("networkidle", { timeout: 15e3 });
+  } catch {
+    await tabPage.waitForTimeout(3e3);
+  }
+  const data = await _extractQimaRequestData(tabPage, requestId);
+  _qimaLog(`\u{1F4CA} \u0627\u0644\u0639\u0645\u064A\u0644: ${data.ClientName || "?"} | \u0627\u0644\u0645\u062F\u064A\u0646\u0629: ${data.City || "?"} | \u0627\u0644\u0645\u0646\u0637\u0642\u0629: ${data.Region || "?"}`);
+  _qimaLog(`\u{1F3E0} \u0627\u0644\u0645\u0633\u0627\u062D\u0629: ${data.PropArea || "?"} | \u0631\u0642\u0645 \u0627\u0644\u0645\u062E\u0637\u0637: ${data.PlanNumber || "?"} | \u0631\u0642\u0645 \u0627\u0644\u0642\u0637\u0639\u0629: ${data.ItemNumber || "?"}`);
+  const { licenseFile, licenseName, docFile, docName } = await _downloadQimaFiles(tabPage);
+  const apiBaseUrl = _loadDocumenQaimhConfig();
+  if (!apiBaseUrl) {
+    _qimaLog("\u26A0\uFE0F DocumenQaimh \u063A\u064A\u0631 \u0645\u064F\u0639\u0631\u064E\u0651\u0641 \u0641\u064A config.json \u2014 \u062A\u0645 \u0627\u0644\u0627\u0633\u062A\u062E\u0631\u0627\u062C \u0641\u0642\u0637 \u0648\u0644\u0646 \u064A\u064F\u0631\u0633\u064E\u0644");
+    return;
+  }
+  const apiResult = await _sendToDocumenQaimhApi(
+    apiBaseUrl,
+    data,
+    licenseFile,
+    licenseName,
+    docFile,
+    docName
+  );
+  if (apiResult.success) {
+    _qimaLog(`\u2705 \u062A\u0645 \u0627\u0644\u0625\u0631\u0633\u0627\u0644 \u0644\u0640 API: ${apiResult.message}`);
+  } else {
+    _qimaLog(`\u274C \u0641\u0634\u0644 \u0627\u0644\u0625\u0631\u0633\u0627\u0644 \u0644\u0640 API: ${apiResult.message}`);
+  }
+}
 async function startQimaSession() {
   if (_qimaState.status === "running") return;
   if (_qimaCleanup) {
@@ -291898,13 +292128,14 @@ async function startQimaSession() {
         const tabPage = await context.newPage();
         await tabPage.goto(url, { waitUntil: "domcontentloaded", timeout: 3e4 });
         _qimaState.openedCount++;
-        _qimaLog(`\u2705 \u062A\u0645 \u0641\u062A\u062D \u0627\u0644\u0637\u0644\u0628 ${i + 1}`);
+        _qimaLog(`\u2705 \u062A\u0645 \u0641\u062A\u062D \u0627\u0644\u0637\u0644\u0628 ${i + 1} \u2014 \u062C\u0627\u0631\u064D \u0627\u0633\u062A\u062E\u0631\u0627\u062C \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A...`);
+        await _processQimaRequest(tabPage, url);
       } catch (e) {
-        _qimaLog(`\u26A0\uFE0F \u0641\u0634\u0644 \u0641\u062A\u062D \u0627\u0644\u0637\u0644\u0628 ${i + 1}: ${e.message?.slice(0, 80)}`);
+        _qimaLog(`\u26A0\uFE0F \u0641\u0634\u0644 \u0645\u0639\u0627\u0644\u062C\u0629 \u0627\u0644\u0637\u0644\u0628 ${i + 1}: ${e.message?.slice(0, 80)}`);
       }
     }
     _qimaState.status = "ready";
-    _qimaLog(`\u{1F389} \u0627\u0643\u062A\u0645\u0644 \u2014 \u062A\u0645 \u0641\u062A\u062D ${_qimaState.openedCount} \u0645\u0646 ${assignedLinks.length} \u0637\u0644\u0628`);
+    _qimaLog(`\u{1F389} \u0627\u0643\u062A\u0645\u0644 \u2014 \u062A\u0645\u062A \u0645\u0639\u0627\u0644\u062C\u0629 ${_qimaState.openedCount} \u0645\u0646 ${assignedLinks.length} \u0637\u0644\u0628`);
   } catch (err) {
     _qimaState.status = "failed";
     _qimaState.error = err.message;
