@@ -2057,42 +2057,83 @@ async function startQimaSession(): Promise<void> {
       _qimaLog("⚠️ لم يظهر الجدول خلال 20 ثانية — المحاولة على أي حال");
     }
 
-    // انتظر ثانيتين إضافيتين للـ Angular rendering
-    await _qimaPage.waitForTimeout(2000);
+    // انتظر ثلاث ثوانٍ إضافية للـ Angular rendering
+    await _qimaPage.waitForTimeout(3000);
+
+    // debug: سجّل عدد الصفوف وأول نص لتشخيص المشكلة
+    const debugInfo = await _qimaPage.evaluate(() => {
+      const rows = Array.from(document.querySelectorAll("tr"));
+      return {
+        totalRows: rows.length,
+        sample: rows.slice(0, 3).map(r => (r.textContent || "").replace(/\s+/g, " ").trim().slice(0, 80)),
+      };
+    }).catch(() => ({ totalRows: 0, sample: [] as string[] }));
+    _qimaLog(`🔬 الصفوف الكلية: ${debugInfo.totalRows} | نموذج: ${debugInfo.sample[0]?.slice(0, 60) ?? "—"}`);
 
     // استخرج روابط الطلبات ذات حالة "مسند تلقائيًا"
     _qimaLog("🔍 البحث عن طلبات بحالة 'مسند تلقائيًا'...");
     const assignedLinks: string[] = await _qimaPage.evaluate(() => {
       const results: string[] = [];
-      const rows = Array.from(document.querySelectorAll("table tbody tr, tbody tr"));
+
+      function normalizeAr(t: string) {
+        return t
+          .replace(/[أإآا]/g, "ا")
+          .replace(/[ةه]/g, "ه")
+          .replace(/[ئى]/g, "ي")   // ← إصلاح: ئ وى تُعامَلان كـ ي
+          .replace(/[\u064B-\u065F]/g, "")  // إزالة التشكيل
+          .replace(/\s+/g, " ")
+          .trim();
+      }
+
+      const TARGET = normalizeAr("مسند تلقائياً");
+
+      const rows = Array.from(document.querySelectorAll("tr"));
       for (const row of rows) {
         const cells = Array.from(row.querySelectorAll("td"));
         if (cells.length < 2) continue;
-        // "مسند تلقائيًا" — ابحث في نص الصف كاملاً
-        const rowText = (row.textContent || "")
-          .replace(/[أإآا]/g, "ا")
-          .replace(/[ةه]/g, "ه")
-          .replace(/\s+/g, " ");
-        if (!rowText.includes("مسند") || !rowText.includes("تلقاي")) continue;
-        // ابحث عن أي رابط في الصف يحتوي على رقم طلب
+
+        const rowNorm = normalizeAr(row.textContent || "");
+
+        // تحقق: يحتوي على "مسند" و"تلقاي" بعد التطبيع
+        if (!rowNorm.includes("مسند") || !rowNorm.includes("تلقاي")) continue;
+
+        // أولاً: ابحث عن روابط مباشرة
         const links = Array.from(row.querySelectorAll("a[href]")) as HTMLAnchorElement[];
         for (const link of links) {
-          if (link.href && !results.includes(link.href)) {
-            results.push(link.href);
-          }
+          if (link.href && !results.includes(link.href)) results.push(link.href);
         }
-        // fallback: اقرأ نص الرقم وابنِ الرابط
-        if (links.length === 0) {
-          const numCell = cells[0];
-          const num = (numCell?.textContent || "").trim();
+
+        if (links.length > 0) continue;
+
+        // ثانياً: ابحث في كل الخلايا عن رقم طلب (5-10 أرقام)
+        for (const cell of cells) {
+          const num = (cell.textContent || "").replace(/\s+/g, "").trim();
           if (/^\d{5,10}$/.test(num)) {
             const url = `https://qima.taqeem.gov.sa/qaym/request/${num}/tab`;
             if (!results.includes(url)) results.push(url);
+            break;
           }
+        }
+
+        // ثالثاً: حاول استخراج الرقم من data-* أو id
+        const rowEl = row as HTMLElement;
+        const dataId = rowEl.getAttribute("data-id") || rowEl.getAttribute("data-request-id") || "";
+        if (dataId && /^\d+$/.test(dataId)) {
+          const url = `https://qima.taqeem.gov.sa/qaym/request/${dataId}/tab`;
+          if (!results.includes(url)) results.push(url);
         }
       }
       return results;
     }).catch(() => [] as string[]);
+
+    // إذا ما زلنا بصفر نتائج، سجّل نماذج للمساعدة في التشخيص
+    if (assignedLinks.length === 0) {
+      const textSample = await _qimaPage.evaluate(() => {
+        const rows = Array.from(document.querySelectorAll("tr")).slice(0, 10);
+        return rows.map(r => (r.textContent || "").replace(/\s+/g, " ").trim().slice(0, 100));
+      }).catch(() => [] as string[]);
+      textSample.forEach((t, i) => t && _qimaLog(`📝 صف ${i + 1}: ${t}`));
+    }
 
     _qimaState.assignedRequests = assignedLinks;
     _qimaLog(`📋 وُجد ${assignedLinks.length} طلب بحالة 'مسند تلقائيًا'`);
