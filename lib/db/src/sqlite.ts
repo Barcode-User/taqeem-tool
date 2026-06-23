@@ -386,7 +386,7 @@ function rowToReport(row: any): Report {
 
 export async function sqliteListReports(): Promise<Report[]> {
   const db = getDb();
-  const rows = db.prepare("SELECT * FROM Reports ORDER BY CreatedAt DESC").all() as any[];
+  const rows = db.prepare("SELECT * FROM Reports ORDER BY IsPriority ASC, CreatedAt DESC").all() as any[];
   return rows.map(rowToReport);
 }
 
@@ -398,7 +398,7 @@ export async function sqliteGetReportById(id: number): Promise<Report | null> {
 
 export async function sqliteGetReportsByAutomationStatus(status: string): Promise<Report[]> {
   const db = getDb();
-  const rows = db.prepare("SELECT * FROM Reports WHERE AutomationStatus = ?").all(status) as any[];
+  const rows = db.prepare("SELECT * FROM Reports WHERE AutomationStatus = ? ORDER BY IsPriority DESC, CreatedAt ASC").all(status) as any[];
   return rows.map(rowToReport);
 }
 
@@ -823,6 +823,26 @@ export async function sqliteDeleteReport(id: number): Promise<void> {
   db.prepare("DELETE FROM Reports WHERE Id = ?").run(id);
 }
 
+export async function sqliteTogglePriority(id: number): Promise<{ isPriority: boolean } | null> {
+  const db = getDb();
+
+  // تأكد من وجود العمود حتى لو لم تنجح المهاجرة التلقائية
+  try {
+    db.exec("ALTER TABLE Reports ADD COLUMN IsPriority INTEGER DEFAULT 0");
+  } catch {
+    // العمود موجود بالفعل — لا بأس
+  }
+
+  const row = db.prepare("SELECT IsPriority FROM Reports WHERE Id = ?").get(id) as any;
+  if (!row) return null;
+
+  const newVal = row.IsPriority === 1 ? 0 : 1;
+  db.prepare("UPDATE Reports SET IsPriority = ?, UpdatedAt = ? WHERE Id = ?")
+    .run(newVal, new Date().toISOString(), id);
+
+  return { isPriority: newVal === 1 };
+}
+
 export async function sqliteGetReportStats() {
   const db = getDb();
   const row = db.prepare(`
@@ -859,6 +879,100 @@ export async function sqliteHasPendingQueue(): Promise<number> {
   const db = getDb();
   const rows = db.prepare("SELECT Id FROM Reports WHERE AutomationStatus = 'queued'").all() as any[];
   return rows.length;
+}
+
+// ─── جدول طلبات قيمة المُرسَلة ───────────────────────────────────────────────
+function ensureQimaSubmissionsTable(db: DatabaseSync) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS QimaSubmissions (
+      Id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      RequestId     TEXT NOT NULL,
+      DataJson      TEXT NOT NULL DEFAULT '{}',
+      Status        TEXT NOT NULL DEFAULT 'pending',
+      ErrorMessage  TEXT,
+      ApiUrl        TEXT,
+      CreatedAt     TEXT NOT NULL DEFAULT (datetime('now')),
+      SentAt        TEXT
+    )
+  `);
+}
+
+export interface QimaSubmission {
+  id: number;
+  requestId: string;
+  dataJson: string;
+  status: "pending" | "success" | "failed";
+  errorMessage: string | null;
+  apiUrl: string | null;
+  createdAt: string;
+  sentAt: string | null;
+}
+
+export async function sqliteInsertQimaSubmission(data: {
+  requestId: string;
+  dataJson: string;
+  apiUrl?: string;
+}): Promise<QimaSubmission> {
+  const db = getDb();
+  ensureQimaSubmissionsTable(db);
+  const r = db.prepare(
+    "INSERT INTO QimaSubmissions (RequestId, DataJson, Status, ApiUrl) VALUES (?, ?, 'pending', ?)"
+  ).run(data.requestId, data.dataJson, data.apiUrl ?? null) as any;
+  return {
+    id: Number(r.lastInsertRowid),
+    requestId: data.requestId,
+    dataJson: data.dataJson,
+    status: "pending",
+    errorMessage: null,
+    apiUrl: data.apiUrl ?? null,
+    createdAt: new Date().toISOString(),
+    sentAt: null,
+  };
+}
+
+export async function sqliteUpdateQimaSubmissionStatus(
+  id: number,
+  status: "success" | "failed",
+  errorMessage?: string,
+): Promise<void> {
+  const db = getDb();
+  ensureQimaSubmissionsTable(db);
+  db.prepare(
+    "UPDATE QimaSubmissions SET Status=?, ErrorMessage=?, SentAt=datetime('now') WHERE Id=?"
+  ).run(status, errorMessage ?? null, id);
+}
+
+export async function sqliteListQimaSubmissions(): Promise<QimaSubmission[]> {
+  const db = getDb();
+  ensureQimaSubmissionsTable(db);
+  const rows = db.prepare("SELECT * FROM QimaSubmissions ORDER BY Id DESC").all() as any[];
+  return rows.map(r => ({
+    id: Number(r.Id),
+    requestId: r.RequestId ?? "",
+    dataJson: r.DataJson ?? "{}",
+    status: (r.Status ?? "pending") as QimaSubmission["status"],
+    errorMessage: r.ErrorMessage ?? null,
+    apiUrl: r.ApiUrl ?? null,
+    createdAt: r.CreatedAt ?? "",
+    sentAt: r.SentAt ?? null,
+  }));
+}
+
+export async function sqliteGetQimaSubmissionById(id: number): Promise<QimaSubmission | null> {
+  const db = getDb();
+  ensureQimaSubmissionsTable(db);
+  const r = db.prepare("SELECT * FROM QimaSubmissions WHERE Id=?").get(id) as any;
+  if (!r) return null;
+  return {
+    id: Number(r.Id),
+    requestId: r.RequestId ?? "",
+    dataJson: r.DataJson ?? "{}",
+    status: (r.Status ?? "pending") as QimaSubmission["status"],
+    errorMessage: r.ErrorMessage ?? null,
+    apiUrl: r.ApiUrl ?? null,
+    createdAt: r.CreatedAt ?? "",
+    sentAt: r.SentAt ?? null,
+  };
 }
 
 // ─── جدول التقارير المعمدة ────────────────────────────────────────────────────
