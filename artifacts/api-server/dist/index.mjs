@@ -291932,9 +291932,39 @@ router2.post("/automation/open-qima-browser", async (_req, res) => {
   }
 });
 var QIMA_REQUESTS_URL = "https://qima.taqeem.gov.sa/qaym/request/13/tab";
-var _qimaState = { status: "idle", logs: [], assignedRequests: [], openedCount: 0 };
+var QIMA_AUTO_INTERVAL_MS = 10 * 60 * 1e3;
+var _qimaState = {
+  status: "idle",
+  logs: [],
+  assignedRequests: [],
+  openedCount: 0,
+  autoRestart: false,
+  nextRunAt: null
+};
 var _qimaPage = null;
 var _qimaCleanup = null;
+var _qimaAutoTimer = null;
+function _scheduleAutoRestart() {
+  if (_qimaAutoTimer) {
+    clearTimeout(_qimaAutoTimer);
+    _qimaAutoTimer = null;
+  }
+  if (!_qimaState.autoRestart) {
+    _qimaState.nextRunAt = null;
+    return;
+  }
+  const runAt = new Date(Date.now() + QIMA_AUTO_INTERVAL_MS);
+  _qimaState.nextRunAt = runAt.toISOString();
+  _qimaLog(`\u23F1\uFE0F \u0627\u0644\u062A\u0634\u063A\u064A\u0644 \u0627\u0644\u062A\u0644\u0642\u0627\u0626\u064A \u0627\u0644\u0642\u0627\u062F\u0645: ${runAt.toLocaleTimeString("ar-SA")}`);
+  _qimaAutoTimer = setTimeout(() => {
+    _qimaAutoTimer = null;
+    _qimaState.nextRunAt = null;
+    if (_qimaState.status !== "running") {
+      _qimaLog("\u{1F504} \u0628\u062F\u0621 \u0627\u0644\u062A\u0634\u063A\u064A\u0644 \u0627\u0644\u062A\u0644\u0642\u0627\u0626\u064A \u0627\u0644\u0645\u062C\u062F\u0648\u064E\u0644...");
+      startQimaSession().catch((err) => console.error("[qima-auto]", err));
+    }
+  }, QIMA_AUTO_INTERVAL_MS);
+}
 function _qimaLog(msg) {
   _qimaState.logs.push(`[${(/* @__PURE__ */ new Date()).toISOString()}] ${msg}`);
   console.log(`[QimaBot] ${msg}`);
@@ -291943,6 +291973,12 @@ function getQimaStatus() {
   return { ..._qimaState, logs: [..._qimaState.logs] };
 }
 async function stopQimaSession() {
+  if (_qimaAutoTimer) {
+    clearTimeout(_qimaAutoTimer);
+    _qimaAutoTimer = null;
+  }
+  _qimaState.autoRestart = false;
+  _qimaState.nextRunAt = null;
   _qimaState.status = "idle";
   if (_qimaPage) {
     try {
@@ -291958,7 +291994,7 @@ async function stopQimaSession() {
     }
     _qimaCleanup = null;
   }
-  _qimaLog("\u{1F6D1} \u062A\u0645 \u0625\u063A\u0644\u0627\u0642 \u062C\u0644\u0633\u0629 QIMA");
+  _qimaLog("\u{1F6D1} \u062A\u0645 \u0625\u063A\u0644\u0627\u0642 \u062C\u0644\u0633\u0629 QIMA \u0648\u0625\u0644\u063A\u0627\u0621 \u0627\u0644\u062A\u0634\u063A\u064A\u0644 \u0627\u0644\u062A\u0644\u0642\u0627\u0626\u064A");
 }
 function _loadDocumenQaimhConfig() {
   try {
@@ -292310,6 +292346,7 @@ async function startQimaSession() {
     }
     _qimaState.status = "ready";
     _qimaLog(`\u{1F389} \u0627\u0643\u062A\u0645\u0644 \u2014 \u062A\u0645\u062A \u0645\u0639\u0627\u0644\u062C\u0629 ${_qimaState.openedCount} \u0645\u0646 ${assignedLinks.length} \u0637\u0644\u0628`);
+    _scheduleAutoRestart();
   } catch (err) {
     _qimaState.status = "failed";
     _qimaState.error = err.message;
@@ -292322,6 +292359,7 @@ async function startQimaSession() {
       _qimaCleanup = null;
     }
     _qimaPage = null;
+    _scheduleAutoRestart();
   }
 }
 router2.get("/automation/qima/status", (_req, res) => {
@@ -292340,6 +292378,22 @@ router2.post("/automation/qima/start", async (_req, res) => {
 router2.post("/automation/qima/stop", async (_req, res) => {
   await stopQimaSession();
   res.json({ message: "\u062A\u0645 \u0625\u063A\u0644\u0627\u0642 \u062C\u0644\u0633\u0629 QIMA." });
+});
+router2.post("/automation/qima/auto-restart", (req, res) => {
+  const { enabled } = req.body;
+  _qimaState.autoRestart = !!enabled;
+  if (!enabled) {
+    if (_qimaAutoTimer) {
+      clearTimeout(_qimaAutoTimer);
+      _qimaAutoTimer = null;
+    }
+    _qimaState.nextRunAt = null;
+    _qimaLog("\u23F9\uFE0F \u062A\u0645 \u0625\u064A\u0642\u0627\u0641 \u0627\u0644\u062A\u0634\u063A\u064A\u0644 \u0627\u0644\u062A\u0644\u0642\u0627\u0626\u064A");
+  } else {
+    _scheduleAutoRestart();
+    _qimaLog("\u25B6\uFE0F \u062A\u0645 \u062A\u0641\u0639\u064A\u0644 \u0627\u0644\u062A\u0634\u063A\u064A\u0644 \u0627\u0644\u062A\u0644\u0642\u0627\u0626\u064A \u0643\u0644 10 \u062F\u0642\u0627\u0626\u0642");
+  }
+  res.json({ autoRestart: _qimaState.autoRestart, nextRunAt: _qimaState.nextRunAt });
 });
 router2.get("/automation/queue", async (_req, res) => {
   try {
