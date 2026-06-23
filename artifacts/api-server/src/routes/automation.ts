@@ -1903,7 +1903,10 @@ async function _sendToDocumenQaimhApi(
 
   if (licenseFile) addFile("certificatelisinc", licenseName || "license.pdf", licenseFile);
   if (docFile) addFile("DocumentAqr", docName || "document.pdf", docFile);
-  addField("Data", JSON.stringify(data));
+  // أرسل كل حقل بشكل مستقل حتى يعمل [FromForm] binding في ASP.NET Core
+  for (const [key, value] of Object.entries(data)) {
+    addField(key, value ?? "");
+  }
   parts.push(Buffer.from(`--${boundary}--\r\n`));
 
   const body = Buffer.concat(parts);
