@@ -2018,6 +2018,7 @@ async function startQimaSession(): Promise<void> {
   if (_qimaCleanup) { try { await _qimaCleanup(); } catch {} _qimaCleanup = null; }
 
   _qimaState = { status: "running", logs: [], assignedRequests: [], openedCount: 0 };
+  _qimaLog("🚀 Bot v4 [viewport:1920px | selector:role=row]");
   _qimaLog("بدء جلسة QIMA...");
 
   try {
