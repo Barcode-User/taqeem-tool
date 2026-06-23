@@ -46932,7 +46932,8 @@ async function startLogin(username, password, role = "entry") {
         args: [
           "--disable-blink-features=AutomationControlled",
           "--no-first-run",
-          "--no-default-browser-check"
+          "--no-default-browser-check",
+          "--window-size=1920,1080"
         ]
       });
       console.log(`[TaqeemLogin:${role}] Using real Chrome channel`);
@@ -46955,7 +46956,7 @@ async function startLogin(username, password, role = "entry") {
   const context = await browser.newContext({
     locale: "ar-SA",
     timezoneId: "Asia/Riyadh",
-    viewport: { width: 1280, height: 900 },
+    viewport: { width: 1920, height: 1080 },
     ...isReplit ? {
       userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     } : {},
@@ -47192,7 +47193,7 @@ async function createIsolatedContextForRole(role) {
           headless: false,
           channel: "chrome",
           slowMo: 30,
-          args: ["--disable-blink-features=AutomationControlled", "--no-first-run", "--no-default-browser-check"]
+          args: ["--disable-blink-features=AutomationControlled", "--no-first-run", "--no-default-browser-check", "--window-size=1920,1080"]
         });
       } catch {
         newBrowser = null;
@@ -47202,7 +47203,7 @@ async function createIsolatedContextForRole(role) {
       newBrowser = await chromium.launch({
         headless: isReplit,
         slowMo: isReplit ? 0 : 80,
-        args: isReplit ? ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"] : ["--disable-blink-features=AutomationControlled", "--no-first-run"],
+        args: isReplit ? ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"] : ["--disable-blink-features=AutomationControlled", "--no-first-run", "--window-size=1920,1080"],
         ...chromiumExec ? { executablePath: chromiumExec } : {}
       });
     }
@@ -47212,7 +47213,7 @@ async function createIsolatedContextForRole(role) {
   const ctx = await automationBrowser.newContext({
     locale: "ar-SA",
     timezoneId: "Asia/Riyadh",
-    viewport: { width: 1280, height: 900 },
+    viewport: { width: 1920, height: 1080 },
     storageState: s.storageStateFile,
     ...isReplit ? { userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" } : {}
   });
@@ -47259,7 +47260,8 @@ async function createIsolatedAutomationContext() {
           args: [
             "--disable-blink-features=AutomationControlled",
             "--no-first-run",
-            "--no-default-browser-check"
+            "--no-default-browser-check",
+            "--window-size=1920,1080"
           ]
         });
       } catch {
@@ -47270,7 +47272,7 @@ async function createIsolatedAutomationContext() {
       newBrowser = await chromium.launch({
         headless: isReplit,
         slowMo: isReplit ? 0 : 80,
-        args: isReplit ? ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"] : ["--disable-blink-features=AutomationControlled", "--no-first-run"],
+        args: isReplit ? ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"] : ["--disable-blink-features=AutomationControlled", "--no-first-run", "--window-size=1920,1080"],
         ...chromiumExec ? { executablePath: chromiumExec } : {}
       });
     }
@@ -47280,7 +47282,7 @@ async function createIsolatedAutomationContext() {
   const isolatedContext = await automationBrowser.newContext({
     locale: "ar-SA",
     timezoneId: "Asia/Riyadh",
-    viewport: { width: 1280, height: 900 },
+    viewport: { width: 1920, height: 1080 },
     storageState: s.storageStateFile,
     ...isReplit ? {
       userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -47332,7 +47334,8 @@ async function getAuthenticatedContext2() {
           args: [
             "--disable-blink-features=AutomationControlled",
             "--no-first-run",
-            "--no-default-browser-check"
+            "--no-default-browser-check",
+            "--window-size=1920,1080"
           ]
         });
       } catch {
@@ -47343,7 +47346,7 @@ async function getAuthenticatedContext2() {
       restoredBrowser = await chromium.launch({
         headless: isReplit,
         slowMo: isReplit ? 0 : 100,
-        args: isReplit ? ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"] : ["--disable-blink-features=AutomationControlled", "--no-first-run"],
+        args: isReplit ? ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"] : ["--disable-blink-features=AutomationControlled", "--no-first-run", "--window-size=1920,1080"],
         ...chromiumExec ? { executablePath: chromiumExec } : {}
       });
     }
@@ -47351,7 +47354,7 @@ async function getAuthenticatedContext2() {
     const context = await browser.newContext({
       locale: "ar-SA",
       timezoneId: "Asia/Riyadh",
-      viewport: { width: 1280, height: 900 },
+      viewport: { width: 1920, height: 1080 },
       storageState: s.storageStateFile,
       ...isReplit ? {
         userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
