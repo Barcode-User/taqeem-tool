@@ -11,6 +11,10 @@ import {
   listReports,
   updateReport,
   insertCertifiedReport,
+  insertQimaSubmission,
+  updateQimaSubmissionStatus,
+  listQimaSubmissions,
+  getQimaSubmissionById,
 } from "@workspace/db";
 import { startAutomation } from "../automation/taqeem-bot";
 import { getSessionByReportId, submitOtp, isAnySessionRunning, canStartNewSession } from "../automation/session-manager";
@@ -1935,7 +1939,25 @@ async function _processQimaRequest(tabPage: any, requestUrl: string): Promise<vo
   const apiBaseUrl = _loadDocumenQaimhConfig();
   if (!apiBaseUrl) {
     _qimaLog("⚠️ DocumenQaimh غير مُعرَّف في config.json — تم الاستخراج فقط ولن يُرسَل");
+    // احفظ في قاعدة البيانات كـ pending (بدون إرسال)
+    try {
+      await insertQimaSubmission({ requestId, dataJson: JSON.stringify(data) });
+    } catch {}
     return;
+  }
+
+  // احفظ السجل في قاعدة البيانات قبل الإرسال
+  let submissionId: number | null = null;
+  try {
+    const submission = await insertQimaSubmission({
+      requestId,
+      dataJson: JSON.stringify(data),
+      apiUrl: apiBaseUrl,
+    });
+    submissionId = submission.id;
+    _qimaLog(`💾 تم حفظ السجل #${submissionId} في قاعدة البيانات`);
+  } catch (e: any) {
+    _qimaLog(`⚠️ فشل الحفظ في قاعدة البيانات: ${e.message?.slice(0, 60)}`);
   }
 
   // أرسل للـ API
@@ -1944,10 +1966,22 @@ async function _processQimaRequest(tabPage: any, requestUrl: string): Promise<vo
     licenseFile, licenseName,
     docFile, docName,
   );
+
+  // حدّث الحالة في قاعدة البيانات
+  if (submissionId) {
+    try {
+      await updateQimaSubmissionStatus(
+        submissionId,
+        apiResult.success ? "success" : "failed",
+        apiResult.success ? undefined : apiResult.message,
+      );
+    } catch {}
+  }
+
   if (apiResult.success) {
-    _qimaLog(`✅ تم الإرسال لـ API: ${apiResult.message}`);
+    _qimaLog(`✅ مرفوع بنجاح — طلب #${requestId}`);
   } else {
-    _qimaLog(`❌ فشل الإرسال لـ API: ${apiResult.message}`);
+    _qimaLog(`❌ فشل الرفع — طلب #${requestId}: ${apiResult.message}`);
   }
 }
 
@@ -2100,6 +2134,49 @@ router.get("/automation/queue", async (_req, res) => {
   } catch (err: any) {
     res.status(500).json({ error: "Internal server error" });
   }
+});
+
+// GET /api/automation/qima/submissions — قائمة جميع الإرسالات
+router.get("/automation/qima/submissions", async (_req, res) => {
+  try {
+    const submissions = await listQimaSubmissions();
+    res.json({ submissions });
+  } catch (err: any) {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /api/automation/qima/submissions/:id/retry — إعادة الإرسال
+router.post("/automation/qima/submissions/:id/retry", async (req, res) => {
+  const id = Number(req.params.id);
+  if (isNaN(id)) return res.status(400).json({ error: "معرّف غير صالح" });
+
+  const submission = await getQimaSubmissionById(id);
+  if (!submission) return res.status(404).json({ error: "السجل غير موجود" });
+
+  const apiBaseUrl = submission.apiUrl || _loadDocumenQaimhConfig();
+  if (!apiBaseUrl) return res.status(400).json({ error: "DocumenQaimh غير مُعرَّف في config.json" });
+
+  let data: any;
+  try { data = JSON.parse(submission.dataJson); } catch {
+    return res.status(400).json({ error: "بيانات السجل تالفة" });
+  }
+
+  // حدّث الحالة إلى pending فوراً
+  try { await updateQimaSubmissionStatus(id, "failed", "جارٍ إعادة الإرسال..."); } catch {}
+
+  // أرسل للـ API بدون ملفات (إعادة إرسال بيانات فقط)
+  const apiResult = await _sendToDocumenQaimhApi(
+    apiBaseUrl, data, null, "", null, "",
+  );
+
+  await updateQimaSubmissionStatus(
+    id,
+    apiResult.success ? "success" : "failed",
+    apiResult.success ? undefined : apiResult.message,
+  );
+
+  res.json({ success: apiResult.success, message: apiResult.message });
 });
 
 export default router;
