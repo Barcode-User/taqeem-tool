@@ -292263,6 +292263,7 @@ async function startQimaSession() {
     _qimaCleanup = null;
   }
   _qimaState = { status: "running", logs: [], assignedRequests: [], openedCount: 0 };
+  _qimaLog("\u{1F680} Bot v4 [viewport:1920px | selector:role=row]");
   _qimaLog("\u0628\u062F\u0621 \u062C\u0644\u0633\u0629 QIMA...");
   try {
     const session = await createIsolatedContextForRole("qima");
