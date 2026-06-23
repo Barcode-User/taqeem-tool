@@ -292155,7 +292155,9 @@ ${value}\r
   };
   if (licenseFile) addFile("certificatelisinc", licenseName || "license.pdf", licenseFile);
   if (docFile) addFile("DocumentAqr", docName || "document.pdf", docFile);
-  addField("Data", JSON.stringify(data));
+  for (const [key, value] of Object.entries(data)) {
+    addField(key, value ?? "");
+  }
   parts.push(Buffer.from(`--${boundary}--\r
 `));
   const body = Buffer.concat(parts);
