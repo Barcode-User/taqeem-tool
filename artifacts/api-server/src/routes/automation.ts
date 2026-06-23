@@ -1679,11 +1679,35 @@ type QimaState = {
   logs: string[];
   assignedRequests: string[];
   openedCount: number;
+  autoRestart: boolean;
+  nextRunAt: string | null;
 };
 
-let _qimaState: QimaState = { status: "idle", logs: [], assignedRequests: [], openedCount: 0 };
+const QIMA_AUTO_INTERVAL_MS = 10 * 60 * 1000; // 10 دقائق
+
+let _qimaState: QimaState = {
+  status: "idle", logs: [], assignedRequests: [], openedCount: 0,
+  autoRestart: false, nextRunAt: null,
+};
 let _qimaPage: any = null;
 let _qimaCleanup: (() => Promise<void>) | null = null;
+let _qimaAutoTimer: ReturnType<typeof setTimeout> | null = null;
+
+function _scheduleAutoRestart() {
+  if (_qimaAutoTimer) { clearTimeout(_qimaAutoTimer); _qimaAutoTimer = null; }
+  if (!_qimaState.autoRestart) { _qimaState.nextRunAt = null; return; }
+  const runAt = new Date(Date.now() + QIMA_AUTO_INTERVAL_MS);
+  _qimaState.nextRunAt = runAt.toISOString();
+  _qimaLog(`⏱️ التشغيل التلقائي القادم: ${runAt.toLocaleTimeString("ar-SA")}`);
+  _qimaAutoTimer = setTimeout(() => {
+    _qimaAutoTimer = null;
+    _qimaState.nextRunAt = null;
+    if (_qimaState.status !== "running") {
+      _qimaLog("🔄 بدء التشغيل التلقائي المجدوَل...");
+      startQimaSession().catch(err => console.error("[qima-auto]", err));
+    }
+  }, QIMA_AUTO_INTERVAL_MS);
+}
 
 function _qimaLog(msg: string) {
   _qimaState.logs.push(`[${new Date().toISOString()}] ${msg}`);
@@ -1695,10 +1719,14 @@ function getQimaStatus(): QimaState {
 }
 
 async function stopQimaSession(): Promise<void> {
+  // إلغاء التشغيل التلقائي
+  if (_qimaAutoTimer) { clearTimeout(_qimaAutoTimer); _qimaAutoTimer = null; }
+  _qimaState.autoRestart = false;
+  _qimaState.nextRunAt = null;
   _qimaState.status = "idle";
   if (_qimaPage) { try { await _qimaPage.close(); } catch {} _qimaPage = null; }
   if (_qimaCleanup) { try { await _qimaCleanup(); } catch {} _qimaCleanup = null; }
-  _qimaLog("🛑 تم إغلاق جلسة QIMA");
+  _qimaLog("🛑 تم إغلاق جلسة QIMA وإلغاء التشغيل التلقائي");
 }
 
 // ── قراءة DocumenQaimh من config.json ────────────────────────────────────────
@@ -2093,6 +2121,7 @@ async function startQimaSession(): Promise<void> {
 
     _qimaState.status = "ready";
     _qimaLog(`🎉 اكتمل — تمت معالجة ${_qimaState.openedCount} من ${assignedLinks.length} طلب`);
+    _scheduleAutoRestart();
 
   } catch (err: any) {
     _qimaState.status = "failed";
@@ -2100,6 +2129,7 @@ async function startQimaSession(): Promise<void> {
     _qimaLog("❌ خطأ: " + err.message);
     if (_qimaCleanup) { try { await _qimaCleanup(); } catch {} _qimaCleanup = null; }
     _qimaPage = null;
+    _scheduleAutoRestart();
   }
 }
 
@@ -2124,6 +2154,21 @@ router.post("/automation/qima/start", async (_req, res) => {
 router.post("/automation/qima/stop", async (_req, res) => {
   await stopQimaSession();
   res.json({ message: "تم إغلاق جلسة QIMA." });
+});
+
+// POST /api/automation/qima/auto-restart — تفعيل/إيقاف التشغيل التلقائي كل 10 دقائق
+router.post("/automation/qima/auto-restart", (req, res) => {
+  const { enabled } = req.body as { enabled: boolean };
+  _qimaState.autoRestart = !!enabled;
+  if (!enabled) {
+    if (_qimaAutoTimer) { clearTimeout(_qimaAutoTimer); _qimaAutoTimer = null; }
+    _qimaState.nextRunAt = null;
+    _qimaLog("⏹️ تم إيقاف التشغيل التلقائي");
+  } else {
+    _scheduleAutoRestart();
+    _qimaLog("▶️ تم تفعيل التشغيل التلقائي كل 10 دقائق");
+  }
+  res.json({ autoRestart: _qimaState.autoRestart, nextRunAt: _qimaState.nextRunAt });
 });
 
 // GET /api/automation/queue — عرض الطلبات المعلقة في الطابور
