@@ -292291,76 +292291,97 @@ async function startQimaSession() {
     }
     _qimaLog(`\u{1F4C4} \u0627\u0644\u0635\u0641\u062D\u0629: ${_qimaPage.url()}`);
     _qimaLog("\u23F3 \u0627\u0646\u062A\u0638\u0627\u0631 \u062A\u062D\u0645\u064A\u0644 \u0627\u0644\u062C\u062F\u0648\u0644...");
+    const ROW_SEL = "[role='row'], .mat-mdc-row, .mat-row, tbody tr";
     try {
-      await _qimaPage.waitForSelector("table tbody tr, tbody tr", { timeout: 2e4 });
-      _qimaLog("\u2705 \u062A\u0645 \u062A\u062D\u0645\u064A\u0644 \u0627\u0644\u062C\u062F\u0648\u0644");
+      await _qimaPage.waitForSelector(ROW_SEL, { timeout: 3e4 });
+      _qimaLog("\u2705 \u0627\u0644\u062C\u062F\u0648\u0644 \u0645\u062D\u0645\u0651\u0644");
     } catch {
-      _qimaLog("\u26A0\uFE0F \u0644\u0645 \u064A\u0638\u0647\u0631 \u0627\u0644\u062C\u062F\u0648\u0644 \u062E\u0644\u0627\u0644 20 \u062B\u0627\u0646\u064A\u0629 \u2014 \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0629 \u0639\u0644\u0649 \u0623\u064A \u062D\u0627\u0644");
+      _qimaLog("\u26A0\uFE0F \u0644\u0645 \u064A\u0638\u0647\u0631 \u0627\u0644\u062C\u062F\u0648\u0644 \u2014 \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0629 \u0639\u0644\u0649 \u0623\u064A \u062D\u0627\u0644");
     }
-    await _qimaPage.waitForTimeout(3e3);
-    const debugInfo = await _qimaPage.evaluate(() => {
-      const rows = Array.from(document.querySelectorAll("tr"));
-      return {
-        totalRows: rows.length,
-        sample: rows.slice(0, 3).map((r) => (r.textContent || "").replace(/\s+/g, " ").trim().slice(0, 80))
-      };
-    }).catch(() => ({ totalRows: 0, sample: [] }));
-    _qimaLog(`\u{1F52C} \u0627\u0644\u0635\u0641\u0648\u0641 \u0627\u0644\u0643\u0644\u064A\u0629: ${debugInfo.totalRows} | \u0646\u0645\u0648\u0630\u062C: ${debugInfo.sample[0]?.slice(0, 60) ?? "\u2014"}`);
-    _qimaLog("\u{1F50D} \u0627\u0644\u0628\u062D\u062B \u0639\u0646 \u0637\u0644\u0628\u0627\u062A \u0628\u062D\u0627\u0644\u0629 '\u0645\u0633\u0646\u062F \u062A\u0644\u0642\u0627\u0626\u064A\u064B\u0627'...");
-    const assignedLinks = await _qimaPage.evaluate(() => {
-      const results = [];
-      function normalizeAr2(t) {
-        return t.replace(/[أإآا]/g, "\u0627").replace(/[ةه]/g, "\u0647").replace(/[ئى]/g, "\u064A").replace(/[\u064B-\u065F]/g, "").replace(/\s+/g, " ").trim();
-      }
-      const TARGET = normalizeAr2("\u0645\u0633\u0646\u062F \u062A\u0644\u0642\u0627\u0626\u064A\u0627\u064B");
-      const rows = Array.from(document.querySelectorAll("tr"));
-      for (const row of rows) {
-        const cells = Array.from(row.querySelectorAll("td"));
-        if (cells.length < 2) continue;
-        const rowNorm = normalizeAr2(row.textContent || "");
-        if (!rowNorm.includes("\u0645\u0633\u0646\u062F") || !rowNorm.includes("\u062A\u0644\u0642\u0627\u064A")) continue;
-        const links = Array.from(row.querySelectorAll("a[href]"));
-        for (const link of links) {
-          if (link.href && !results.includes(link.href)) results.push(link.href);
+    await _qimaPage.waitForTimeout(2e3);
+    const allRowCount = await _qimaPage.locator(ROW_SEL).count().catch(() => 0);
+    _qimaLog(`\u{1F52C} \u0635\u0641\u0648\u0641 \u0627\u0644\u062C\u062F\u0648\u0644: ${allRowCount}`);
+    if (allRowCount > 0) {
+      const sample = await _qimaPage.locator(ROW_SEL).first().textContent().catch(() => "");
+      _qimaLog(`\u{1F4DD} \u0646\u0645\u0648\u0630\u062C \u0623\u0648\u0644 \u0635\u0641: ${(sample ?? "").replace(/\s+/g, " ").trim().slice(0, 80)}`);
+    }
+    _qimaLog("\u{1F50D} \u0627\u0644\u0628\u062D\u062B \u0639\u0646 \u0637\u0644\u0628\u0627\u062A '\u0645\u0633\u0646\u062F \u062A\u0644\u0642\u0627\u0626\u064A\u064B\u0627'...");
+    const msnadLocator = _qimaPage.locator(ROW_SEL).filter({ hasText: "\u0645\u0633\u0646\u062F" });
+    const msnadCount = await msnadLocator.count().catch(() => 0);
+    _qimaLog(`\u{1F4CB} \u0635\u0641\u0648\u0641 "\u0645\u0633\u0646\u062F": ${msnadCount}`);
+    const assignedLinks = [];
+    if (msnadCount > 0) {
+      for (let ri = 0; ri < msnadCount; ri++) {
+        const rowEl = msnadLocator.nth(ri);
+        const rowText = await rowEl.textContent().catch(() => "") ?? "";
+        if (!rowText.includes("\u062A\u0644\u0642\u0627\u0626") && !rowText.includes("\u062A\u0644\u0642\u0627\u064A")) {
+          _qimaLog(`\u23E9 \u0635\u0641 ${ri + 1} \u0644\u0627 \u064A\u062D\u062A\u0648\u064A \u062A\u0644\u0642\u0627\u0626\u064A\u0627\u064B \u2014 \u062A\u062E\u0637\u064A`);
+          continue;
         }
-        if (links.length > 0) continue;
+        _qimaLog(`\u2705 \u0635\u0641 ${ri + 1} \u0645\u0637\u0627\u0628\u0642: ${rowText.replace(/\s+/g, " ").trim().slice(0, 60)}`);
+        const linkHref = await rowEl.locator("a[href]").first().getAttribute("href").catch(() => null);
+        if (linkHref) {
+          const fullUrl = linkHref.startsWith("http") ? linkHref : `https://qima.taqeem.gov.sa${linkHref}`;
+          if (!assignedLinks.includes(fullUrl)) assignedLinks.push(fullUrl);
+          continue;
+        }
+        const cells = await rowEl.locator("td, [role='cell'], .mat-cell, .mat-mdc-cell").all();
+        let foundNum = false;
         for (const cell of cells) {
-          const num = (cell.textContent || "").replace(/\s+/g, "").trim();
-          if (/^\d{5,10}$/.test(num)) {
-            const url = `https://qima.taqeem.gov.sa/qaym/request/${num}/tab`;
-            if (!results.includes(url)) results.push(url);
+          const cellText = (await cell.textContent().catch(() => "") ?? "").replace(/\s+/g, "").trim();
+          if (/^\d{5,10}$/.test(cellText)) {
+            const url = `https://qima.taqeem.gov.sa/qaym/request/${cellText}/tab`;
+            if (!assignedLinks.includes(url)) assignedLinks.push(url);
+            _qimaLog(`\u{1F522} \u0631\u0642\u0645 \u0637\u0644\u0628 \u0645\u0646 \u0627\u0644\u062E\u0644\u064A\u0629: ${cellText}`);
+            foundNum = true;
             break;
           }
         }
-        const rowEl = row;
-        const dataId = rowEl.getAttribute("data-id") || rowEl.getAttribute("data-request-id") || "";
-        if (dataId && /^\d+$/.test(dataId)) {
-          const url = `https://qima.taqeem.gov.sa/qaym/request/${dataId}/tab`;
-          if (!results.includes(url)) results.push(url);
+        if (foundNum) continue;
+        try {
+          _qimaLog(`\u{1F5B1}\uFE0F \u0645\u062D\u0627\u0648\u0644\u0629 \u0627\u0644\u0646\u0642\u0631 \u0639\u0644\u0649 \u0627\u0644\u0635\u0641 ${ri + 1}...`);
+          const [newPage] = await Promise.all([
+            context.waitForEvent("page", { timeout: 5e3 }).catch(() => null),
+            rowEl.click({ timeout: 5e3 })
+          ]);
+          if (newPage) {
+            await newPage.waitForLoadState("domcontentloaded").catch(() => {
+            });
+            const newUrl = newPage.url();
+            if (!assignedLinks.includes(newUrl)) assignedLinks.push(newUrl);
+            _qimaLog(`\u{1F517} \u062A\u0627\u0628 \u062C\u062F\u064A\u062F: ${newUrl}`);
+          } else {
+            await _qimaPage.waitForTimeout(1500);
+            const newUrl = _qimaPage.url();
+            if (newUrl !== QIMA_REQUESTS_URL && !assignedLinks.includes(newUrl)) {
+              assignedLinks.push(newUrl);
+              _qimaLog(`\u{1F517} \u062A\u0646\u0642\u0651\u0644 \u0644\u0640: ${newUrl}`);
+              await _qimaPage.goto(QIMA_REQUESTS_URL, { waitUntil: "domcontentloaded", timeout: 3e4 });
+              await _qimaPage.waitForTimeout(2e3);
+            }
+          }
+        } catch (clickErr) {
+          _qimaLog(`\u26A0\uFE0F \u0641\u0634\u0644 \u0627\u0644\u0646\u0642\u0631: ${clickErr.message?.slice(0, 60)}`);
         }
       }
-      return results;
-    }).catch(() => []);
-    if (assignedLinks.length === 0) {
-      const textSample = await _qimaPage.evaluate(() => {
-        const rows = Array.from(document.querySelectorAll("tr")).slice(0, 10);
-        return rows.map((r) => (r.textContent || "").replace(/\s+/g, " ").trim().slice(0, 100));
-      }).catch(() => []);
-      textSample.forEach((t, i) => t && _qimaLog(`\u{1F4DD} \u0635\u0641 ${i + 1}: ${t}`));
     }
     _qimaState.assignedRequests = assignedLinks;
-    _qimaLog(`\u{1F4CB} \u0648\u064F\u062C\u062F ${assignedLinks.length} \u0637\u0644\u0628 \u0628\u062D\u0627\u0644\u0629 '\u0645\u0633\u0646\u062F \u062A\u0644\u0642\u0627\u0626\u064A\u064B\u0627'`);
+    _qimaLog(`\u{1F4CB} \u0648\u064F\u062C\u062F ${assignedLinks.length} \u0637\u0644\u0628 \u0645\u0633\u0646\u062F \u062A\u0644\u0642\u0627\u0626\u064A\u0627\u064B`);
     if (assignedLinks.length === 0) {
-      _qimaLog("\u26A0\uFE0F \u0644\u0645 \u064A\u064F\u0639\u062B\u0631 \u0639\u0644\u0649 \u0637\u0644\u0628\u0627\u062A \u0645\u0633\u0646\u062F\u0629 \u2014 \u0642\u062F \u062A\u0643\u0648\u0646 \u0627\u0644\u0635\u0641\u062D\u0629 \u0641\u0627\u0631\u063A\u0629 \u0623\u0648 \u0627\u0644\u062C\u0644\u0633\u0629 \u0645\u0646\u062A\u0647\u064A\u0629");
+      _qimaLog("\u26A0\uFE0F \u0644\u0645 \u064A\u064F\u0639\u062B\u0631 \u0639\u0644\u0649 \u0637\u0644\u0628\u0627\u062A \u2014 \u0627\u0644\u062C\u0644\u0633\u0629 \u0645\u0646\u062A\u0647\u064A\u0629 \u0623\u0648 \u0644\u0627 \u062A\u0648\u062C\u062F \u0637\u0644\u0628\u0627\u062A \u0645\u0633\u0646\u062F\u0629");
       _qimaState.status = "ready";
+      _scheduleAutoRestart();
       return;
     }
     for (let i = 0; i < assignedLinks.length; i++) {
       const url = assignedLinks[i];
-      _qimaLog(`\u{1F517} \u0641\u062A\u062D \u0637\u0644\u0628 ${i + 1}/${assignedLinks.length}: ${url}`);
+      _qimaLog(`\u{1F517} \u0645\u0639\u0627\u0644\u062C\u0629 \u0637\u0644\u0628 ${i + 1}/${assignedLinks.length}: ${url}`);
       try {
-        const tabPage = await context.newPage();
-        await tabPage.goto(url, { waitUntil: "domcontentloaded", timeout: 3e4 });
+        const existingPage = context.pages().find((p) => p.url() === url);
+        const tabPage = existingPage ?? await context.newPage();
+        if (!existingPage) {
+          await tabPage.goto(url, { waitUntil: "domcontentloaded", timeout: 3e4 });
+        }
         _qimaState.openedCount++;
         _qimaLog(`\u2705 \u062A\u0645 \u0641\u062A\u062D \u0627\u0644\u0637\u0644\u0628 ${i + 1} \u2014 \u062C\u0627\u0631\u064D \u0627\u0633\u062A\u062E\u0631\u0627\u062C \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A...`);
         await _processQimaRequest(tabPage, url);
