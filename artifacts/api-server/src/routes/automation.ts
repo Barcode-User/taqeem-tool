@@ -2048,112 +2048,122 @@ async function startQimaSession(): Promise<void> {
 
     _qimaLog(`📄 الصفحة: ${_qimaPage.url()}`);
 
-    // انتظر ظهور الجدول
+    // انتظر ظهور الجدول — يدعم Angular Material (role=row) وجداول HTML عادية
     _qimaLog("⏳ انتظار تحميل الجدول...");
+    const ROW_SEL = "[role='row'], .mat-mdc-row, .mat-row, tbody tr";
     try {
-      await _qimaPage.waitForSelector("table tbody tr, tbody tr", { timeout: 20000 });
-      _qimaLog("✅ تم تحميل الجدول");
+      await _qimaPage.waitForSelector(ROW_SEL, { timeout: 30000 });
+      _qimaLog("✅ الجدول محمّل");
     } catch {
-      _qimaLog("⚠️ لم يظهر الجدول خلال 20 ثانية — المحاولة على أي حال");
+      _qimaLog("⚠️ لم يظهر الجدول — المحاولة على أي حال");
+    }
+    await _qimaPage.waitForTimeout(2000);
+
+    // debug: عدد الصفوف ونموذج من النص
+    const allRowCount = await _qimaPage.locator(ROW_SEL).count().catch(() => 0);
+    _qimaLog(`🔬 صفوف الجدول: ${allRowCount}`);
+    if (allRowCount > 0) {
+      const sample = await _qimaPage.locator(ROW_SEL).first().textContent().catch(() => "");
+      _qimaLog(`📝 نموذج أول صف: ${(sample ?? "").replace(/\s+/g, " ").trim().slice(0, 80)}`);
     }
 
-    // انتظر ثلاث ثوانٍ إضافية للـ Angular rendering
-    await _qimaPage.waitForTimeout(3000);
+    // ابحث عن الصفوف التي تحتوي "مسند" بـ Playwright Locator (يتعامل مع Angular)
+    _qimaLog("🔍 البحث عن طلبات 'مسند تلقائيًا'...");
+    const msnadLocator = _qimaPage.locator(ROW_SEL).filter({ hasText: "مسند" });
+    const msnadCount = await msnadLocator.count().catch(() => 0);
+    _qimaLog(`📋 صفوف "مسند": ${msnadCount}`);
 
-    // debug: سجّل عدد الصفوف وأول نص لتشخيص المشكلة
-    const debugInfo = await _qimaPage.evaluate(() => {
-      const rows = Array.from(document.querySelectorAll("tr"));
-      return {
-        totalRows: rows.length,
-        sample: rows.slice(0, 3).map(r => (r.textContent || "").replace(/\s+/g, " ").trim().slice(0, 80)),
-      };
-    }).catch(() => ({ totalRows: 0, sample: [] as string[] }));
-    _qimaLog(`🔬 الصفوف الكلية: ${debugInfo.totalRows} | نموذج: ${debugInfo.sample[0]?.slice(0, 60) ?? "—"}`);
+    const assignedLinks: string[] = [];
 
-    // استخرج روابط الطلبات ذات حالة "مسند تلقائيًا"
-    _qimaLog("🔍 البحث عن طلبات بحالة 'مسند تلقائيًا'...");
-    const assignedLinks: string[] = await _qimaPage.evaluate(() => {
-      const results: string[] = [];
+    if (msnadCount > 0) {
+      // استراتيجية 1: ابحث عن روابط أو أرقام في DOM
+      for (let ri = 0; ri < msnadCount; ri++) {
+        const rowEl = msnadLocator.nth(ri);
+        const rowText = (await rowEl.textContent().catch(() => "")) ?? "";
 
-      function normalizeAr(t: string) {
-        return t
-          .replace(/[أإآا]/g, "ا")
-          .replace(/[ةه]/g, "ه")
-          .replace(/[ئى]/g, "ي")   // ← إصلاح: ئ وى تُعامَلان كـ ي
-          .replace(/[\u064B-\u065F]/g, "")  // إزالة التشكيل
-          .replace(/\s+/g, " ")
-          .trim();
-      }
+        // تحقق أن الصف يحتوي "تلقائ" (بعد أن تحقق "مسند")
+        if (!rowText.includes("تلقائ") && !rowText.includes("تلقاي")) {
+          _qimaLog(`⏩ صف ${ri + 1} لا يحتوي تلقائياً — تخطي`);
+          continue;
+        }
+        _qimaLog(`✅ صف ${ri + 1} مطابق: ${rowText.replace(/\s+/g, " ").trim().slice(0, 60)}`);
 
-      const TARGET = normalizeAr("مسند تلقائياً");
-
-      const rows = Array.from(document.querySelectorAll("tr"));
-      for (const row of rows) {
-        const cells = Array.from(row.querySelectorAll("td"));
-        if (cells.length < 2) continue;
-
-        const rowNorm = normalizeAr(row.textContent || "");
-
-        // تحقق: يحتوي على "مسند" و"تلقاي" بعد التطبيع
-        if (!rowNorm.includes("مسند") || !rowNorm.includes("تلقاي")) continue;
-
-        // أولاً: ابحث عن روابط مباشرة
-        const links = Array.from(row.querySelectorAll("a[href]")) as HTMLAnchorElement[];
-        for (const link of links) {
-          if (link.href && !results.includes(link.href)) results.push(link.href);
+        // ابحث عن رابط مباشر
+        const linkHref = await rowEl.locator("a[href]").first().getAttribute("href").catch(() => null);
+        if (linkHref) {
+          const fullUrl = linkHref.startsWith("http") ? linkHref
+            : `https://qima.taqeem.gov.sa${linkHref}`;
+          if (!assignedLinks.includes(fullUrl)) assignedLinks.push(fullUrl);
+          continue;
         }
 
-        if (links.length > 0) continue;
-
-        // ثانياً: ابحث في كل الخلايا عن رقم طلب (5-10 أرقام)
+        // ابحث عن رقم طلب في الخلايا
+        const cells = await rowEl.locator("td, [role='cell'], .mat-cell, .mat-mdc-cell").all();
+        let foundNum = false;
         for (const cell of cells) {
-          const num = (cell.textContent || "").replace(/\s+/g, "").trim();
-          if (/^\d{5,10}$/.test(num)) {
-            const url = `https://qima.taqeem.gov.sa/qaym/request/${num}/tab`;
-            if (!results.includes(url)) results.push(url);
+          const cellText = ((await cell.textContent().catch(() => "")) ?? "").replace(/\s+/g, "").trim();
+          if (/^\d{5,10}$/.test(cellText)) {
+            const url = `https://qima.taqeem.gov.sa/qaym/request/${cellText}/tab`;
+            if (!assignedLinks.includes(url)) assignedLinks.push(url);
+            _qimaLog(`🔢 رقم طلب من الخلية: ${cellText}`);
+            foundNum = true;
             break;
           }
         }
+        if (foundNum) continue;
 
-        // ثالثاً: حاول استخراج الرقم من data-* أو id
-        const rowEl = row as HTMLElement;
-        const dataId = rowEl.getAttribute("data-id") || rowEl.getAttribute("data-request-id") || "";
-        if (dataId && /^\d+$/.test(dataId)) {
-          const url = `https://qima.taqeem.gov.sa/qaym/request/${dataId}/tab`;
-          if (!results.includes(url)) results.push(url);
+        // استراتيجية 2: انقر على الصف وسجّل الرابط الناتج
+        try {
+          _qimaLog(`🖱️ محاولة النقر على الصف ${ri + 1}...`);
+          const [newPage] = await Promise.all([
+            context.waitForEvent("page", { timeout: 5000 }).catch(() => null),
+            rowEl.click({ timeout: 5000 }),
+          ]);
+          if (newPage) {
+            await newPage.waitForLoadState("domcontentloaded").catch(() => {});
+            const newUrl = newPage.url();
+            if (!assignedLinks.includes(newUrl)) assignedLinks.push(newUrl);
+            _qimaLog(`🔗 تاب جديد: ${newUrl}`);
+          } else {
+            await _qimaPage.waitForTimeout(1500);
+            const newUrl = _qimaPage.url();
+            if (newUrl !== QIMA_REQUESTS_URL && !assignedLinks.includes(newUrl)) {
+              assignedLinks.push(newUrl);
+              _qimaLog(`🔗 تنقّل لـ: ${newUrl}`);
+              // ارجع للقائمة
+              await _qimaPage.goto(QIMA_REQUESTS_URL, { waitUntil: "domcontentloaded", timeout: 30000 });
+              await _qimaPage.waitForTimeout(2000);
+            }
+          }
+        } catch (clickErr: any) {
+          _qimaLog(`⚠️ فشل النقر: ${clickErr.message?.slice(0, 60)}`);
         }
       }
-      return results;
-    }).catch(() => [] as string[]);
-
-    // إذا ما زلنا بصفر نتائج، سجّل نماذج للمساعدة في التشخيص
-    if (assignedLinks.length === 0) {
-      const textSample = await _qimaPage.evaluate(() => {
-        const rows = Array.from(document.querySelectorAll("tr")).slice(0, 10);
-        return rows.map(r => (r.textContent || "").replace(/\s+/g, " ").trim().slice(0, 100));
-      }).catch(() => [] as string[]);
-      textSample.forEach((t, i) => t && _qimaLog(`📝 صف ${i + 1}: ${t}`));
     }
 
     _qimaState.assignedRequests = assignedLinks;
-    _qimaLog(`📋 وُجد ${assignedLinks.length} طلب بحالة 'مسند تلقائيًا'`);
+    _qimaLog(`📋 وُجد ${assignedLinks.length} طلب مسند تلقائياً`);
 
     if (assignedLinks.length === 0) {
-      _qimaLog("⚠️ لم يُعثر على طلبات مسندة — قد تكون الصفحة فارغة أو الجلسة منتهية");
+      _qimaLog("⚠️ لم يُعثر على طلبات — الجلسة منتهية أو لا توجد طلبات مسندة");
       _qimaState.status = "ready";
+      _scheduleAutoRestart();
       return;
     }
 
-    // افتح كل طلب في تاب جديد ومعالجته (استخراج + تحميل + إرسال)
+    // معالجة كل طلب
     for (let i = 0; i < assignedLinks.length; i++) {
       const url = assignedLinks[i];
-      _qimaLog(`🔗 فتح طلب ${i + 1}/${assignedLinks.length}: ${url}`);
+      _qimaLog(`🔗 معالجة طلب ${i + 1}/${assignedLinks.length}: ${url}`);
       try {
-        const tabPage = await context.newPage();
-        await tabPage.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+        // إذا كان رابطاً في تاب موجود (context.pages()) استخدمه، وإلا افتح تاباً جديداً
+        const existingPage = context.pages().find(p => p.url() === url);
+        const tabPage = existingPage ?? await context.newPage();
+        if (!existingPage) {
+          await tabPage.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+        }
         _qimaState.openedCount++;
         _qimaLog(`✅ تم فتح الطلب ${i + 1} — جارٍ استخراج البيانات...`);
-        // استخراج البيانات + تحميل الملفات + إرسالها للـ API
         await _processQimaRequest(tabPage, url);
       } catch (e: any) {
         _qimaLog(`⚠️ فشل معالجة الطلب ${i + 1}: ${e.message?.slice(0, 80)}`);
