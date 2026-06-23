@@ -6,7 +6,7 @@ import * as path from "path";
 import { execSync } from "child_process";
 import { getReportsByAutomationStatus, updateReport } from "@workspace/db";
 
-export type RoleKey = "entry" | "certifier";
+export type RoleKey = "entry" | "certifier" | "qima";
 
 /**
  * تُحوّل جميع تقارير "pending" إلى "queued" ثم تُشغّل معالج الطابور.
@@ -94,6 +94,13 @@ const roleState: Record<RoleKey, RoleState> = {
     sharedContext: null,
     storageStateFile: path.join(UPLOADS_DIR, "taqeem-session-certifier.json"),
     sessionMetaFile: path.join(UPLOADS_DIR, "taqeem-session-certifier.meta.json"),
+  },
+  qima: {
+    activeFlow: null,
+    sharedBrowser: null,
+    sharedContext: null,
+    storageStateFile: path.join(UPLOADS_DIR, "taqeem-session-qima.json"),
+    sessionMetaFile: path.join(UPLOADS_DIR, "taqeem-session-qima.meta.json"),
   },
 };
 
@@ -196,6 +203,7 @@ export async function startLogin(username: string, password: string, role: RoleK
           "--disable-blink-features=AutomationControlled",
           "--no-first-run",
           "--no-default-browser-check",
+          "--window-size=1920,1080",
         ],
       });
       console.log(`[TaqeemLogin:${role}] Using real Chrome channel`);
@@ -223,7 +231,7 @@ export async function startLogin(username: string, password: string, role: RoleK
   const context = await browser.newContext({
     locale: "ar-SA",
     timezoneId: "Asia/Riyadh",
-    viewport: { width: 1280, height: 900 },
+    viewport: { width: 1920, height: 1080 },
     ...(isReplit ? {
       userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     } : {}),
@@ -492,7 +500,7 @@ export async function createIsolatedContextForRole(role: RoleKey): Promise<{
           headless: false,
           channel: "chrome",
           slowMo: 30,
-          args: ["--disable-blink-features=AutomationControlled", "--no-first-run", "--no-default-browser-check"],
+          args: ["--disable-blink-features=AutomationControlled", "--no-first-run", "--no-default-browser-check", "--window-size=1920,1080"],
         });
       } catch { newBrowser = null; }
     }
@@ -502,7 +510,7 @@ export async function createIsolatedContextForRole(role: RoleKey): Promise<{
         slowMo: isReplit ? 0 : 80,
         args: isReplit
           ? ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
-          : ["--disable-blink-features=AutomationControlled", "--no-first-run"],
+          : ["--disable-blink-features=AutomationControlled", "--no-first-run", "--window-size=1920,1080"],
         ...(chromiumExec ? { executablePath: chromiumExec } : {}),
       });
     }
@@ -513,7 +521,7 @@ export async function createIsolatedContextForRole(role: RoleKey): Promise<{
   const ctx = await automationBrowser.newContext({
     locale: "ar-SA",
     timezoneId: "Asia/Riyadh",
-    viewport: { width: 1280, height: 900 },
+    viewport: { width: 1920, height: 1080 },
     storageState: s.storageStateFile as any,
     ...(isReplit ? { userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" } : {}),
   });
@@ -564,6 +572,7 @@ export async function createIsolatedAutomationContext(): Promise<{
             "--disable-blink-features=AutomationControlled",
             "--no-first-run",
             "--no-default-browser-check",
+            "--window-size=1920,1080",
           ],
         });
       } catch { newBrowser = null; }
@@ -575,7 +584,7 @@ export async function createIsolatedAutomationContext(): Promise<{
         slowMo: isReplit ? 0 : 80,
         args: isReplit
           ? ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
-          : ["--disable-blink-features=AutomationControlled", "--no-first-run"],
+          : ["--disable-blink-features=AutomationControlled", "--no-first-run", "--window-size=1920,1080"],
         ...(chromiumExec ? { executablePath: chromiumExec } : {}),
       });
     }
@@ -587,7 +596,7 @@ export async function createIsolatedAutomationContext(): Promise<{
   const isolatedContext = await automationBrowser.newContext({
     locale: "ar-SA",
     timezoneId: "Asia/Riyadh",
-    viewport: { width: 1280, height: 900 },
+    viewport: { width: 1920, height: 1080 },
     storageState: s.storageStateFile as any,
     ...(isReplit ? {
       userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -643,6 +652,7 @@ export async function getAuthenticatedContext(): Promise<BrowserContext | null> 
             "--disable-blink-features=AutomationControlled",
             "--no-first-run",
             "--no-default-browser-check",
+            "--window-size=1920,1080",
           ],
         });
       } catch {
@@ -656,7 +666,7 @@ export async function getAuthenticatedContext(): Promise<BrowserContext | null> 
         slowMo: isReplit ? 0 : 100,
         args: isReplit
           ? ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
-          : ["--disable-blink-features=AutomationControlled", "--no-first-run"],
+          : ["--disable-blink-features=AutomationControlled", "--no-first-run", "--window-size=1920,1080"],
         ...(chromiumExec ? { executablePath: chromiumExec } : {}),
       });
     }
@@ -666,7 +676,7 @@ export async function getAuthenticatedContext(): Promise<BrowserContext | null> 
     const context = await browser.newContext({
       locale: "ar-SA",
       timezoneId: "Asia/Riyadh",
-      viewport: { width: 1280, height: 900 },
+      viewport: { width: 1920, height: 1080 },
       storageState: s.storageStateFile as any,
       ...(isReplit ? {
         userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
