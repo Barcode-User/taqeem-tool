@@ -2035,6 +2035,9 @@ async function startQimaSession(): Promise<void> {
     _qimaLog("📂 فتح صفحة الطلبات...");
     _qimaPage = await context.newPage();
 
+    // وسّع الـ viewport ليظهر عمود "حالة العرض" في Angular Material
+    await _qimaPage.setViewportSize({ width: 1920, height: 1080 });
+
     try {
       await _qimaPage.goto(QIMA_REQUESTS_URL, { waitUntil: "domcontentloaded", timeout: 60000 });
     } catch (navErr: any) {
