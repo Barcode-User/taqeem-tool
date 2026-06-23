@@ -88,7 +88,7 @@ function QimaLayout({ children }: { children: React.ReactNode }) {
     window.location.reload();
   };
 
-  const pageTitle = location === "/taqeem-session" ? "جلسة تقييم" : "التقارير";
+  const pageTitle = location === "/taqeem-session" ? "جلسة تقييم" : "فتح الطلبات";
 
   return (
     <div className="flex min-h-[100dvh] w-full bg-background font-sans" dir="rtl">
@@ -104,15 +104,18 @@ function QimaLayout({ children }: { children: React.ReactNode }) {
         </div>
 
         <nav className="flex-1 px-4 py-3 space-y-1">
-          <a
-            href="https://qima.taqeem.gov.sa/qaym/request/13/tab"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center px-4 py-3 text-sm font-medium rounded-md cursor-pointer transition-colors text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-          >
-            <ExternalLink className="h-5 w-5 ml-3 text-muted-foreground" />
-            فتح الطلبات
-          </a>
+          <WouterLink href="/">
+            <div
+              className={`flex items-center px-4 py-3 text-sm font-medium rounded-md cursor-pointer transition-colors ${
+                location === "/"
+                  ? "bg-violet-50 text-violet-700"
+                  : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+              }`}
+            >
+              <ExternalLink className={`h-5 w-5 ml-3 ${location === "/" ? "text-violet-600" : "text-muted-foreground"}`} />
+              فتح الطلبات
+            </div>
+          </WouterLink>
 
           <WouterLink href="/taqeem-session">
             <div
