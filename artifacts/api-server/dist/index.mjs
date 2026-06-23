@@ -292273,6 +292273,7 @@ async function startQimaSession() {
     const context = session.context;
     _qimaLog("\u{1F4C2} \u0641\u062A\u062D \u0635\u0641\u062D\u0629 \u0627\u0644\u0637\u0644\u0628\u0627\u062A...");
     _qimaPage = await context.newPage();
+    await _qimaPage.setViewportSize({ width: 1920, height: 1080 });
     try {
       await _qimaPage.goto(QIMA_REQUESTS_URL, { waitUntil: "domcontentloaded", timeout: 6e4 });
     } catch (navErr) {
