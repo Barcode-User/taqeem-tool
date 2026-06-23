@@ -45399,6 +45399,77 @@ async function pgHasPendingQueue() {
   const r = await pool.query("SELECT COUNT(*) AS cnt FROM reports WHERE automation_status = 'queued'");
   return Number(r.rows[0]?.cnt ?? 0);
 }
+async function ensureQimaSubmissionsTable() {
+  const pool = getPgPool();
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS qima_submissions (
+      id            SERIAL PRIMARY KEY,
+      request_id    VARCHAR(50) NOT NULL,
+      data_json     TEXT NOT NULL DEFAULT '{}',
+      status        VARCHAR(20) NOT NULL DEFAULT 'pending',
+      error_message TEXT,
+      api_url       TEXT,
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      sent_at       TIMESTAMPTZ
+    )
+  `);
+  return pool;
+}
+async function pgInsertQimaSubmission(data) {
+  const pool = await ensureQimaSubmissionsTable();
+  const r = await pool.query(
+    "INSERT INTO qima_submissions (request_id, data_json, api_url) VALUES ($1, $2, $3) RETURNING *",
+    [data.requestId, data.dataJson, data.apiUrl ?? null]
+  );
+  const row = r.rows[0];
+  return {
+    id: row.id,
+    requestId: row.request_id,
+    dataJson: row.data_json,
+    status: row.status,
+    errorMessage: row.error_message ?? null,
+    apiUrl: row.api_url ?? null,
+    createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
+    sentAt: null
+  };
+}
+async function pgUpdateQimaSubmissionStatus(id, status, errorMessage) {
+  const pool = await ensureQimaSubmissionsTable();
+  await pool.query(
+    "UPDATE qima_submissions SET status=$1, error_message=$2, sent_at=NOW() WHERE id=$3",
+    [status, errorMessage ?? null, id]
+  );
+}
+async function pgListQimaSubmissions() {
+  const pool = await ensureQimaSubmissionsTable();
+  const r = await pool.query("SELECT * FROM qima_submissions ORDER BY id DESC");
+  return r.rows.map((row) => ({
+    id: row.id,
+    requestId: row.request_id,
+    dataJson: row.data_json,
+    status: row.status,
+    errorMessage: row.error_message ?? null,
+    apiUrl: row.api_url ?? null,
+    createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
+    sentAt: row.sent_at instanceof Date ? row.sent_at.toISOString() : row.sent_at ?? null
+  }));
+}
+async function pgGetQimaSubmissionById(id) {
+  const pool = await ensureQimaSubmissionsTable();
+  const r = await pool.query("SELECT * FROM qima_submissions WHERE id=$1", [id]);
+  if (!r.rows[0]) return null;
+  const row = r.rows[0];
+  return {
+    id: row.id,
+    requestId: row.request_id,
+    dataJson: row.data_json,
+    status: row.status,
+    errorMessage: row.error_message ?? null,
+    apiUrl: row.api_url ?? null,
+    createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
+    sentAt: row.sent_at instanceof Date ? row.sent_at.toISOString() : row.sent_at ?? null
+  };
+}
 async function ensureCertifiedTable() {
   const pool = getPgPool();
   await pool.query(`
@@ -46404,6 +46475,75 @@ async function sqliteHasPendingQueue() {
   const rows = db.prepare("SELECT Id FROM Reports WHERE AutomationStatus = 'queued'").all();
   return rows.length;
 }
+function ensureQimaSubmissionsTable2(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS QimaSubmissions (
+      Id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      RequestId     TEXT NOT NULL,
+      DataJson      TEXT NOT NULL DEFAULT '{}',
+      Status        TEXT NOT NULL DEFAULT 'pending',
+      ErrorMessage  TEXT,
+      ApiUrl        TEXT,
+      CreatedAt     TEXT NOT NULL DEFAULT (datetime('now')),
+      SentAt        TEXT
+    )
+  `);
+}
+async function sqliteInsertQimaSubmission(data) {
+  const db = getDb();
+  ensureQimaSubmissionsTable2(db);
+  const r = db.prepare(
+    "INSERT INTO QimaSubmissions (RequestId, DataJson, Status, ApiUrl) VALUES (?, ?, 'pending', ?)"
+  ).run(data.requestId, data.dataJson, data.apiUrl ?? null);
+  return {
+    id: Number(r.lastInsertRowid),
+    requestId: data.requestId,
+    dataJson: data.dataJson,
+    status: "pending",
+    errorMessage: null,
+    apiUrl: data.apiUrl ?? null,
+    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+    sentAt: null
+  };
+}
+async function sqliteUpdateQimaSubmissionStatus(id, status, errorMessage) {
+  const db = getDb();
+  ensureQimaSubmissionsTable2(db);
+  db.prepare(
+    "UPDATE QimaSubmissions SET Status=?, ErrorMessage=?, SentAt=datetime('now') WHERE Id=?"
+  ).run(status, errorMessage ?? null, id);
+}
+async function sqliteListQimaSubmissions() {
+  const db = getDb();
+  ensureQimaSubmissionsTable2(db);
+  const rows = db.prepare("SELECT * FROM QimaSubmissions ORDER BY Id DESC").all();
+  return rows.map((r) => ({
+    id: Number(r.Id),
+    requestId: r.RequestId ?? "",
+    dataJson: r.DataJson ?? "{}",
+    status: r.Status ?? "pending",
+    errorMessage: r.ErrorMessage ?? null,
+    apiUrl: r.ApiUrl ?? null,
+    createdAt: r.CreatedAt ?? "",
+    sentAt: r.SentAt ?? null
+  }));
+}
+async function sqliteGetQimaSubmissionById(id) {
+  const db = getDb();
+  ensureQimaSubmissionsTable2(db);
+  const r = db.prepare("SELECT * FROM QimaSubmissions WHERE Id=?").get(id);
+  if (!r) return null;
+  return {
+    id: Number(r.Id),
+    requestId: r.RequestId ?? "",
+    dataJson: r.DataJson ?? "{}",
+    status: r.Status ?? "pending",
+    errorMessage: r.ErrorMessage ?? null,
+    apiUrl: r.ApiUrl ?? null,
+    createdAt: r.CreatedAt ?? "",
+    sentAt: r.SentAt ?? null
+  };
+}
 function ensureCertifiedTable2(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS CertifiedReports (
@@ -46454,15 +46594,18 @@ var init_sqlite = __esm({
 var src_exports = {};
 __export(src_exports, {
   deleteReport: () => deleteReport,
+  getQimaSubmissionById: () => getQimaSubmissionById,
   getReportAutomationStatus: () => getReportAutomationStatus,
   getReportById: () => getReportById,
   getReportStats: () => getReportStats,
   getReportsByAutomationStatus: () => getReportsByAutomationStatus,
   hasPendingQueueDb: () => hasPendingQueueDb,
   insertCertifiedReport: () => insertCertifiedReport,
+  insertQimaSubmission: () => insertQimaSubmission,
   insertReport: () => insertReport,
   isConfigured: () => isConfigured,
   listCertifiedReports: () => listCertifiedReports,
+  listQimaSubmissions: () => listQimaSubmissions,
   listReports: () => listReports,
   sqliteGetDataSystemById: () => sqliteGetDataSystemById2,
   sqliteGetDataSystemByReportId: () => sqliteGetDataSystemByReportId2,
@@ -46470,9 +46613,10 @@ __export(src_exports, {
   sqliteListDataSystem: () => sqliteListDataSystem2,
   sqliteTogglePriority: () => sqliteTogglePriority2,
   sqliteUpdateDataSystemLinkedReport: () => sqliteUpdateDataSystemLinkedReport2,
+  updateQimaSubmissionStatus: () => updateQimaSubmissionStatus,
   updateReport: () => updateReport
 });
-var isPostgres, listReports, getReportById, getReportsByAutomationStatus, getReportAutomationStatus, insertReport, updateReport, deleteReport, getReportStats, hasPendingQueueDb, sqliteTogglePriority2, sqliteInsertDataSystem2, sqliteGetDataSystemById2, sqliteGetDataSystemByReportId2, sqliteListDataSystem2, sqliteUpdateDataSystemLinkedReport2, insertCertifiedReport, listCertifiedReports;
+var isPostgres, listReports, getReportById, getReportsByAutomationStatus, getReportAutomationStatus, insertReport, updateReport, deleteReport, getReportStats, hasPendingQueueDb, sqliteTogglePriority2, sqliteInsertDataSystem2, sqliteGetDataSystemById2, sqliteGetDataSystemByReportId2, sqliteListDataSystem2, sqliteUpdateDataSystemLinkedReport2, insertCertifiedReport, listCertifiedReports, insertQimaSubmission, updateQimaSubmissionStatus, listQimaSubmissions, getQimaSubmissionById;
 var init_src = __esm({
   "../../lib/db/src/index.ts"() {
     "use strict";
@@ -46503,6 +46647,10 @@ var init_src = __esm({
     sqliteUpdateDataSystemLinkedReport2 = sqliteUpdateDataSystemLinkedReport;
     insertCertifiedReport = isPostgres ? pgInsertCertifiedReport : sqliteInsertCertifiedReport;
     listCertifiedReports = isPostgres ? pgListCertifiedReports : sqliteListCertifiedReports;
+    insertQimaSubmission = isPostgres ? pgInsertQimaSubmission : sqliteInsertQimaSubmission;
+    updateQimaSubmissionStatus = isPostgres ? pgUpdateQimaSubmissionStatus : sqliteUpdateQimaSubmissionStatus;
+    listQimaSubmissions = isPostgres ? pgListQimaSubmissions : sqliteListQimaSubmissions;
+    getQimaSubmissionById = isPostgres ? pgGetQimaSubmissionById : sqliteGetQimaSubmissionById;
   }
 });
 
@@ -292024,7 +292172,23 @@ async function _processQimaRequest(tabPage, requestUrl) {
   const apiBaseUrl = _loadDocumenQaimhConfig();
   if (!apiBaseUrl) {
     _qimaLog("\u26A0\uFE0F DocumenQaimh \u063A\u064A\u0631 \u0645\u064F\u0639\u0631\u064E\u0651\u0641 \u0641\u064A config.json \u2014 \u062A\u0645 \u0627\u0644\u0627\u0633\u062A\u062E\u0631\u0627\u062C \u0641\u0642\u0637 \u0648\u0644\u0646 \u064A\u064F\u0631\u0633\u064E\u0644");
+    try {
+      await insertQimaSubmission({ requestId, dataJson: JSON.stringify(data) });
+    } catch {
+    }
     return;
+  }
+  let submissionId = null;
+  try {
+    const submission = await insertQimaSubmission({
+      requestId,
+      dataJson: JSON.stringify(data),
+      apiUrl: apiBaseUrl
+    });
+    submissionId = submission.id;
+    _qimaLog(`\u{1F4BE} \u062A\u0645 \u062D\u0641\u0638 \u0627\u0644\u0633\u062C\u0644 #${submissionId} \u0641\u064A \u0642\u0627\u0639\u062F\u0629 \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A`);
+  } catch (e) {
+    _qimaLog(`\u26A0\uFE0F \u0641\u0634\u0644 \u0627\u0644\u062D\u0641\u0638 \u0641\u064A \u0642\u0627\u0639\u062F\u0629 \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A: ${e.message?.slice(0, 60)}`);
   }
   const apiResult = await _sendToDocumenQaimhApi(
     apiBaseUrl,
@@ -292034,10 +292198,20 @@ async function _processQimaRequest(tabPage, requestUrl) {
     docFile,
     docName
   );
+  if (submissionId) {
+    try {
+      await updateQimaSubmissionStatus(
+        submissionId,
+        apiResult.success ? "success" : "failed",
+        apiResult.success ? void 0 : apiResult.message
+      );
+    } catch {
+    }
+  }
   if (apiResult.success) {
-    _qimaLog(`\u2705 \u062A\u0645 \u0627\u0644\u0625\u0631\u0633\u0627\u0644 \u0644\u0640 API: ${apiResult.message}`);
+    _qimaLog(`\u2705 \u0645\u0631\u0641\u0648\u0639 \u0628\u0646\u062C\u0627\u062D \u2014 \u0637\u0644\u0628 #${requestId}`);
   } else {
-    _qimaLog(`\u274C \u0641\u0634\u0644 \u0627\u0644\u0625\u0631\u0633\u0627\u0644 \u0644\u0640 API: ${apiResult.message}`);
+    _qimaLog(`\u274C \u0641\u0634\u0644 \u0627\u0644\u0631\u0641\u0639 \u2014 \u0637\u0644\u0628 #${requestId}: ${apiResult.message}`);
   }
 }
 async function startQimaSession() {
@@ -292174,6 +292348,46 @@ router2.get("/automation/queue", async (_req, res) => {
   } catch (err) {
     res.status(500).json({ error: "Internal server error" });
   }
+});
+router2.get("/automation/qima/submissions", async (_req, res) => {
+  try {
+    const submissions = await listQimaSubmissions();
+    res.json({ submissions });
+  } catch (err) {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+router2.post("/automation/qima/submissions/:id/retry", async (req, res) => {
+  const id = Number(req.params.id);
+  if (isNaN(id)) return res.status(400).json({ error: "\u0645\u0639\u0631\u0651\u0641 \u063A\u064A\u0631 \u0635\u0627\u0644\u062D" });
+  const submission = await getQimaSubmissionById(id);
+  if (!submission) return res.status(404).json({ error: "\u0627\u0644\u0633\u062C\u0644 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
+  const apiBaseUrl = submission.apiUrl || _loadDocumenQaimhConfig();
+  if (!apiBaseUrl) return res.status(400).json({ error: "DocumenQaimh \u063A\u064A\u0631 \u0645\u064F\u0639\u0631\u064E\u0651\u0641 \u0641\u064A config.json" });
+  let data;
+  try {
+    data = JSON.parse(submission.dataJson);
+  } catch {
+    return res.status(400).json({ error: "\u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u0633\u062C\u0644 \u062A\u0627\u0644\u0641\u0629" });
+  }
+  try {
+    await updateQimaSubmissionStatus(id, "failed", "\u062C\u0627\u0631\u064D \u0625\u0639\u0627\u062F\u0629 \u0627\u0644\u0625\u0631\u0633\u0627\u0644...");
+  } catch {
+  }
+  const apiResult = await _sendToDocumenQaimhApi(
+    apiBaseUrl,
+    data,
+    null,
+    "",
+    null,
+    ""
+  );
+  await updateQimaSubmissionStatus(
+    id,
+    apiResult.success ? "success" : "failed",
+    apiResult.success ? void 0 : apiResult.message
+  );
+  res.json({ success: apiResult.success, message: apiResult.message });
 });
 var automation_default = router2;
 
