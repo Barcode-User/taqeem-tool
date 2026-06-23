@@ -1,7 +1,11 @@
 import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { PlayCircle, StopCircle, Loader2, CheckCircle2, AlertCircle, RefreshCw } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import {
+  PlayCircle, StopCircle, Loader2, CheckCircle2,
+  AlertCircle, RefreshCw, RotateCcw, Database, ChevronDown, ChevronUp,
+} from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 type QimaStatus = "idle" | "running" | "ready" | "failed";
@@ -14,6 +18,17 @@ type QimaState = {
   openedCount: number;
 };
 
+type Submission = {
+  id: number;
+  requestId: string;
+  dataJson: string;
+  status: "pending" | "success" | "failed";
+  errorMessage: string | null;
+  apiUrl: string | null;
+  createdAt: string;
+  sentAt: string | null;
+};
+
 export default function QimaRequestsPage() {
   const { toast } = useToast();
   const apiBase = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
@@ -21,6 +36,10 @@ export default function QimaRequestsPage() {
     status: "idle", logs: [], assignedRequests: [], openedCount: 0,
   });
   const [loading, setLoading] = useState(false);
+  const [submissions, setSubmissions] = useState<Submission[]>([]);
+  const [submissionsLoading, setSubmissionsLoading] = useState(false);
+  const [retryingId, setRetryingId] = useState<number | null>(null);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -31,8 +50,22 @@ export default function QimaRequestsPage() {
     } catch {}
   };
 
+  const fetchSubmissions = async () => {
+    setSubmissionsLoading(true);
+    try {
+      const r = await fetch(`${apiBase}/api/automation/qima/submissions`);
+      if (r.ok) {
+        const data = await r.json();
+        setSubmissions(data.submissions ?? []);
+      }
+    } catch {} finally {
+      setSubmissionsLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchStatus();
+    fetchSubmissions();
     pollRef.current = setInterval(fetchStatus, 3000);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [apiBase]);
@@ -63,9 +96,55 @@ export default function QimaRequestsPage() {
     toast({ title: "تم الإيقاف" });
   };
 
+  const handleRetry = async (sub: Submission) => {
+    setRetryingId(sub.id);
+    try {
+      const r = await fetch(`${apiBase}/api/automation/qima/submissions/${sub.id}/retry`, {
+        method: "POST",
+      });
+      const data = await r.json();
+      if (data.success) {
+        toast({ title: "✅ تم الإرسال بنجاح", description: `طلب #${sub.requestId}` });
+      } else {
+        toast({ variant: "destructive", title: "❌ فشل الإرسال", description: data.message });
+      }
+      await fetchSubmissions();
+    } catch {
+      toast({ variant: "destructive", title: "خطأ في الاتصال" });
+    } finally {
+      setRetryingId(null);
+    }
+  };
+
   const isRunning = state.status === "running";
   const isReady = state.status === "ready";
   const isFailed = state.status === "failed";
+
+  const statusBadge = (s: Submission["status"]) => {
+    if (s === "success") return (
+      <Badge className="bg-green-100 text-green-700 border-green-200 gap-1">
+        <CheckCircle2 className="h-3 w-3" /> نجح
+      </Badge>
+    );
+    if (s === "failed") return (
+      <Badge className="bg-red-100 text-red-700 border-red-200 gap-1">
+        <AlertCircle className="h-3 w-3" /> فشل
+      </Badge>
+    );
+    return (
+      <Badge className="bg-slate-100 text-slate-600 border-slate-200 gap-1">
+        <Loader2 className="h-3 w-3" /> معلق
+      </Badge>
+    );
+  };
+
+  const formatDate = (iso: string) => {
+    try {
+      return new Date(iso).toLocaleString("ar-SA", {
+        dateStyle: "short", timeStyle: "short",
+      });
+    } catch { return iso; }
+  };
 
   return (
     <div className="space-y-6" dir="rtl">
@@ -189,6 +268,136 @@ export default function QimaRequestsPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* سجل الإرسالات */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Database className="h-4 w-4 text-violet-500" />
+              <CardTitle className="text-base">سجل الإرسالات</CardTitle>
+              {submissions.length > 0 && (
+                <Badge variant="outline" className="text-xs">
+                  {submissions.length}
+                </Badge>
+              )}
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={fetchSubmissions}
+              disabled={submissionsLoading}
+              className="gap-1.5"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${submissionsLoading ? "animate-spin" : ""}`} />
+              تحديث
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="pt-0">
+          {submissions.length === 0 ? (
+            <div className="text-center py-10 text-muted-foreground text-sm">
+              {submissionsLoading ? "جارٍ التحميل..." : "لا توجد إرسالات بعد"}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {submissions.map(sub => (
+                <div
+                  key={sub.id}
+                  className={`border rounded-lg overflow-hidden transition-colors ${
+                    sub.status === "success"
+                      ? "border-green-200 bg-green-50/40"
+                      : sub.status === "failed"
+                      ? "border-red-200 bg-red-50/40"
+                      : "border-slate-200"
+                  }`}
+                >
+                  {/* صف رئيسي */}
+                  <div className="flex items-center gap-3 p-3">
+                    <span className="text-xs text-muted-foreground font-mono w-6 text-center">
+                      #{sub.id}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-medium text-sm">طلب {sub.requestId}</span>
+                        {statusBadge(sub.status)}
+                      </div>
+                      <div className="flex gap-3 mt-0.5 text-xs text-muted-foreground">
+                        <span>أُنشئ: {formatDate(sub.createdAt)}</span>
+                        {sub.sentAt && <span>أُرسل: {formatDate(sub.sentAt)}</span>}
+                      </div>
+                      {sub.errorMessage && sub.status === "failed" && (
+                        <p className="text-xs text-red-600 mt-1 truncate max-w-sm">
+                          {sub.errorMessage}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {sub.status === "failed" && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleRetry(sub)}
+                          disabled={retryingId === sub.id}
+                          className="gap-1.5 text-xs h-7 border-amber-300 text-amber-700 hover:bg-amber-50"
+                        >
+                          {retryingId === sub.id ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <RotateCcw className="h-3 w-3" />
+                          )}
+                          إعادة إرسال
+                        </Button>
+                      )}
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setExpandedId(expandedId === sub.id ? null : sub.id)}
+                        className="h-7 w-7 p-0"
+                      >
+                        {expandedId === sub.id
+                          ? <ChevronUp className="h-3.5 w-3.5" />
+                          : <ChevronDown className="h-3.5 w-3.5" />}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* تفاصيل قابلة للطي */}
+                  {expandedId === sub.id && (
+                    <div className="border-t border-dashed p-3 bg-white/60">
+                      {sub.apiUrl && (
+                        <p className="text-xs text-muted-foreground mb-2">
+                          <span className="font-medium">API URL:</span>{" "}
+                          <span className="font-mono break-all">{sub.apiUrl}</span>
+                        </p>
+                      )}
+                      {sub.errorMessage && (
+                        <p className="text-xs text-red-600 mb-2">
+                          <span className="font-medium">الخطأ:</span> {sub.errorMessage}
+                        </p>
+                      )}
+                      <details className="text-xs">
+                        <summary className="cursor-pointer text-muted-foreground hover:text-foreground select-none">
+                          البيانات المُرسَلة
+                        </summary>
+                        <pre className="mt-2 bg-slate-100 rounded p-2 overflow-x-auto text-[10px] leading-relaxed max-h-48">
+                          {(() => {
+                            try {
+                              return JSON.stringify(JSON.parse(sub.dataJson), null, 2);
+                            } catch {
+                              return sub.dataJson;
+                            }
+                          })()}
+                        </pre>
+                      </details>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
