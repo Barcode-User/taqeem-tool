@@ -292297,33 +292297,57 @@ async function startQimaSession() {
     } catch {
       _qimaLog("\u26A0\uFE0F \u0644\u0645 \u064A\u0638\u0647\u0631 \u0627\u0644\u062C\u062F\u0648\u0644 \u062E\u0644\u0627\u0644 20 \u062B\u0627\u0646\u064A\u0629 \u2014 \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0629 \u0639\u0644\u0649 \u0623\u064A \u062D\u0627\u0644");
     }
-    await _qimaPage.waitForTimeout(2e3);
+    await _qimaPage.waitForTimeout(3e3);
+    const debugInfo = await _qimaPage.evaluate(() => {
+      const rows = Array.from(document.querySelectorAll("tr"));
+      return {
+        totalRows: rows.length,
+        sample: rows.slice(0, 3).map((r) => (r.textContent || "").replace(/\s+/g, " ").trim().slice(0, 80))
+      };
+    }).catch(() => ({ totalRows: 0, sample: [] }));
+    _qimaLog(`\u{1F52C} \u0627\u0644\u0635\u0641\u0648\u0641 \u0627\u0644\u0643\u0644\u064A\u0629: ${debugInfo.totalRows} | \u0646\u0645\u0648\u0630\u062C: ${debugInfo.sample[0]?.slice(0, 60) ?? "\u2014"}`);
     _qimaLog("\u{1F50D} \u0627\u0644\u0628\u062D\u062B \u0639\u0646 \u0637\u0644\u0628\u0627\u062A \u0628\u062D\u0627\u0644\u0629 '\u0645\u0633\u0646\u062F \u062A\u0644\u0642\u0627\u0626\u064A\u064B\u0627'...");
     const assignedLinks = await _qimaPage.evaluate(() => {
       const results = [];
-      const rows = Array.from(document.querySelectorAll("table tbody tr, tbody tr"));
+      function normalizeAr2(t) {
+        return t.replace(/[أإآا]/g, "\u0627").replace(/[ةه]/g, "\u0647").replace(/[ئى]/g, "\u064A").replace(/[\u064B-\u065F]/g, "").replace(/\s+/g, " ").trim();
+      }
+      const TARGET = normalizeAr2("\u0645\u0633\u0646\u062F \u062A\u0644\u0642\u0627\u0626\u064A\u0627\u064B");
+      const rows = Array.from(document.querySelectorAll("tr"));
       for (const row of rows) {
         const cells = Array.from(row.querySelectorAll("td"));
         if (cells.length < 2) continue;
-        const rowText = (row.textContent || "").replace(/[أإآا]/g, "\u0627").replace(/[ةه]/g, "\u0647").replace(/\s+/g, " ");
-        if (!rowText.includes("\u0645\u0633\u0646\u062F") || !rowText.includes("\u062A\u0644\u0642\u0627\u064A")) continue;
+        const rowNorm = normalizeAr2(row.textContent || "");
+        if (!rowNorm.includes("\u0645\u0633\u0646\u062F") || !rowNorm.includes("\u062A\u0644\u0642\u0627\u064A")) continue;
         const links = Array.from(row.querySelectorAll("a[href]"));
         for (const link of links) {
-          if (link.href && !results.includes(link.href)) {
-            results.push(link.href);
-          }
+          if (link.href && !results.includes(link.href)) results.push(link.href);
         }
-        if (links.length === 0) {
-          const numCell = cells[0];
-          const num = (numCell?.textContent || "").trim();
+        if (links.length > 0) continue;
+        for (const cell of cells) {
+          const num = (cell.textContent || "").replace(/\s+/g, "").trim();
           if (/^\d{5,10}$/.test(num)) {
             const url = `https://qima.taqeem.gov.sa/qaym/request/${num}/tab`;
             if (!results.includes(url)) results.push(url);
+            break;
           }
+        }
+        const rowEl = row;
+        const dataId = rowEl.getAttribute("data-id") || rowEl.getAttribute("data-request-id") || "";
+        if (dataId && /^\d+$/.test(dataId)) {
+          const url = `https://qima.taqeem.gov.sa/qaym/request/${dataId}/tab`;
+          if (!results.includes(url)) results.push(url);
         }
       }
       return results;
     }).catch(() => []);
+    if (assignedLinks.length === 0) {
+      const textSample = await _qimaPage.evaluate(() => {
+        const rows = Array.from(document.querySelectorAll("tr")).slice(0, 10);
+        return rows.map((r) => (r.textContent || "").replace(/\s+/g, " ").trim().slice(0, 100));
+      }).catch(() => []);
+      textSample.forEach((t, i) => t && _qimaLog(`\u{1F4DD} \u0635\u0641 ${i + 1}: ${t}`));
+    }
     _qimaState.assignedRequests = assignedLinks;
     _qimaLog(`\u{1F4CB} \u0648\u064F\u062C\u062F ${assignedLinks.length} \u0637\u0644\u0628 \u0628\u062D\u0627\u0644\u0629 '\u0645\u0633\u0646\u062F \u062A\u0644\u0642\u0627\u0626\u064A\u064B\u0627'`);
     if (assignedLinks.length === 0) {
