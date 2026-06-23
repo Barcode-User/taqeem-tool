@@ -49,6 +49,7 @@ export const hasPendingQueueDb = isPostgres
 
 // ─── DataSystem (SQLite فقط) ─────────────────────────────────────────────────
 export type { DataSystemRecord } from "./sqlite";
+export const sqliteTogglePriority   = sq.sqliteTogglePriority;
 export const sqliteInsertDataSystem = sq.sqliteInsertDataSystem;
 export const sqliteGetDataSystemById = sq.sqliteGetDataSystemById;
 export const sqliteGetDataSystemByReportId = sq.sqliteGetDataSystemByReportId;
@@ -61,3 +62,14 @@ export const insertCertifiedReport = isPostgres
   ? pg.pgInsertCertifiedReport : sq.sqliteInsertCertifiedReport;
 export const listCertifiedReports = isPostgres
   ? pg.pgListCertifiedReports : sq.sqliteListCertifiedReports;
+
+// ─── طلبات قيمة المُرسَلة (كلا البيئتين) ────────────────────────────────────
+export type { QimaSubmission } from "./sqlite";
+export const insertQimaSubmission = isPostgres
+  ? pg.pgInsertQimaSubmission : sq.sqliteInsertQimaSubmission;
+export const updateQimaSubmissionStatus = isPostgres
+  ? pg.pgUpdateQimaSubmissionStatus : sq.sqliteUpdateQimaSubmissionStatus;
+export const listQimaSubmissions = isPostgres
+  ? pg.pgListQimaSubmissions : sq.sqliteListQimaSubmissions;
+export const getQimaSubmissionById = isPostgres
+  ? pg.pgGetQimaSubmissionById : sq.sqliteGetQimaSubmissionById;
