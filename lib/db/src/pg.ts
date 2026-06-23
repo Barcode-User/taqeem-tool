@@ -114,6 +114,7 @@ async function ensureTable(): Promise<void> {
       qr_code_base64 TEXT,
       certificate_path TEXT,
       taqeem_submitted_at VARCHAR(50),
+      is_priority BOOLEAN NOT NULL DEFAULT FALSE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
@@ -137,6 +138,7 @@ async function ensureTable(): Promise<void> {
     "ALTER TABLE reports ADD COLUMN IF NOT EXISTS market_approach_percentage NUMERIC(5,2)",
     "ALTER TABLE reports ADD COLUMN IF NOT EXISTS income_approach_percentage NUMERIC(5,2)",
     "ALTER TABLE reports ADD COLUMN IF NOT EXISTS cost_approach_percentage NUMERIC(5,2)",
+    "ALTER TABLE reports ADD COLUMN IF NOT EXISTS is_priority BOOLEAN NOT NULL DEFAULT FALSE",
   ];
   for (const sql of newCols) await pool.query(sql).catch(() => {});
 }
@@ -244,6 +246,7 @@ function rowToReport(row: any): Report {
     qrCodeBase64: str(row.qr_code_base64),
     certificatePath: str(row.certificate_path),
     taqeemSubmittedAt: str(row.taqeem_submitted_at),
+    isPriority: row.is_priority === true || row.is_priority === 1,
     createdAt: row.created_at instanceof Date ? row.created_at : new Date(row.created_at),
     updatedAt: row.updated_at instanceof Date ? row.updated_at : new Date(row.updated_at),
   };
@@ -295,11 +298,12 @@ const FIELD_MAP_PG: Record<string, string> = {
   automationError: "automation_error", automationSessionId: "automation_session_id",
   qrCodeBase64: "qr_code_base64", certificatePath: "certificate_path",
   taqeemSubmittedAt: "taqeem_submitted_at",
+  isPriority: "is_priority",
 };
 
 export async function pgListReports(): Promise<Report[]> {
   const pool = await withTable();
-  const r = await pool.query("SELECT * FROM reports ORDER BY created_at DESC");
+  const r = await pool.query("SELECT * FROM reports ORDER BY is_priority ASC, created_at DESC");
   return r.rows.map(rowToReport);
 }
 
@@ -311,7 +315,7 @@ export async function pgGetReportById(id: number): Promise<Report | null> {
 
 export async function pgGetReportsByAutomationStatus(automationStatus: string): Promise<Pick<Report, "id" | "reportNumber">[]> {
   const pool = await withTable();
-  const r = await pool.query("SELECT id, report_number FROM reports WHERE automation_status = $1 ORDER BY created_at ASC", [automationStatus]);
+  const r = await pool.query("SELECT id, report_number FROM reports WHERE automation_status = $1 ORDER BY is_priority DESC, created_at ASC", [automationStatus]);
   return r.rows.map(row => ({ id: row.id, reportNumber: row.report_number ?? null }));
 }
 
@@ -408,6 +412,102 @@ export async function pgHasPendingQueue(): Promise<number> {
   const pool = await withTable();
   const r = await pool.query("SELECT COUNT(*) AS cnt FROM reports WHERE automation_status = 'queued'");
   return Number(r.rows[0]?.cnt ?? 0);
+}
+
+// ─── جدول طلبات قيمة المُرسَلة ───────────────────────────────────────────────
+async function ensureQimaSubmissionsTable(): Promise<PgPool> {
+  const pool = getPgPool();
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS qima_submissions (
+      id            SERIAL PRIMARY KEY,
+      request_id    VARCHAR(50) NOT NULL,
+      data_json     TEXT NOT NULL DEFAULT '{}',
+      status        VARCHAR(20) NOT NULL DEFAULT 'pending',
+      error_message TEXT,
+      api_url       TEXT,
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      sent_at       TIMESTAMPTZ
+    )
+  `);
+  return pool;
+}
+
+export interface QimaSubmission {
+  id: number;
+  requestId: string;
+  dataJson: string;
+  status: "pending" | "success" | "failed";
+  errorMessage: string | null;
+  apiUrl: string | null;
+  createdAt: string;
+  sentAt: string | null;
+}
+
+export async function pgInsertQimaSubmission(data: {
+  requestId: string;
+  dataJson: string;
+  apiUrl?: string;
+}): Promise<QimaSubmission> {
+  const pool = await ensureQimaSubmissionsTable();
+  const r = await pool.query(
+    "INSERT INTO qima_submissions (request_id, data_json, api_url) VALUES ($1, $2, $3) RETURNING *",
+    [data.requestId, data.dataJson, data.apiUrl ?? null]
+  );
+  const row = r.rows[0];
+  return {
+    id: row.id,
+    requestId: row.request_id,
+    dataJson: row.data_json,
+    status: row.status,
+    errorMessage: row.error_message ?? null,
+    apiUrl: row.api_url ?? null,
+    createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
+    sentAt: null,
+  };
+}
+
+export async function pgUpdateQimaSubmissionStatus(
+  id: number,
+  status: "success" | "failed",
+  errorMessage?: string,
+): Promise<void> {
+  const pool = await ensureQimaSubmissionsTable();
+  await pool.query(
+    "UPDATE qima_submissions SET status=$1, error_message=$2, sent_at=NOW() WHERE id=$3",
+    [status, errorMessage ?? null, id]
+  );
+}
+
+export async function pgListQimaSubmissions(): Promise<QimaSubmission[]> {
+  const pool = await ensureQimaSubmissionsTable();
+  const r = await pool.query("SELECT * FROM qima_submissions ORDER BY id DESC");
+  return r.rows.map(row => ({
+    id: row.id,
+    requestId: row.request_id,
+    dataJson: row.data_json,
+    status: row.status as QimaSubmission["status"],
+    errorMessage: row.error_message ?? null,
+    apiUrl: row.api_url ?? null,
+    createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
+    sentAt: row.sent_at instanceof Date ? row.sent_at.toISOString() : (row.sent_at ?? null),
+  }));
+}
+
+export async function pgGetQimaSubmissionById(id: number): Promise<QimaSubmission | null> {
+  const pool = await ensureQimaSubmissionsTable();
+  const r = await pool.query("SELECT * FROM qima_submissions WHERE id=$1", [id]);
+  if (!r.rows[0]) return null;
+  const row = r.rows[0];
+  return {
+    id: row.id,
+    requestId: row.request_id,
+    dataJson: row.data_json,
+    status: row.status as QimaSubmission["status"],
+    errorMessage: row.error_message ?? null,
+    apiUrl: row.api_url ?? null,
+    createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
+    sentAt: row.sent_at instanceof Date ? row.sent_at.toISOString() : (row.sent_at ?? null),
+  };
 }
 
 // ─── جدول التقارير المعمدة ────────────────────────────────────────────────────
