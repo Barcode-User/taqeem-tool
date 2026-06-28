@@ -292096,19 +292096,22 @@ async function _downloadQimaFiles(page) {
   for (let i = 0; i < Math.min(links.length, 4); i++) {
     const { href, contextLabel } = links[i];
     try {
-      _qimaLog(`\u{1F4E5} \u062C\u0627\u0631\u064D \u062A\u062D\u0645\u064A\u0644: ${contextLabel.slice(0, 40)}...`);
-      const [download] = await Promise.all([
-        page.waitForEvent("download", { timeout: 2e4 }),
-        page.evaluate((u) => {
-          const a = document.createElement("a");
-          a.href = u;
-          a.click();
-        }, href)
-      ]);
-      const dlPath = await download.path();
-      if (!dlPath) continue;
-      const buf = fs4.readFileSync(dlPath);
-      const name = download.suggestedFilename() || `file${i + 1}.pdf`;
+      _qimaLog(`\u{1F4E5} \u062C\u0627\u0631\u064D \u062A\u062D\u0645\u064A\u0644 (request.get): ${href.slice(0, 80)}...`);
+      const response = await page.request.get(href, { timeout: 3e4 });
+      if (!response.ok()) {
+        _qimaLog(`\u26A0\uFE0F \u0631\u0627\u0628\u0637 ${i + 1} \u0623\u0639\u0627\u062F HTTP ${response.status()} \u2014 \u062A\u062E\u0637\u0651\u064A`);
+        continue;
+      }
+      const bodyBytes = await response.body();
+      const buf = Buffer.from(bodyBytes);
+      if (buf.length === 0) {
+        _qimaLog(`\u26A0\uFE0F \u0631\u0627\u0628\u0637 ${i + 1}: \u0627\u0644\u0645\u0644\u0641 \u0641\u0627\u0631\u063A (0 bytes) \u2014 \u062A\u062E\u0637\u0651\u064A`);
+        continue;
+      }
+      const contentDisposition = response.headers()["content-disposition"] || "";
+      const cdMatch = contentDisposition.match(/filename\*?=(?:UTF-8''|"?)([^";]+)/i);
+      const urlBasename = href.split("/").pop()?.split("?")[0] || "";
+      const name = cdMatch ? decodeURIComponent(cdMatch[1].replace(/"/g, "")) : urlBasename || `file${i + 1}.pdf`;
       _qimaLog(`\u{1F4C4} \u062A\u0645 \u062A\u062D\u0645\u064A\u0644: ${name} (${Math.round(buf.length / 1024)} KB)`);
       const ctxNorm = contextLabel.replace(/[أإآا]/g, "\u0627").replace(/[ةه]/g, "\u0647");
       const isLicense = ctxNorm.includes("\u0631\u062E\u0635") || ctxNorm.includes("\u0628\u0646\u0627\u0621");
@@ -292120,7 +292123,7 @@ async function _downloadQimaFiles(page) {
         result.docName = name;
       }
     } catch (e) {
-      _qimaLog(`\u26A0\uFE0F \u0641\u0634\u0644 \u062A\u062D\u0645\u064A\u0644 \u0631\u0627\u0628\u0637 ${i + 1}: ${e.message?.slice(0, 60)}`);
+      _qimaLog(`\u26A0\uFE0F \u0641\u0634\u0644 \u062A\u062D\u0645\u064A\u0644 \u0631\u0627\u0628\u0637 ${i + 1}: ${e.message?.slice(0, 80)}`);
     }
   }
   return result;
