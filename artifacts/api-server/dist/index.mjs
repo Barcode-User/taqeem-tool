@@ -46919,8 +46919,32 @@ async function startLogin(username, password, role = "entry") {
   }
   s.activeFlow = null;
   const loginId = randomUUID();
-  const chromiumExec = getChromiumExecutable();
   const isReplit = !!process.env.REPL_ID || !!process.env.REPLIT_ID;
+  if (role === "qima") {
+    if (isReplit) {
+      const flow = {
+        loginId,
+        browser: null,
+        context: null,
+        status: "failed",
+        username,
+        error: "\u064A\u062C\u0628 \u062A\u0634\u063A\u064A\u0644 \u0627\u0644\u0623\u062F\u0627\u0629 \u0639\u0644\u0649 \u062C\u0647\u0627\u0632\u0643 \u0627\u0644\u0645\u062D\u0644\u064A (Windows) \u0644\u0641\u062A\u062D \u0645\u062A\u0635\u0641\u062D \u0642\u064A\u0645\u0629 \u2014 \u0627\u0644\u0645\u0648\u0642\u0639 \u0645\u062D\u062C\u0648\u0628 \u0645\u0646 \u0627\u0644\u0633\u064A\u0631\u0641\u0631 \u0627\u0644\u062E\u0627\u0631\u062C\u064A",
+        otpResolver: null,
+        logs: ["\u274C \u0644\u0627 \u064A\u0645\u0643\u0646 \u0641\u062A\u062D \u0645\u062A\u0635\u0641\u062D \u0642\u064A\u0645\u0629 \u0645\u0646 \u0627\u0644\u0633\u064A\u0631\u0641\u0631 \u0627\u0644\u062E\u0627\u0631\u062C\u064A \u2014 \u0634\u063A\u0651\u0644 \u0627\u0644\u0623\u062F\u0627\u0629 \u0645\u0646 \u062C\u0647\u0627\u0632\u0643 \u0627\u0644\u0645\u062D\u0644\u064A"]
+      };
+      s.activeFlow = flow;
+      return loginId;
+    }
+    runQimaManualLogin(role, loginId, username).catch((err) => {
+      if (s.activeFlow?.loginId === loginId) {
+        s.activeFlow.status = "failed";
+        s.activeFlow.error = err.message;
+        addFlowLog(role, `\u274C \u0641\u0634\u0644: ${err.message}`);
+      }
+    });
+    return loginId;
+  }
+  const chromiumExec = getChromiumExecutable();
   const headlessMode = isReplit ? true : false;
   let browser = null;
   if (!isReplit) {
@@ -46984,6 +47008,124 @@ async function startLogin(username, password, role = "entry") {
     }
   });
   return loginId;
+}
+async function runQimaManualLogin(role, loginId, username) {
+  const s = roleState[role];
+  const QIMA_HOME = "https://qima.taqeem.gov.sa";
+  const LOGIN_URL = `${QIMA_HOME}/membership/login`;
+  addFlowLog(role, "\u{1F310} \u062C\u0627\u0631\u064D \u0641\u062A\u062D Chrome \u2014 \u0633\u062C\u0651\u0644 \u062F\u062E\u0648\u0644\u0643 \u064A\u062F\u0648\u064A\u0627\u064B \u0641\u064A \u0627\u0644\u0646\u0627\u0641\u0630\u0629 \u0627\u0644\u062A\u064A \u0633\u062A\u0638\u0647\u0631...");
+  let browser = null;
+  try {
+    browser = await chromium.launch({
+      headless: false,
+      channel: "chrome",
+      args: [
+        "--disable-blink-features=AutomationControlled",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--window-size=1920,1080",
+        "--start-maximized"
+      ]
+    });
+  } catch {
+    browser = await chromium.launch({
+      headless: false,
+      args: ["--disable-blink-features=AutomationControlled", "--window-size=1920,1080", "--start-maximized"]
+    });
+  }
+  const storageStateFile = s.storageStateFile;
+  const storageState = fs2.existsSync(storageStateFile) ? storageStateFile : void 0;
+  const context = await browser.newContext({
+    locale: "ar-SA",
+    timezoneId: "Asia/Riyadh",
+    viewport: null,
+    ...storageState ? { storageState } : {}
+  });
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, "webdriver", { get: () => void 0 });
+    globalThis.window ??= {};
+    globalThis.window.chrome = { runtime: {} };
+  });
+  const flow = {
+    loginId,
+    browser,
+    context,
+    status: "logging_in",
+    username,
+    otpResolver: null,
+    logs: s.activeFlow?.logs ?? []
+  };
+  s.activeFlow = flow;
+  const page = await context.newPage();
+  addFlowLog(role, "\u{1F4C2} \u062C\u0627\u0631\u064D \u0627\u0644\u0627\u0646\u062A\u0642\u0627\u0644 \u0644\u0635\u0641\u062D\u0629 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644...");
+  try {
+    await page.goto(LOGIN_URL, { waitUntil: "domcontentloaded", timeout: 6e4 });
+  } catch (err) {
+    flow.status = "failed";
+    flow.error = `\u0641\u0634\u0644 \u0641\u062A\u062D \u0635\u0641\u062D\u0629 \u0642\u064A\u0645\u0629: ${err.message}`;
+    addFlowLog(role, `\u274C ${flow.error}`);
+    try {
+      await browser.close();
+    } catch {
+    }
+    return;
+  }
+  addFlowLog(role, "\u270B \u0633\u062C\u0651\u0644 \u062F\u062E\u0648\u0644\u0643 \u0627\u0644\u0622\u0646 \u0641\u064A \u0646\u0627\u0641\u0630\u0629 Chrome \u2014 \u0627\u0644\u0623\u062F\u0627\u0629 \u062A\u0631\u0627\u0642\u0628 \u062A\u0644\u0642\u0627\u0626\u064A\u0627\u064B \u0648\u0633\u062A\u062D\u0641\u0638 \u062C\u0644\u0633\u062A\u0643 \u0639\u0646\u062F \u0627\u0644\u0627\u0646\u062A\u0647\u0627\u0621");
+  addFlowLog(role, "\u23F3 \u0645\u0631\u0627\u0642\u0628\u0629 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 (\u0627\u0644\u0627\u0646\u062A\u0638\u0627\u0631 \u062D\u062A\u0649 5 \u062F\u0642\u0627\u0626\u0642)...");
+  const DEADLINE = Date.now() + 5 * 60 * 1e3;
+  const SSO_HOST = "sso.taqeem.gov.sa";
+  while (Date.now() < DEADLINE) {
+    await page.waitForTimeout(2e3);
+    if (page.isClosed() || !browser.isConnected()) {
+      flow.status = "failed";
+      flow.error = "\u0623\u064F\u063A\u0644\u0642 \u0627\u0644\u0645\u062A\u0635\u0641\u062D \u0642\u0628\u0644 \u0627\u0643\u062A\u0645\u0627\u0644 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644";
+      addFlowLog(role, `\u274C ${flow.error}`);
+      return;
+    }
+    let currentUrl = "";
+    try {
+      currentUrl = page.url();
+    } catch {
+      break;
+    }
+    let hostname = "";
+    try {
+      hostname = new URL(currentUrl).hostname;
+    } catch {
+    }
+    if (hostname.includes("qima.taqeem.gov.sa") && !hostname.includes(SSO_HOST) && !currentUrl.includes("/membership/login")) {
+      addFlowLog(role, `\u2705 \u062A\u0645 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 \u0628\u0646\u062C\u0627\u062D \u2014 \u0627\u0644\u0635\u0641\u062D\u0629: ${currentUrl}`);
+      addFlowLog(role, "\u{1F4BE} \u062C\u0627\u0631\u064D \u062D\u0641\u0638 \u0627\u0644\u062C\u0644\u0633\u0629...");
+      try {
+        await context.storageState({ path: storageStateFile });
+        saveMeta(role, username);
+        setSharedContext(role, browser, context);
+        flow.status = "authenticated";
+        flow.loggedInAt = /* @__PURE__ */ new Date();
+        addFlowLog(role, "\u2705 \u0627\u0644\u062C\u0644\u0633\u0629 \u0645\u062D\u0641\u0648\u0638\u0629 \u2014 \u064A\u0645\u0643\u0646\u0643 \u0627\u0644\u0622\u0646 \u062A\u0634\u063A\u064A\u0644 \u0631\u0648\u0628\u0648\u062A \u0642\u064A\u0645\u0629");
+      } catch (saveErr) {
+        flow.status = "failed";
+        flow.error = `\u0641\u0634\u0644 \u062D\u0641\u0638 \u0627\u0644\u062C\u0644\u0633\u0629: ${saveErr.message}`;
+        addFlowLog(role, `\u274C ${flow.error}`);
+      }
+      try {
+        await page.close();
+      } catch {
+      }
+      return;
+    }
+  }
+  flow.status = "failed";
+  flow.error = "\u0627\u0646\u062A\u0647\u062A \u0645\u0647\u0644\u0629 \u0627\u0644\u0627\u0646\u062A\u0638\u0627\u0631 (5 \u062F\u0642\u0627\u0626\u0642) \u2014 \u0623\u0639\u062F \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0629 \u0648\u0633\u062C\u0651\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 \u0641\u064A Chrome \u0642\u0628\u0644 \u0627\u0646\u062A\u0647\u0627\u0621 \u0627\u0644\u0648\u0642\u062A";
+  addFlowLog(role, `\u274C ${flow.error}`);
+  try {
+    await page.close();
+  } catch {
+  }
+  try {
+    await browser.close();
+  } catch {
+  }
 }
 async function runLoginFlow(role, flow, username, password) {
   const s = roleState[role];
