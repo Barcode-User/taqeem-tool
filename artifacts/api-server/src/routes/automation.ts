@@ -1840,21 +1840,29 @@ async function _downloadQimaFiles(page: any): Promise<{
   _qimaLog(`🔗 وُجد ${links.length} رابط تنزيل`);
   if (links.length === 0) return result;
 
-  // حمّل كل رابط وصنّفه
+  // حمّل كل رابط عبر page.request.get() — يستخدم كوكيز الجلسة تلقائياً
   for (let i = 0; i < Math.min(links.length, 4); i++) {
     const { href, contextLabel } = links[i];
     try {
-      _qimaLog(`📥 جارٍ تحميل: ${contextLabel.slice(0, 40)}...`);
-      const [download] = await Promise.all([
-        page.waitForEvent("download", { timeout: 20000 }),
-        page.evaluate((u: string) => {
-          const a = document.createElement("a"); a.href = u; a.click();
-        }, href),
-      ]);
-      const dlPath = await download.path();
-      if (!dlPath) continue;
-      const buf = fs.readFileSync(dlPath);
-      const name = download.suggestedFilename() || `file${i + 1}.pdf`;
+      _qimaLog(`📥 جارٍ تحميل (request.get): ${href.slice(0, 80)}...`);
+      const response = await page.request.get(href, { timeout: 30000 });
+      if (!response.ok()) {
+        _qimaLog(`⚠️ رابط ${i + 1} أعاد HTTP ${response.status()} — تخطّي`);
+        continue;
+      }
+      const bodyBytes = await response.body();
+      const buf = Buffer.from(bodyBytes);
+      if (buf.length === 0) {
+        _qimaLog(`⚠️ رابط ${i + 1}: الملف فارغ (0 bytes) — تخطّي`);
+        continue;
+      }
+
+      // استخرج اسم الملف من Content-Disposition أو URL
+      const contentDisposition = response.headers()["content-disposition"] || "";
+      const cdMatch = contentDisposition.match(/filename\*?=(?:UTF-8''|"?)([^";]+)/i);
+      const urlBasename = href.split("/").pop()?.split("?")[0] || "";
+      const name = cdMatch ? decodeURIComponent(cdMatch[1].replace(/"/g, "")) : (urlBasename || `file${i + 1}.pdf`);
+
       _qimaLog(`📄 تم تحميل: ${name} (${Math.round(buf.length / 1024)} KB)`);
 
       // صنّف: رخصة بناء أم مستند عقار؟
@@ -1866,7 +1874,7 @@ async function _downloadQimaFiles(page: any): Promise<{
         result.docFile = buf; result.docName = name;
       }
     } catch (e: any) {
-      _qimaLog(`⚠️ فشل تحميل رابط ${i + 1}: ${e.message?.slice(0, 60)}`);
+      _qimaLog(`⚠️ فشل تحميل رابط ${i + 1}: ${e.message?.slice(0, 80)}`);
     }
   }
   return result;
