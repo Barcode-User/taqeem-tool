@@ -5,7 +5,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import {
-  Bot,
   KeyRound,
   LogIn,
   LogOut,
@@ -131,8 +130,7 @@ export default function TaqeemSessionPage() {
   const isCertifier = role === "certifier";
   const isQima = role === "qima";
   const isAuthenticated = session.status === "authenticated";
-  const isLoggingIn = (session.status === "logging_in" || session.status === "waiting_otp" || loading) && !isQima;
-  const isQimaWaiting = isQima && session.status === "logging_in";
+  const isLoggingIn = session.status === "logging_in" || session.status === "waiting_otp" || loading;
 
   const sessionLabel = isCertifier
     ? "جلسة معمد البيانات — لتعميد التقارير على منصة تقييم"
@@ -160,21 +158,6 @@ export default function TaqeemSessionPage() {
         {sessionLabel}
       </div>
 
-      {/* تعليمات خاصة بدور قيمة */}
-      {isQima && !isAuthenticated && (
-        <div className="rounded-lg bg-violet-50 border border-violet-200 p-4 space-y-2" dir="rtl">
-          <p className="font-semibold text-violet-800 flex items-center gap-2">
-            <Bot className="h-4 w-4" />
-            كيف يعمل تسجيل الدخول لنظام قيمة؟
-          </p>
-          <ol className="text-sm text-violet-700 space-y-1 list-decimal list-inside">
-            <li>أدخل اسم المستخدم وكلمة المرور ثم اضغط <strong>تسجيل الدخول</strong></li>
-            <li>سيفتح Chrome تلقائياً على صفحة قيمة — <strong>سجّل دخولك يدوياً</strong> في النافذة التي تظهر</li>
-            <li>بعد نجاح الدخول، تُحفظ الجلسة تلقائياً وتعود الأداة للحالة "مسجّل"</li>
-          </ol>
-          <p className="text-xs text-violet-500 mt-1">⚠️ لدك حتى 5 دقائق لإتمام تسجيل الدخول في Chrome</p>
-        </div>
-      )}
 
       {/* Status Card */}
       <Card>
@@ -212,17 +195,6 @@ export default function TaqeemSessionPage() {
                 تسجيل الخروج
               </Button>
             </div>
-          ) : isQimaWaiting ? (
-            <div className="rounded-lg bg-violet-50 border border-violet-200 text-violet-800 p-4 flex items-start gap-3">
-              <Loader2 className="h-5 w-5 animate-spin shrink-0 mt-0.5" />
-              <div>
-                <p className="font-semibold">Chrome مفتوح — في انتظار تسجيل دخولك...</p>
-                <p className="text-sm mt-1 opacity-80">
-                  سجّل الدخول في نافذة Chrome التي ظهرت أمامك. ستُحفظ الجلسة تلقائياً عند الانتهاء.
-                </p>
-                <p className="text-xs mt-2 opacity-60">⏳ الوقت المتاح: 5 دقائق</p>
-              </div>
-            </div>
           ) : isLoggingIn ? (
             <div className="rounded-lg bg-blue-50 border border-blue-200 text-blue-800 p-4 flex items-center gap-3">
               <Loader2 className="h-5 w-5 animate-spin shrink-0" />
@@ -252,7 +224,7 @@ export default function TaqeemSessionPage() {
       </Card>
 
       {/* Login Form */}
-      {!isAuthenticated && !isLoggingIn && !isQimaWaiting && (
+      {!isAuthenticated && !isLoggingIn && (
         <Card>
           <CardHeader className="bg-muted/40 border-b pb-3">
             <CardTitle className="text-base flex items-center gap-2">
