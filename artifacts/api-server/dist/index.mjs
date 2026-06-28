@@ -46992,8 +46992,9 @@ async function runLoginFlow(role, flow, username, password) {
   const page = await flow.context.newPage();
   try {
     addFlowLog(role, "\u0627\u0644\u0627\u0646\u062A\u0642\u0627\u0644 \u0625\u0644\u0649 \u0635\u0641\u062D\u0629 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644...");
+    const initialUrl = role === "qima" ? `${TAQEEM_URL2}/qaym/request/13/tab` : `${TAQEEM_URL2}/membership/login`;
     try {
-      await page.goto(`${TAQEEM_URL2}/membership/login`, {
+      await page.goto(initialUrl, {
         waitUntil: "domcontentloaded",
         timeout: 6e4
       });
@@ -47006,7 +47007,7 @@ async function runLoginFlow(role, flow, username, password) {
     await page.waitForTimeout(2e3);
     const currentUrlAfterNav = page.url();
     addFlowLog(role, `\u0627\u0644\u0635\u0641\u062D\u0629 \u0627\u0644\u062D\u0627\u0644\u064A\u0629: ${currentUrlAfterNav}`);
-    if (currentUrlAfterNav === "about:blank" || currentUrlAfterNav === `${TAQEEM_URL2}/membership/login`) {
+    if (currentUrlAfterNav === "about:blank" || currentUrlAfterNav === initialUrl) {
       const bodyText = await page.innerText("body").catch(() => "");
       addFlowLog(role, `\u0645\u062D\u062A\u0648\u0649 \u0627\u0644\u0635\u0641\u062D\u0629 (\u0623\u0648\u0644 200 \u062D\u0631\u0641): ${bodyText.slice(0, 200)}`);
     }
