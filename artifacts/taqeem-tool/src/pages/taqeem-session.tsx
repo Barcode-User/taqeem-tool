@@ -29,9 +29,9 @@ type SessionStatus = {
 
 const ROLE_KEY = "taqeem_role";
 
-function getCurrentRole(): "entry" | "certifier" {
+function getCurrentRole(): "entry" | "certifier" | "qima" {
   const v = localStorage.getItem(ROLE_KEY);
-  return v === "certifier" ? "certifier" : "entry";
+  return v === "certifier" ? "certifier" : v === "qima" ? "qima" : "entry";
 }
 
 export default function TaqeemSessionPage() {
@@ -129,24 +129,52 @@ export default function TaqeemSessionPage() {
   };
 
   const isCertifier = role === "certifier";
+  const isQima = role === "qima";
   const isAuthenticated = session.status === "authenticated";
-  const isLoggingIn = session.status === "logging_in" || session.status === "waiting_otp" || loading;
+  const isLoggingIn = (session.status === "logging_in" || session.status === "waiting_otp" || loading) && !isQima;
+  const isQimaWaiting = isQima && session.status === "logging_in";
 
   const sessionLabel = isCertifier
     ? "جلسة معمد البيانات — لتعميد التقارير على منصة تقييم"
+    : isQima
+    ? "جلسة نظام قيمة — لفتح الطلبات المسندة تلقائياً"
     : "جلسة مدخل البيانات — لرفع التقارير على منصة تقييم";
 
   const afterLoginNote = isCertifier
     ? "يمكنك الآن تعميد التقارير على منصة تقييم."
+    : isQima
+    ? "يمكنك الآن تشغيل روبوت قيمة لفتح الطلبات المسندة."
     : "يمكنك الآن رفع أي عدد من التقارير بدون إعادة تسجيل الدخول.";
+
+  const badgeColor = isCertifier
+    ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+    : isQima
+    ? "bg-violet-50 border-violet-200 text-violet-800"
+    : "bg-blue-50 border-blue-200 text-blue-800";
 
   return (
     <div className="max-w-xl mx-auto space-y-6">
       {/* Role badge */}
-      <div className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border ${isCertifier ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-blue-50 border-blue-200 text-blue-800"}`}>
+      <div className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border ${badgeColor}`}>
         <ShieldCheck className="h-4 w-4 shrink-0" />
         {sessionLabel}
       </div>
+
+      {/* تعليمات خاصة بدور قيمة */}
+      {isQima && !isAuthenticated && (
+        <div className="rounded-lg bg-violet-50 border border-violet-200 p-4 space-y-2" dir="rtl">
+          <p className="font-semibold text-violet-800 flex items-center gap-2">
+            <Bot className="h-4 w-4" />
+            كيف يعمل تسجيل الدخول لنظام قيمة؟
+          </p>
+          <ol className="text-sm text-violet-700 space-y-1 list-decimal list-inside">
+            <li>أدخل اسم المستخدم وكلمة المرور ثم اضغط <strong>تسجيل الدخول</strong></li>
+            <li>سيفتح Chrome تلقائياً على صفحة قيمة — <strong>سجّل دخولك يدوياً</strong> في النافذة التي تظهر</li>
+            <li>بعد نجاح الدخول، تُحفظ الجلسة تلقائياً وتعود الأداة للحالة "مسجّل"</li>
+          </ol>
+          <p className="text-xs text-violet-500 mt-1">⚠️ لدك حتى 5 دقائق لإتمام تسجيل الدخول في Chrome</p>
+        </div>
+      )}
 
       {/* Status Card */}
       <Card>
@@ -184,6 +212,17 @@ export default function TaqeemSessionPage() {
                 تسجيل الخروج
               </Button>
             </div>
+          ) : isQimaWaiting ? (
+            <div className="rounded-lg bg-violet-50 border border-violet-200 text-violet-800 p-4 flex items-start gap-3">
+              <Loader2 className="h-5 w-5 animate-spin shrink-0 mt-0.5" />
+              <div>
+                <p className="font-semibold">Chrome مفتوح — في انتظار تسجيل دخولك...</p>
+                <p className="text-sm mt-1 opacity-80">
+                  سجّل الدخول في نافذة Chrome التي ظهرت أمامك. ستُحفظ الجلسة تلقائياً عند الانتهاء.
+                </p>
+                <p className="text-xs mt-2 opacity-60">⏳ الوقت المتاح: 5 دقائق</p>
+              </div>
+            </div>
           ) : isLoggingIn ? (
             <div className="rounded-lg bg-blue-50 border border-blue-200 text-blue-800 p-4 flex items-center gap-3">
               <Loader2 className="h-5 w-5 animate-spin shrink-0" />
@@ -213,7 +252,7 @@ export default function TaqeemSessionPage() {
       </Card>
 
       {/* Login Form */}
-      {!isAuthenticated && !isLoggingIn && (
+      {!isAuthenticated && !isLoggingIn && !isQimaWaiting && (
         <Card>
           <CardHeader className="bg-muted/40 border-b pb-3">
             <CardTitle className="text-base flex items-center gap-2">
