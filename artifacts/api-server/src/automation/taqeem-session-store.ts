@@ -275,8 +275,14 @@ async function runLoginFlow(role: RoleKey, flow: ActiveLoginFlow, username: stri
   try {
     addFlowLog(role, "الانتقال إلى صفحة تسجيل الدخول...");
 
+    // دور qima: نذهب لصفحة الطلبات مباشرة — ستُعيد التوجيه لـ SSO إذا لم يكن مسجلاً
+    // دور entry/certifier: نذهب لـ /membership/login
+    const initialUrl = role === "qima"
+      ? `${TAQEEM_URL}/qaym/request/13/tab`
+      : `${TAQEEM_URL}/membership/login`;
+
     try {
-      await page.goto(`${TAQEEM_URL}/membership/login`, {
+      await page.goto(initialUrl, {
         waitUntil: "domcontentloaded",
         timeout: 60000,
       });
@@ -293,7 +299,7 @@ async function runLoginFlow(role: RoleKey, flow: ActiveLoginFlow, username: stri
     const currentUrlAfterNav = page.url();
     addFlowLog(role, `الصفحة الحالية: ${currentUrlAfterNav}`);
 
-    if (currentUrlAfterNav === "about:blank" || currentUrlAfterNav === `${TAQEEM_URL}/membership/login`) {
+    if (currentUrlAfterNav === "about:blank" || currentUrlAfterNav === initialUrl) {
       const bodyText = await page.innerText("body").catch(() => "");
       addFlowLog(role, `محتوى الصفحة (أول 200 حرف): ${bodyText.slice(0, 200)}`);
     }
