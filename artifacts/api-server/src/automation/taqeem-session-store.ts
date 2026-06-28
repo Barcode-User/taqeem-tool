@@ -180,6 +180,14 @@ export function getLoginStatus(role: RoleKey = "entry"): {
 }
 
 export async function startLogin(username: string, password: string, role: RoleKey = "entry"): Promise<string> {
+  const isReplit = !!process.env.REPL_ID || !!process.env.REPLIT_ID;
+  if (isReplit) {
+    throw new Error(
+      "الأتمتة لا تعمل على Replit — يجب تشغيل الخادم على جهازك المحلي.\n" +
+      "افتح http://localhost:8080 من جهازك بدلاً من استخدام رابط Replit."
+    );
+  }
+
   const s = roleState[role];
   if (s.activeFlow?.browser) {
     try { await s.activeFlow.browser.close(); } catch {}
@@ -189,38 +197,32 @@ export async function startLogin(username: string, password: string, role: RoleK
   const loginId = randomUUID();
 
   const chromiumExec = getChromiumExecutable();
-  const isReplit = !!process.env.REPL_ID || !!process.env.REPLIT_ID;
-  const headlessMode = isReplit ? true : false;
 
+  // نصل هنا فقط إذا كنا على الجهاز المحلي (isReplit=false تم التحقق منها أعلاه)
   let browser: import("playwright").Browser | null = null;
-  if (!isReplit) {
-    try {
-      browser = await chromium.launch({
-        headless: false,
-        channel: "chrome",
-        slowMo: 150,
-        args: [
-          "--disable-blink-features=AutomationControlled",
-          "--no-first-run",
-          "--no-default-browser-check",
-          "--window-size=1920,1080",
-        ],
-      });
-      console.log(`[TaqeemLogin:${role}] Using real Chrome channel`);
-    } catch (e) {
-      console.log(`[TaqeemLogin:${role}] Chrome channel not available: ${e} — falling back`);
-      browser = null;
-    }
+  try {
+    browser = await chromium.launch({
+      headless: false,
+      channel: "chrome",
+      slowMo: 150,
+      args: [
+        "--disable-blink-features=AutomationControlled",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--window-size=1920,1080",
+      ],
+    });
+    console.log(`[TaqeemLogin:${role}] Using real Chrome channel`);
+  } catch (e) {
+    console.log(`[TaqeemLogin:${role}] Chrome channel not available: ${e} — falling back`);
+    browser = null;
   }
 
   if (!browser) {
-    const chromiumArgs = isReplit
-      ? ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
-      : ["--disable-blink-features=AutomationControlled", "--no-first-run", "--no-default-browser-check"];
     browser = await chromium.launch({
-      headless: headlessMode,
-      slowMo: headlessMode ? 0 : 150,
-      args: chromiumArgs,
+      headless: false,
+      slowMo: 150,
+      args: ["--disable-blink-features=AutomationControlled", "--no-first-run", "--no-default-browser-check"],
       ...(chromiumExec ? { executablePath: chromiumExec } : {}),
     });
   }
@@ -232,9 +234,6 @@ export async function startLogin(username: string, password: string, role: RoleK
     locale: "ar-SA",
     timezoneId: "Asia/Riyadh",
     viewport: { width: 1920, height: 1080 },
-    ...(isReplit ? {
-      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    } : {}),
     ...(storageState ? { storageState } : {}),
   });
 
