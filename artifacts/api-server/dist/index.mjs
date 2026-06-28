@@ -46910,6 +46910,12 @@ function getLoginStatus(role = "entry") {
   return { status: "not_logged_in", logs: [] };
 }
 async function startLogin(username, password, role = "entry") {
+  const isReplit = !!process.env.REPL_ID || !!process.env.REPLIT_ID;
+  if (isReplit) {
+    throw new Error(
+      "\u0627\u0644\u0623\u062A\u0645\u062A\u0629 \u0644\u0627 \u062A\u0639\u0645\u0644 \u0639\u0644\u0649 Replit \u2014 \u064A\u062C\u0628 \u062A\u0634\u063A\u064A\u0644 \u0627\u0644\u062E\u0627\u062F\u0645 \u0639\u0644\u0649 \u062C\u0647\u0627\u0632\u0643 \u0627\u0644\u0645\u062D\u0644\u064A.\n\u0627\u0641\u062A\u062D http://localhost:8080 \u0645\u0646 \u062C\u0647\u0627\u0632\u0643 \u0628\u062F\u0644\u0627\u064B \u0645\u0646 \u0627\u0633\u062A\u062E\u062F\u0627\u0645 \u0631\u0627\u0628\u0637 Replit."
+    );
+  }
   const s = roleState[role];
   if (s.activeFlow?.browser) {
     try {
@@ -46920,34 +46926,29 @@ async function startLogin(username, password, role = "entry") {
   s.activeFlow = null;
   const loginId = randomUUID();
   const chromiumExec = getChromiumExecutable();
-  const isReplit = !!process.env.REPL_ID || !!process.env.REPLIT_ID;
-  const headlessMode = isReplit ? true : false;
   let browser = null;
-  if (!isReplit) {
-    try {
-      browser = await chromium.launch({
-        headless: false,
-        channel: "chrome",
-        slowMo: 150,
-        args: [
-          "--disable-blink-features=AutomationControlled",
-          "--no-first-run",
-          "--no-default-browser-check",
-          "--window-size=1920,1080"
-        ]
-      });
-      console.log(`[TaqeemLogin:${role}] Using real Chrome channel`);
-    } catch (e) {
-      console.log(`[TaqeemLogin:${role}] Chrome channel not available: ${e} \u2014 falling back`);
-      browser = null;
-    }
+  try {
+    browser = await chromium.launch({
+      headless: false,
+      channel: "chrome",
+      slowMo: 150,
+      args: [
+        "--disable-blink-features=AutomationControlled",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--window-size=1920,1080"
+      ]
+    });
+    console.log(`[TaqeemLogin:${role}] Using real Chrome channel`);
+  } catch (e) {
+    console.log(`[TaqeemLogin:${role}] Chrome channel not available: ${e} \u2014 falling back`);
+    browser = null;
   }
   if (!browser) {
-    const chromiumArgs = isReplit ? ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"] : ["--disable-blink-features=AutomationControlled", "--no-first-run", "--no-default-browser-check"];
     browser = await chromium.launch({
-      headless: headlessMode,
-      slowMo: headlessMode ? 0 : 150,
-      args: chromiumArgs,
+      headless: false,
+      slowMo: 150,
+      args: ["--disable-blink-features=AutomationControlled", "--no-first-run", "--no-default-browser-check"],
       ...chromiumExec ? { executablePath: chromiumExec } : {}
     });
   }
@@ -46957,9 +46958,6 @@ async function startLogin(username, password, role = "entry") {
     locale: "ar-SA",
     timezoneId: "Asia/Riyadh",
     viewport: { width: 1920, height: 1080 },
-    ...isReplit ? {
-      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    } : {},
     ...storageState ? { storageState } : {}
   });
   await context.addInitScript(() => {
