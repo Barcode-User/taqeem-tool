@@ -50155,37 +50155,71 @@ ${pageTextAfterSubmit.slice(0, 400)}`);
       const blob = new Blob([fileBuffer], { type: "application/pdf" });
       formData.append("certificatePath", blob, path3.basename(certificatePath));
     }
-    const resp = await fetch("http://192.168.1.88:4545/External/QrInformationApi", {
-      method: "POST",
-      body: formData
-    });
-    const rawBody = await resp.text().catch(() => "");
-    let qrJson = null;
-    try {
-      qrJson = JSON.parse(rawBody);
-    } catch {
+    const QR_TIMEOUT_MS = 3 * 60 * 1e3;
+    const QR_MAX_ATTEMPTS = 3;
+    let qrSuccess = false;
+    let qrErrMsg = "";
+    for (let _attempt = 1; _attempt <= QR_MAX_ATTEMPTS; _attempt++) {
+      if (_attempt > 1) {
+        addLog(session, `\u{1F504} \u0625\u0639\u0627\u062F\u0629 \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0629 ${_attempt - 1} \u0645\u0646 ${QR_MAX_ATTEMPTS - 1} \u2014 \u0627\u0646\u062A\u0638\u0627\u0631 5 \u062B\u0648\u0627\u0646\u064D...`);
+        await new Promise((r) => setTimeout(r, 5e3));
+      }
+      qrSuccess = false;
+      qrErrMsg = "";
+      try {
+        const controller = new AbortController();
+        const _tid = setTimeout(() => controller.abort(), QR_TIMEOUT_MS);
+        let resp;
+        try {
+          resp = await fetch("http://192.168.1.88:4545/External/QrInformationApi", {
+            method: "POST",
+            body: formData,
+            signal: controller.signal
+          });
+        } finally {
+          clearTimeout(_tid);
+        }
+        const rawBody = await resp.text().catch(() => "");
+        let qrJson = null;
+        try {
+          qrJson = JSON.parse(rawBody);
+        } catch {
+        }
+        if (!resp.ok) {
+          qrErrMsg = `QrInformationApi: HTTP ${resp.status} \u2014 ${rawBody.slice(0, 200)}`;
+          addLog(session, `\u274C ${qrErrMsg}`);
+        } else if (qrJson !== null && qrJson.success === false) {
+          const reason = qrJson.message ?? qrJson.error ?? qrJson.msg ?? JSON.stringify(qrJson).slice(0, 200);
+          qrErrMsg = `QrInformationApi: success=false \u2014 ${reason}`;
+          addLog(session, `\u274C ${qrErrMsg}`);
+        } else {
+          qrSuccess = true;
+          addLog(session, `\u2705 QRInformationApi: ${resp.status} ${resp.statusText}${qrJson?.success === true ? " (success: true)" : ""}`);
+        }
+      } catch (e) {
+        if (e?.name === "AbortError") {
+          qrErrMsg = `QrInformationApi: \u0627\u0646\u062A\u0647\u062A \u0645\u0647\u0644\u0629 \u0627\u0644\u0627\u0646\u062A\u0638\u0627\u0631 (3 \u062F\u0642\u0627\u0626\u0642)`;
+        } else {
+          qrErrMsg = `QrInformationApi \u0641\u0634\u0644 \u0627\u0644\u0627\u062A\u0635\u0627\u0644: ${String(e).slice(0, 100)}`;
+        }
+        addLog(session, `\u274C ${qrErrMsg}`);
+      }
+      if (qrSuccess) break;
+      if (_attempt < QR_MAX_ATTEMPTS) {
+        addLog(session, `\u26A0\uFE0F \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0629 ${_attempt} \u0641\u0634\u0644\u062A \u2014 \u0633\u064A\u062A\u0645 \u0625\u0639\u0627\u062F\u0629 \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0629...`);
+      } else {
+        addLog(session, `\u{1F534} \u0641\u0634\u0644\u062A \u062C\u0645\u064A\u0639 \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0627\u062A (${QR_MAX_ATTEMPTS}) \u2014 \u0633\u064A\u062A\u0645 \u062A\u062C\u0627\u0648\u0632 \u0627\u0644\u062A\u0642\u0631\u064A\u0631`);
+      }
     }
-    if (!resp.ok) {
-      const errMsg = `QrInformationApi: HTTP ${resp.status} \u2014 ${rawBody.slice(0, 200)}`;
-      addLog(session, `\u274C ${errMsg} \u2014 \u0633\u064A\u062A\u0645 \u062A\u062C\u0627\u0648\u0632 \u0647\u0630\u0627 \u0627\u0644\u062A\u0642\u0631\u064A\u0631 \u0648\u0627\u0644\u0627\u0646\u062A\u0642\u0627\u0644 \u0644\u0644\u062A\u0627\u0644\u064A`);
+    if (!qrSuccess) {
       await updateReport(reportId, {
         automationStatus: "qr_error",
-        automationError: errMsg
+        automationError: qrErrMsg
       });
-    } else if (qrJson !== null && qrJson.success === false) {
-      const reason = qrJson.message ?? qrJson.error ?? qrJson.msg ?? JSON.stringify(qrJson).slice(0, 200);
-      const errMsg = `QrInformationApi: success=false \u2014 ${reason}`;
-      addLog(session, `\u274C ${errMsg} \u2014 \u0633\u064A\u062A\u0645 \u062A\u062C\u0627\u0648\u0632 \u0647\u0630\u0627 \u0627\u0644\u062A\u0642\u0631\u064A\u0631 \u0648\u0627\u0644\u0627\u0646\u062A\u0642\u0627\u0644 \u0644\u0644\u062A\u0627\u0644\u064A`);
-      await updateReport(reportId, {
-        automationStatus: "qr_error",
-        automationError: errMsg
-      });
-    } else {
-      addLog(session, `\u2705 QRInformationApi: ${resp.status} ${resp.statusText}${qrJson?.success === true ? " (success: true)" : ""}`);
     }
   } catch (e) {
-    const errMsg = `QrInformationApi \u0641\u0634\u0644 \u0627\u0644\u0627\u062A\u0635\u0627\u0644: ${String(e).slice(0, 100)}`;
-    addLog(session, `\u274C ${errMsg} \u2014 \u0633\u064A\u062A\u0645 \u062A\u062C\u0627\u0648\u0632 \u0647\u0630\u0627 \u0627\u0644\u062A\u0642\u0631\u064A\u0631 \u0648\u0627\u0644\u0627\u0646\u062A\u0642\u0627\u0644 \u0644\u0644\u062A\u0627\u0644\u064A`);
+    const errMsg = `QrInformationApi \u062E\u0637\u0623 \u0639\u0627\u0645: ${String(e).slice(0, 100)}`;
+    addLog(session, `\u274C ${errMsg}`);
     await updateReport(reportId, {
       automationStatus: "qr_error",
       automationError: errMsg
@@ -291095,58 +291129,78 @@ async function _doExtractAndSend(page) {
       const { qrApiHostname, qrApiPort, debugMsg } = _loadConfig();
       _certifyLog(`\u2699\uFE0F ${debugMsg}`);
       _certifyLog(`\u{1F310} QrInformationApi \u2192 http://${qrApiHostname}:${qrApiPort}/External/QrInformationApi`);
+      const QR_TIMEOUT_MS = 3 * 60 * 1e3;
+      const QR_MAX_ATTEMPTS = 3;
       let _apiSuccess = false;
       let _apiErrorMsg = "";
-      await new Promise((resolve) => {
-        const reqOpts = {
-          hostname: qrApiHostname,
-          port: qrApiPort,
-          path: "/External/QrInformationApi",
-          method: "POST",
-          headers: {
-            ...fd.getHeaders(),
-            "Content-Length": fdBuffer.length
-            // ضروري لـ ASP.NET IFormFile
-          }
-        };
-        const req = http2.request(reqOpts, (res) => {
-          let body = "";
-          res.on("data", (chunk) => {
-            body += chunk;
-          });
-          res.on("end", () => {
-            if (res.statusCode >= 200 && res.statusCode < 300) {
-              let parsed = null;
-              try {
-                parsed = JSON.parse(body);
-              } catch {
-              }
-              if (parsed?.success === true) {
-                _apiSuccess = true;
-                _certifyLog(`\u2705 QrInformationApi: ${res.statusCode} \u2014 success: true`);
-              } else if (parsed?.success === false) {
-                const reason = parsed.message ?? parsed.error ?? parsed.msg ?? body.slice(0, 200);
-                _apiErrorMsg = `QrInformationApi: success=false \u2014 ${reason}`;
-                _certifyLog(`\u274C ${_apiErrorMsg}`);
-              } else {
-                _apiSuccess = true;
-                _certifyLog(`\u2705 QrInformationApi: ${res.statusCode} \u2014 ${body.slice(0, 200)}`);
-              }
-            } else {
-              _apiErrorMsg = `QrInformationApi: HTTP ${res.statusCode} \u2014 ${body.slice(0, 200)}`;
-              _certifyLog(`\u274C ${_apiErrorMsg}`);
+      for (let _attempt = 1; _attempt <= QR_MAX_ATTEMPTS; _attempt++) {
+        if (_attempt > 1) {
+          _certifyLog(`\u{1F504} \u0625\u0639\u0627\u062F\u0629 \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0629 ${_attempt - 1} \u0645\u0646 ${QR_MAX_ATTEMPTS - 1} \u2014 \u0627\u0646\u062A\u0638\u0627\u0631 5 \u062B\u0648\u0627\u0646\u064D...`);
+          await new Promise((r) => setTimeout(r, 5e3));
+        }
+        _apiSuccess = false;
+        _apiErrorMsg = "";
+        await new Promise((resolve) => {
+          const reqOpts = {
+            hostname: qrApiHostname,
+            port: qrApiPort,
+            path: "/External/QrInformationApi",
+            method: "POST",
+            headers: {
+              ...fd.getHeaders(),
+              "Content-Length": fdBuffer.length
             }
+          };
+          const req = http2.request(reqOpts, (res) => {
+            let body = "";
+            res.on("data", (chunk) => {
+              body += chunk;
+            });
+            res.on("end", () => {
+              if (res.statusCode >= 200 && res.statusCode < 300) {
+                let parsed = null;
+                try {
+                  parsed = JSON.parse(body);
+                } catch {
+                }
+                if (parsed?.success === true) {
+                  _apiSuccess = true;
+                  _certifyLog(`\u2705 QrInformationApi: ${res.statusCode} \u2014 success: true`);
+                } else if (parsed?.success === false) {
+                  const reason = parsed.message ?? parsed.error ?? parsed.msg ?? body.slice(0, 200);
+                  _apiErrorMsg = `QrInformationApi: success=false \u2014 ${reason}`;
+                  _certifyLog(`\u274C ${_apiErrorMsg}`);
+                } else {
+                  _apiSuccess = true;
+                  _certifyLog(`\u2705 QrInformationApi: ${res.statusCode} \u2014 ${body.slice(0, 200)}`);
+                }
+              } else {
+                _apiErrorMsg = `QrInformationApi: HTTP ${res.statusCode} \u2014 ${body.slice(0, 200)}`;
+                _certifyLog(`\u274C ${_apiErrorMsg}`);
+              }
+              resolve();
+            });
+          });
+          req.on("error", (err) => {
+            _apiErrorMsg = `QrInformationApi \u0641\u0634\u0644 \u0627\u0644\u0627\u062A\u0635\u0627\u0644: [${err.code ?? "?"}] ${err.message ?? String(err)}`;
+            _certifyLog(`\u274C ${_apiErrorMsg}`);
             resolve();
           });
+          req.setTimeout(QR_TIMEOUT_MS, () => {
+            _apiErrorMsg = `QrInformationApi: \u0627\u0646\u062A\u0647\u062A \u0645\u0647\u0644\u0629 \u0627\u0644\u0627\u0646\u062A\u0638\u0627\u0631 (3 \u062F\u0642\u0627\u0626\u0642)`;
+            _certifyLog(`\u23F1\uFE0F ${_apiErrorMsg}`);
+            req.destroy();
+          });
+          req.write(fdBuffer);
+          req.end();
         });
-        req.on("error", (err) => {
-          _apiErrorMsg = `QrInformationApi \u0641\u0634\u0644 \u0627\u0644\u0627\u062A\u0635\u0627\u0644: [${err.code ?? "?"}] ${err.message ?? String(err)}`;
-          _certifyLog(`\u274C ${_apiErrorMsg}`);
-          resolve();
-        });
-        req.write(fdBuffer);
-        req.end();
-      });
+        if (_apiSuccess) break;
+        if (_attempt < QR_MAX_ATTEMPTS) {
+          _certifyLog(`\u26A0\uFE0F \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0629 ${_attempt} \u0641\u0634\u0644\u062A \u2014 \u0633\u064A\u062A\u0645 \u0625\u0639\u0627\u062F\u0629 \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0629...`);
+        } else {
+          _certifyLog(`\u{1F534} \u0641\u0634\u0644\u062A \u062C\u0645\u064A\u0639 \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0627\u062A (${QR_MAX_ATTEMPTS}) \u2014 \u0633\u064A\u062A\u0645 \u062A\u062C\u0627\u0648\u0632 \u0627\u0644\u062A\u0642\u0631\u064A\u0631`);
+        }
+      }
       const _goToNextReport = async (label) => {
         _certifyLog(`\u{1F504} ${label} \u2014 \u0627\u0644\u0627\u0646\u062A\u0642\u0627\u0644 \u0644\u0644\u062A\u0642\u0631\u064A\u0631 \u0627\u0644\u062A\u0627\u0644\u064A...`);
         setTimeout(async () => {
