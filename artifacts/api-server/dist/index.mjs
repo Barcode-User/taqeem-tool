@@ -290941,7 +290941,7 @@ async function _doExtractAndSend(page) {
     _certifyLog("\u{1F4CB} \u0627\u0633\u062A\u062E\u0631\u0627\u062C \u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u0634\u0647\u0627\u062F\u0629...");
     const extracted = await page.evaluate(() => {
       const fullText = document.body.innerText || "";
-      const dcMatch = fullText.match(/DC\d+/i);
+      const dcMatch = fullText.match(/DC[A-Za-z]*\d+/i);
       const dcNumber = dcMatch ? dcMatch[0].toUpperCase() : "";
       const valMatch = fullText.match(/الر[أا]ي النهائي.*?[:：]\s*([\d,،٬]+)/);
       const finalValue = valMatch ? valMatch[1].replace(/[,،٬]/g, "") : "";
@@ -291102,7 +291102,7 @@ async function _doExtractAndSend(page) {
       const http2 = __require("http");
       const fd = new FormDataLib();
       fd.append("reportCode", finalDcNumber || "");
-      fd.append("taqeemReportNumber", reportNumber || "");
+      fd.append("taqeemReportNumber", finalDcNumber || reportNumber || "");
       fd.append("taqeemSubmittedAt", submittedAt || "");
       fd.append("qrCodeBase64", qrBase64 || "");
       fd.append("finalValue", extracted.finalValue || "");
