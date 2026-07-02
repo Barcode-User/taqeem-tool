@@ -46990,7 +46990,7 @@ async function runLoginFlow(role, flow, username, password) {
   const page = await flow.context.newPage();
   try {
     addFlowLog(role, "\u0627\u0644\u0627\u0646\u062A\u0642\u0627\u0644 \u0625\u0644\u0649 \u0635\u0641\u062D\u0629 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644...");
-    const initialUrl = role === "qima" ? `${TAQEEM_URL2}/qaym/request/13/tab` : `${TAQEEM_URL2}/membership/login`;
+    const initialUrl = role === "qima" ? `${TAQEEM_URL2}/qaym/request/13/tab` : `${TAQEEM_URL2}/report/create/1/13`;
     try {
       await page.goto(initialUrl, {
         waitUntil: "domcontentloaded",
