@@ -651,53 +651,79 @@ async function _doExtractAndSend(page: any): Promise<{
     _certifyLog(`⚙️ ${debugMsg}`);
     _certifyLog(`🌐 QrInformationApi → http://${qrApiHostname}:${qrApiPort}/External/QrInformationApi`);
 
+    const QR_TIMEOUT_MS = 3 * 60 * 1000; // 3 دقائق
+    const QR_MAX_ATTEMPTS = 3;           // محاولة أصلية + إعادتان
+
     let _apiSuccess = false;
     let _apiErrorMsg = "";
-    await new Promise<void>((resolve) => {
-      const reqOpts = {
-        hostname: qrApiHostname,
-        port: qrApiPort,
-        path: "/External/QrInformationApi",
-        method: "POST",
-        headers: {
-          ...fd.getHeaders(),
-          "Content-Length": fdBuffer.length,  // ضروري لـ ASP.NET IFormFile
-        },
-      };
-      const req = http.request(reqOpts, (res: any) => {
-        let body = "";
-        res.on("data", (chunk: any) => { body += chunk; });
-        res.on("end", () => {
-          if (res.statusCode >= 200 && res.statusCode < 300) {
-            let parsed: any = null;
-            try { parsed = JSON.parse(body); } catch {}
-            if (parsed?.success === true) {
-              _apiSuccess = true;
-              _certifyLog(`✅ QrInformationApi: ${res.statusCode} — success: true`);
-            } else if (parsed?.success === false) {
-              const reason = parsed.message ?? parsed.error ?? parsed.msg ?? body.slice(0, 200);
-              _apiErrorMsg = `QrInformationApi: success=false — ${reason}`;
-              _certifyLog(`❌ ${_apiErrorMsg}`);
+
+    for (let _attempt = 1; _attempt <= QR_MAX_ATTEMPTS; _attempt++) {
+      if (_attempt > 1) {
+        _certifyLog(`🔄 إعادة المحاولة ${_attempt - 1} من ${QR_MAX_ATTEMPTS - 1} — انتظار 5 ثوانٍ...`);
+        await new Promise(r => setTimeout(r, 5000));
+      }
+
+      _apiSuccess = false;
+      _apiErrorMsg = "";
+
+      await new Promise<void>((resolve) => {
+        const reqOpts = {
+          hostname: qrApiHostname,
+          port: qrApiPort,
+          path: "/External/QrInformationApi",
+          method: "POST",
+          headers: {
+            ...fd.getHeaders(),
+            "Content-Length": fdBuffer.length,
+          },
+        };
+        const req = http.request(reqOpts, (res: any) => {
+          let body = "";
+          res.on("data", (chunk: any) => { body += chunk; });
+          res.on("end", () => {
+            if (res.statusCode >= 200 && res.statusCode < 300) {
+              let parsed: any = null;
+              try { parsed = JSON.parse(body); } catch {}
+              if (parsed?.success === true) {
+                _apiSuccess = true;
+                _certifyLog(`✅ QrInformationApi: ${res.statusCode} — success: true`);
+              } else if (parsed?.success === false) {
+                const reason = parsed.message ?? parsed.error ?? parsed.msg ?? body.slice(0, 200);
+                _apiErrorMsg = `QrInformationApi: success=false — ${reason}`;
+                _certifyLog(`❌ ${_apiErrorMsg}`);
+              } else {
+                _apiSuccess = true;
+                _certifyLog(`✅ QrInformationApi: ${res.statusCode} — ${body.slice(0, 200)}`);
+              }
             } else {
-              // استجابة HTTP 2xx بدون حقل success واضح — نعتبرها نجاح
-              _apiSuccess = true;
-              _certifyLog(`✅ QrInformationApi: ${res.statusCode} — ${body.slice(0, 200)}`);
+              _apiErrorMsg = `QrInformationApi: HTTP ${res.statusCode} — ${body.slice(0, 200)}`;
+              _certifyLog(`❌ ${_apiErrorMsg}`);
             }
-          } else {
-            _apiErrorMsg = `QrInformationApi: HTTP ${res.statusCode} — ${body.slice(0, 200)}`;
-            _certifyLog(`❌ ${_apiErrorMsg}`);
-          }
+            resolve();
+          });
+        });
+        req.on("error", (err: any) => {
+          _apiErrorMsg = `QrInformationApi فشل الاتصال: [${err.code ?? "?"}] ${err.message ?? String(err)}`;
+          _certifyLog(`❌ ${_apiErrorMsg}`);
           resolve();
         });
+        req.setTimeout(QR_TIMEOUT_MS, () => {
+          _apiErrorMsg = `QrInformationApi: انتهت مهلة الانتظار (3 دقائق)`;
+          _certifyLog(`⏱️ ${_apiErrorMsg}`);
+          req.destroy();
+        });
+        req.write(fdBuffer);
+        req.end();
       });
-      req.on("error", (err: any) => {
-        _apiErrorMsg = `QrInformationApi فشل الاتصال: [${err.code ?? "?"}] ${err.message ?? String(err)}`;
-        _certifyLog(`❌ ${_apiErrorMsg}`);
-        resolve();
-      });
-      req.write(fdBuffer);
-      req.end();
-    });
+
+      if (_apiSuccess) break;
+
+      if (_attempt < QR_MAX_ATTEMPTS) {
+        _certifyLog(`⚠️ المحاولة ${_attempt} فشلت — سيتم إعادة المحاولة...`);
+      } else {
+        _certifyLog(`🔴 فشلت جميع المحاولات (${QR_MAX_ATTEMPTS}) — سيتم تجاوز التقرير`);
+      }
+    }
 
     // ── دالة مشتركة للانتقال للتقرير التالي (تُستخدم عند النجاح والفشل) ────
     const _goToNextReport = async (label: string) => {
