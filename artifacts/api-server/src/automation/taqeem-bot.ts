@@ -4803,24 +4803,76 @@ async function submitAndDownloadCertificate(
       formData.append("certificatePath", blob, path.basename(certificatePath));
     }
 
-    const resp = await fetch("http://192.168.1.88:4545/External/QrInformationApi", {
-      method: "POST",
-      body: formData,
-    });
+    const QR_TIMEOUT_MS  = 3 * 60 * 1000; // 3 دقائق
+    const QR_MAX_ATTEMPTS = 3;             // محاولة أصلية + إعادتان
 
-    if (resp.ok) {
-      addLog(session, `✅ QRInformationApi: ${resp.status} ${resp.statusText}`);
-    } else {
-      const body = await resp.text().catch(() => "");
-      const errMsg = `QRInformationApi: ${resp.status} — ${body.slice(0, 200)}`;
-      addLog(session, `❌ ${errMsg}`);
+    let qrSuccess = false;
+    let qrErrMsg  = "";
+
+    for (let _attempt = 1; _attempt <= QR_MAX_ATTEMPTS; _attempt++) {
+      if (_attempt > 1) {
+        addLog(session, `🔄 إعادة المحاولة ${_attempt - 1} من ${QR_MAX_ATTEMPTS - 1} — انتظار 5 ثوانٍ...`);
+        await new Promise(r => setTimeout(r, 5000));
+      }
+
+      qrSuccess = false;
+      qrErrMsg  = "";
+
+      try {
+        const controller = new AbortController();
+        const _tid = setTimeout(() => controller.abort(), QR_TIMEOUT_MS);
+        let resp: Response;
+        try {
+          resp = await fetch("http://192.168.1.88:4545/External/QrInformationApi", {
+            method: "POST",
+            body: formData,
+            signal: controller.signal,
+          });
+        } finally {
+          clearTimeout(_tid);
+        }
+
+        const rawBody = await resp.text().catch(() => "");
+        let qrJson: any = null;
+        try { qrJson = JSON.parse(rawBody); } catch { /* ليس JSON */ }
+
+        if (!resp.ok) {
+          qrErrMsg = `QrInformationApi: HTTP ${resp.status} — ${rawBody.slice(0, 200)}`;
+          addLog(session, `❌ ${qrErrMsg}`);
+        } else if (qrJson !== null && qrJson.success === false) {
+          const reason = qrJson.message ?? qrJson.error ?? qrJson.msg ?? JSON.stringify(qrJson).slice(0, 200);
+          qrErrMsg = `QrInformationApi: success=false — ${reason}`;
+          addLog(session, `❌ ${qrErrMsg}`);
+        } else {
+          qrSuccess = true;
+          addLog(session, `✅ QRInformationApi: ${resp.status} ${resp.statusText}${qrJson?.success === true ? " (success: true)" : ""}`);
+        }
+      } catch (e: any) {
+        if (e?.name === "AbortError") {
+          qrErrMsg = `QrInformationApi: انتهت مهلة الانتظار (3 دقائق)`;
+        } else {
+          qrErrMsg = `QrInformationApi فشل الاتصال: ${String(e).slice(0, 100)}`;
+        }
+        addLog(session, `❌ ${qrErrMsg}`);
+      }
+
+      if (qrSuccess) break;
+
+      if (_attempt < QR_MAX_ATTEMPTS) {
+        addLog(session, `⚠️ المحاولة ${_attempt} فشلت — سيتم إعادة المحاولة...`);
+      } else {
+        addLog(session, `🔴 فشلت جميع المحاولات (${QR_MAX_ATTEMPTS}) — سيتم تجاوز التقرير`);
+      }
+    }
+
+    if (!qrSuccess) {
       await updateReport(reportId, {
         automationStatus: "qr_error",
-        automationError: errMsg,
+        automationError: qrErrMsg,
       });
     }
-  } catch (e) {
-    const errMsg = `QRInformationApi فشل الاتصال: ${String(e).slice(0, 100)}`;
+  } catch (e: any) {
+    const errMsg = `QrInformationApi خطأ عام: ${String(e).slice(0, 100)}`;
     addLog(session, `❌ ${errMsg}`);
     await updateReport(reportId, {
       automationStatus: "qr_error",
