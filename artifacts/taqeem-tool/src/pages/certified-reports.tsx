@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -7,7 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
   CheckCircle2, Search, FileText,
-  PlayCircle, StopCircle, Loader2, AlertCircle, RefreshCw, ChevronLeft, Stamp,
+  PlayCircle, StopCircle, Loader2, AlertCircle, RefreshCw, ChevronLeft,
+  Stamp, ArrowUp, ArrowDown, Star, GripVertical, ChevronDown, ChevronUp,
 } from "lucide-react";
 import { format } from "date-fns";
 import { arSA } from "date-fns/locale";
@@ -42,6 +43,10 @@ export default function CertifiedReports() {
   const [loadingNext, setLoadingNext] = useState(false);
   const [loadingApprove, setLoadingApprove] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [reordering, setReordering] = useState(false);
+  const [showQueueEditor, setShowQueueEditor] = useState(false);
+  // الطابور المحرَّر محلياً قبل الحفظ
+  const [localQueue, setLocalQueue] = useState<string[]>([]);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ── سجل التقارير المعمدة ─────────────────────────────────────────────────
@@ -65,25 +70,34 @@ export default function CertifiedReports() {
   });
 
   // ── البوت ─────────────────────────────────────────────────────────────────
-  const fetchCertifyStatus = async () => {
+  const fetchCertifyStatus = useCallback(async () => {
     try {
       const resp = await fetch(`${apiBase}/api/automation/certify/status`);
       if (resp.ok) {
         const data: CertifyState = await resp.json();
         setCertify(data);
+        // حدّث الطابور المحلي إذا لم يكن المستخدم يحرّره الآن
+        setLocalQueue(prev => {
+          if (showQueueEditor) return prev;
+          return data.reportNumbers;
+        });
         if (data.status === "ready" || data.status === "failed" || data.status === "idle") {
           if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
-          // حدّث قائمة السجلات بعد اكتمال دفعة
           if (data.status !== "running") fetchRecords();
         }
       }
     } catch {}
-  };
+  }, [showQueueEditor]);
 
   useEffect(() => {
     fetchCertifyStatus();
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, []);
+
+  // عند فتح محرر الطابور ابدأ من النسخة الحالية
+  useEffect(() => {
+    if (showQueueEditor) setLocalQueue(certify.reportNumbers);
+  }, [showQueueEditor]);
 
   const handleStartCertify = async () => {
     try {
@@ -115,6 +129,8 @@ export default function CertifiedReports() {
     try {
       await fetch(`${apiBase}/api/automation/certify/stop`, { method: "POST" });
       setCertify({ status: "idle", logs: [], reportNumbers: [], currentIndex: 0 });
+      setLocalQueue([]);
+      setShowQueueEditor(false);
       if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
       toast({ title: "تم إغلاق المتصفح" });
     } catch {}
@@ -168,6 +184,7 @@ export default function CertifiedReports() {
       if (resp.ok) {
         const data = await resp.json();
         setCertify(prev => ({ ...prev, reportNumbers: data.reportNumbers, currentIndex: 0 }));
+        setLocalQueue(data.reportNumbers);
         toast({ title: "تم التحديث", description: `${data.count} تقرير` });
         if (data.reportNumbers?.length > 0) {
           await fetch(`${apiBase}/api/automation/certify/open`, {
@@ -181,11 +198,52 @@ export default function CertifiedReports() {
     } catch {} finally { setRefreshing(false); }
   };
 
-  const isRunning = certify.status === "running";
-  const isReady   = certify.status === "ready";
-  const total     = certify.reportNumbers.length;
-  const current   = certify.currentIndex + 1;
-  const hasNext   = certify.currentIndex < total - 1;
+  // ── إعادة ترتيب الطابور ────────────────────────────────────────────────
+  const moveItem = (idx: number, dir: "up" | "down") => {
+    const newQ = [...localQueue];
+    const target = dir === "up" ? idx - 1 : idx + 1;
+    if (target < 0 || target >= newQ.length) return;
+    [newQ[idx], newQ[target]] = [newQ[target], newQ[idx]];
+    setLocalQueue(newQ);
+  };
+
+  const moveToTop = (idx: number) => {
+    if (idx === 0) return;
+    const newQ = [...localQueue];
+    const [item] = newQ.splice(idx, 1);
+    newQ.unshift(item);
+    setLocalQueue(newQ);
+  };
+
+  const saveReorder = async () => {
+    setReordering(true);
+    try {
+      const resp = await fetch(`${apiBase}/api/automation/certify/reorder`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reportNumbers: localQueue }),
+      });
+      const data = await resp.json();
+      if (resp.ok) {
+        setCertify(prev => ({ ...prev, reportNumbers: data.reportNumbers, currentIndex: data.currentIndex }));
+        setShowQueueEditor(false);
+        toast({ title: "✅ تم حفظ ترتيب الأولويات", description: `التقرير الأول: ${data.reportNumbers[data.currentIndex + 1] ?? data.reportNumbers[0]}` });
+      } else {
+        toast({ variant: "destructive", title: "خطأ في الحفظ", description: data.error });
+      }
+    } catch {
+      toast({ variant: "destructive", title: "خطأ في الاتصال" });
+    } finally {
+      setReordering(false);
+    }
+  };
+
+  const isRunning  = certify.status === "running";
+  const isReady    = certify.status === "ready";
+  const total      = certify.reportNumbers.length;
+  const current    = certify.currentIndex + 1;
+  const hasNext    = certify.currentIndex < total - 1;
+  const canReorder = isReady && total > 1;
 
   return (
     <div className="space-y-6">
@@ -244,33 +302,172 @@ export default function CertifiedReports() {
                   <StopCircle className="h-4 w-4" /> إغلاق
                 </Button>
               )}
-              <Button onClick={handleStartCertify} disabled={isRunning} className="gap-2">
-                {isRunning
-                  ? <><Loader2 className="h-4 w-4 animate-spin" /> جارٍ التحميل...</>
-                  : <><PlayCircle className="h-4 w-4" /> بداية التعميد</>}
-              </Button>
+              {!isRunning && !isReady && (
+                <Button onClick={handleStartCertify} className="gap-2">
+                  <PlayCircle className="h-4 w-4" /> تشغيل التعميد
+                </Button>
+              )}
             </div>
           </div>
         </CardHeader>
 
-        {/* شريط تقدم التقارير */}
+        {/* ── شريط التقدم + قائمة الطابور ─────────────────────────────── */}
         {isReady && total > 0 && (
-          <CardContent className="pt-0">
-            <div className="flex items-center gap-3 mb-2">
+          <CardContent className="pt-0 space-y-3">
+
+            {/* شريط التقدم */}
+            <div className="flex items-center gap-3">
               <div className="flex-1 bg-muted rounded-full h-2">
                 <div className="bg-emerald-500 h-2 rounded-full transition-all duration-500"
                   style={{ width: `${(current / total) * 100}%` }} />
               </div>
               <span className="text-xs text-muted-foreground whitespace-nowrap">{current} / {total}</span>
             </div>
-            <div className="flex flex-wrap gap-1.5">
-              {certify.reportNumbers.map((num, idx) => (
-                <Badge key={num} variant={idx === certify.currentIndex ? "default" : idx < certify.currentIndex ? "secondary" : "outline"}
-                  className={`font-mono text-xs ${idx === certify.currentIndex ? "bg-emerald-600" : idx < certify.currentIndex ? "opacity-50" : ""}`}>
-                  {num}
-                </Badge>
-              ))}
-            </div>
+
+            {/* ── عرض الطابور العادي أو محرر الأولويات ── */}
+            {!showQueueEditor ? (
+              <>
+                {/* عرض الـ badges العادي */}
+                <div className="flex flex-wrap gap-1.5">
+                  {certify.reportNumbers.map((num, idx) => (
+                    <Badge
+                      key={num}
+                      variant={idx === certify.currentIndex ? "default" : idx < certify.currentIndex ? "secondary" : "outline"}
+                      className={`font-mono text-xs ${idx === certify.currentIndex ? "bg-emerald-600" : idx < certify.currentIndex ? "opacity-50" : ""}`}
+                    >
+                      {idx === certify.currentIndex && <span className="ml-1">▶</span>}
+                      {idx + 1}. {num}
+                    </Badge>
+                  ))}
+                </div>
+
+                {/* زر فتح محرر الأولويات */}
+                {canReorder && (
+                  <Button
+                    variant="outline" size="sm"
+                    onClick={() => setShowQueueEditor(true)}
+                    className="gap-2 text-amber-700 border-amber-300 hover:bg-amber-50 w-full"
+                  >
+                    <Star className="h-4 w-4" />
+                    ترتيب الأولويات
+                    <ChevronDown className="h-3.5 w-3.5 mr-auto" />
+                  </Button>
+                )}
+              </>
+            ) : (
+              /* ── محرر الأولويات ───────────────────────────────────────── */
+              <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-3 space-y-2">
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-2 text-sm font-medium text-amber-800">
+                    <Star className="h-4 w-4 text-amber-500" />
+                    ترتيب الأولويات — التقارير التالية للمعالجة
+                  </div>
+                  <Button
+                    variant="ghost" size="sm"
+                    onClick={() => { setShowQueueEditor(false); setLocalQueue(certify.reportNumbers); }}
+                    className="h-7 px-2 text-muted-foreground"
+                  >
+                    <ChevronUp className="h-4 w-4" /> إغلاق
+                  </Button>
+                </div>
+
+                <p className="text-xs text-amber-700 mb-2">
+                  التقارير التي تم معالجتها (مُظلّلة) لا يمكن نقلها. رتّب الباقي حسب أولويتك ثم اضغط «حفظ الترتيب».
+                </p>
+
+                <div className="space-y-1.5 max-h-72 overflow-y-auto">
+                  {localQueue.map((num, idx) => {
+                    const isDone   = idx < certify.currentIndex;
+                    const isCurrent = num === certify.openedReport;
+                    const isPending = !isDone && !isCurrent;
+
+                    return (
+                      <div
+                        key={num}
+                        className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors
+                          ${isDone   ? "bg-muted/60 opacity-50 select-none" : ""}
+                          ${isCurrent ? "bg-emerald-100 border border-emerald-300" : ""}
+                          ${isPending ? "bg-white border border-border hover:border-amber-300" : ""}
+                        `}
+                      >
+                        {/* رقم الترتيب */}
+                        <span className={`w-5 text-center text-xs font-bold ${isCurrent ? "text-emerald-700" : "text-muted-foreground"}`}>
+                          {idx + 1}
+                        </span>
+
+                        {/* مقبض السحب (للمظهر) */}
+                        <GripVertical className={`h-4 w-4 shrink-0 ${isPending ? "text-muted-foreground/60" : "text-transparent"}`} />
+
+                        {/* رقم التقرير */}
+                        <span className={`font-mono font-semibold flex-1 ${isCurrent ? "text-emerald-700" : ""}`}>
+                          {num}
+                        </span>
+
+                        {isCurrent && (
+                          <Badge className="bg-emerald-600 text-white text-xs px-1.5 py-0">
+                            جارٍ الآن
+                          </Badge>
+                        )}
+                        {isDone && (
+                          <Badge variant="secondary" className="text-xs px-1.5 py-0 opacity-70">
+                            ✓ تم
+                          </Badge>
+                        )}
+
+                        {/* أزرار الترتيب (للتقارير المعلّقة فقط) */}
+                        {isPending && (
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              onClick={() => moveToTop(idx)}
+                              title="نقل للأول"
+                              disabled={idx === certify.currentIndex + 1}
+                              className="p-1 rounded hover:bg-amber-200 disabled:opacity-30 disabled:cursor-not-allowed text-amber-700 transition-colors"
+                            >
+                              <Star className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              onClick={() => moveItem(idx, "up")}
+                              disabled={idx <= certify.currentIndex + 1}
+                              className="p-1 rounded hover:bg-amber-200 disabled:opacity-30 disabled:cursor-not-allowed text-amber-700 transition-colors"
+                            >
+                              <ArrowUp className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              onClick={() => moveItem(idx, "down")}
+                              disabled={idx === localQueue.length - 1}
+                              className="p-1 rounded hover:bg-amber-200 disabled:opacity-30 disabled:cursor-not-allowed text-amber-700 transition-colors"
+                            >
+                              <ArrowDown className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* أزرار الحفظ / إلغاء */}
+                <div className="flex gap-2 pt-1">
+                  <Button
+                    onClick={saveReorder}
+                    disabled={reordering || JSON.stringify(localQueue) === JSON.stringify(certify.reportNumbers)}
+                    className="gap-2 bg-amber-600 hover:bg-amber-700 text-white flex-1"
+                    size="sm"
+                  >
+                    {reordering
+                      ? <><Loader2 className="h-4 w-4 animate-spin" /> جارٍ الحفظ...</>
+                      : <><Star className="h-4 w-4" /> حفظ الترتيب</>}
+                  </Button>
+                  <Button
+                    variant="outline" size="sm"
+                    onClick={() => { setLocalQueue(certify.reportNumbers); }}
+                    className="gap-2"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" /> إعادة تعيين
+                  </Button>
+                </div>
+              </div>
+            )}
           </CardContent>
         )}
 
