@@ -617,7 +617,7 @@ async function _doExtractAndSend(page: any): Promise<{
     const http = require("http") as typeof import("http");
     const fd = new FormDataLib();
     fd.append("reportCode",         finalDcNumber       || "");
-    fd.append("taqeemReportNumber", finalDcNumber       || reportNumber || "");
+    fd.append("taqeemReportNumber", reportNumber        || "");
     fd.append("taqeemSubmittedAt",  submittedAt         || "");
     fd.append("qrCodeBase64",       qrBase64            || "");
     fd.append("finalValue",         extracted.finalValue|| "");
