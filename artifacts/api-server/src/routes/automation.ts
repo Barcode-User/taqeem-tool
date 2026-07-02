@@ -435,8 +435,8 @@ async function _doExtractAndSend(page: any): Promise<{
   const extracted: { dcNumber: string; finalValue: string } = await page.evaluate(() => {
     const fullText = document.body.innerText || "";
 
-    // البحث عن رقم DC في نص الصفحة فقط
-    const dcMatch = fullText.match(/DC\d+/i);
+    // البحث عن رقم DC في نص الصفحة — يشمل DC، DCA، DCB ... إلخ
+    const dcMatch = fullText.match(/DC[A-Za-z]*\d+/i);
     const dcNumber = dcMatch ? dcMatch[0].toUpperCase() : "";
     const valMatch = fullText.match(/الر[أا]ي النهائي.*?[:：]\s*([\d,،٬]+)/);
     const finalValue = valMatch ? valMatch[1].replace(/[,،٬]/g, "") : "";
@@ -617,7 +617,7 @@ async function _doExtractAndSend(page: any): Promise<{
     const http = require("http") as typeof import("http");
     const fd = new FormDataLib();
     fd.append("reportCode",         finalDcNumber       || "");
-    fd.append("taqeemReportNumber", reportNumber        || "");
+    fd.append("taqeemReportNumber", finalDcNumber       || reportNumber || "");
     fd.append("taqeemSubmittedAt",  submittedAt         || "");
     fd.append("qrCodeBase64",       qrBase64            || "");
     fd.append("finalValue",         extracted.finalValue|| "");
