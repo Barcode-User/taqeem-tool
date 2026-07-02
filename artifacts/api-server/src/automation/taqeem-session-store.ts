@@ -274,11 +274,12 @@ async function runLoginFlow(role: RoleKey, flow: ActiveLoginFlow, username: stri
   try {
     addFlowLog(role, "الانتقال إلى صفحة تسجيل الدخول...");
 
-    // دور qima: نذهب لصفحة الطلبات مباشرة — ستُعيد التوجيه لـ SSO إذا لم يكن مسجلاً
-    // دور entry/certifier: نذهب لـ /membership/login
+    // نذهب لصفحة موجودة فعلاً — ستُعيد التوجيه لـ SSO إذا لم يكن المستخدم مسجلاً
+    // entry/certifier → صفحة إنشاء التقرير
+    // qima           → صفحة قائمة الطلبات
     const initialUrl = role === "qima"
       ? `${TAQEEM_URL}/qaym/request/13/tab`
-      : `${TAQEEM_URL}/membership/login`;
+      : `${TAQEEM_URL}/report/create/1/13`;
 
     try {
       await page.goto(initialUrl, {
