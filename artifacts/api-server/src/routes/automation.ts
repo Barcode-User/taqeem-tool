@@ -1964,14 +1964,22 @@ async function _sendToDocumenQaimhApi(
         res.on("data", (c: any) => d += c);
         res.on("end", () => {
           if (res.statusCode >= 200 && res.statusCode < 300) {
-            resolve({ success: true, message: `HTTP ${res.statusCode}: ${d.slice(0, 120)}` });
+            let parsed: any = null;
+            try { parsed = JSON.parse(d); } catch {}
+            if (parsed !== null && parsed.success === false) {
+              const reason = parsed.message ?? parsed.error ?? parsed.msg ?? d.slice(0, 200);
+              resolve({ success: false, message: `HTTP ${res.statusCode}: success=false — ${reason}` });
+            } else {
+              // success: true أو 2xx بدون حقل success واضح → نجاح
+              resolve({ success: true, message: `HTTP ${res.statusCode}: ${d.slice(0, 120)}` });
+            }
           } else {
             resolve({ success: false, message: `HTTP ${res.statusCode}: ${d.slice(0, 200)}` });
           }
         });
       });
       req.on("error", (e: any) => resolve({ success: false, message: e.message }));
-      req.setTimeout(30000, () => { req.destroy(); resolve({ success: false, message: "timeout بعد 30 ثانية" }); });
+      req.setTimeout(60000, () => { req.destroy(); resolve({ success: false, message: "timeout بعد 60 ثانية" }); });
       req.write(body);
       req.end();
     } catch (e: any) {
