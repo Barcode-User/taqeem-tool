@@ -292236,16 +292236,26 @@ ${value}\r
         res.on("data", (c) => d += c);
         res.on("end", () => {
           if (res.statusCode >= 200 && res.statusCode < 300) {
-            resolve({ success: true, message: `HTTP ${res.statusCode}: ${d.slice(0, 120)}` });
+            let parsed = null;
+            try {
+              parsed = JSON.parse(d);
+            } catch {
+            }
+            if (parsed !== null && parsed.success === false) {
+              const reason = parsed.message ?? parsed.error ?? parsed.msg ?? d.slice(0, 200);
+              resolve({ success: false, message: `HTTP ${res.statusCode}: success=false \u2014 ${reason}` });
+            } else {
+              resolve({ success: true, message: `HTTP ${res.statusCode}: ${d.slice(0, 120)}` });
+            }
           } else {
             resolve({ success: false, message: `HTTP ${res.statusCode}: ${d.slice(0, 200)}` });
           }
         });
       });
       req.on("error", (e) => resolve({ success: false, message: e.message }));
-      req.setTimeout(3e4, () => {
+      req.setTimeout(6e4, () => {
         req.destroy();
-        resolve({ success: false, message: "timeout \u0628\u0639\u062F 30 \u062B\u0627\u0646\u064A\u0629" });
+        resolve({ success: false, message: "timeout \u0628\u0639\u062F 60 \u062B\u0627\u0646\u064A\u0629" });
       });
       req.write(body);
       req.end();
