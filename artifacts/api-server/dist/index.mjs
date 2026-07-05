@@ -291988,7 +291988,7 @@ router2.post("/automation/open-qima-browser", async (_req, res) => {
   }
 });
 var QIMA_REQUESTS_URL = "https://qima.taqeem.gov.sa/qaym/request/13/tab";
-var QIMA_AUTO_INTERVAL_MS = 10 * 60 * 1e3;
+var QIMA_AUTO_INTERVAL_MS = 5 * 60 * 1e3;
 var _qimaState = {
   status: "idle",
   logs: [],
@@ -292330,7 +292330,7 @@ async function startQimaSession() {
     }
     _qimaCleanup = null;
   }
-  _qimaState = { status: "running", logs: [], assignedRequests: [], openedCount: 0 };
+  _qimaState = { status: "running", logs: [], assignedRequests: [], openedCount: 0, autoRestart: true, nextRunAt: null };
   _qimaLog("\u{1F680} Bot v4 [viewport:1920px | selector:role=row]");
   _qimaLog("\u0628\u062F\u0621 \u062C\u0644\u0633\u0629 QIMA...");
   try {
@@ -292449,9 +292449,10 @@ async function startQimaSession() {
     for (let i = 0; i < assignedLinks.length; i++) {
       const url = assignedLinks[i];
       _qimaLog(`\u{1F517} \u0645\u0639\u0627\u0644\u062C\u0629 \u0637\u0644\u0628 ${i + 1}/${assignedLinks.length}: ${url}`);
+      let tabPage = null;
       try {
         const existingPage = context.pages().find((p) => p.url() === url);
-        const tabPage = existingPage ?? await context.newPage();
+        tabPage = existingPage ?? await context.newPage();
         if (!existingPage) {
           await tabPage.goto(url, { waitUntil: "domcontentloaded", timeout: 3e4 });
         }
@@ -292460,10 +292461,26 @@ async function startQimaSession() {
         await _processQimaRequest(tabPage, url);
       } catch (e) {
         _qimaLog(`\u26A0\uFE0F \u0641\u0634\u0644 \u0645\u0639\u0627\u0644\u062C\u0629 \u0627\u0644\u0637\u0644\u0628 ${i + 1}: ${e.message?.slice(0, 80)}`);
+      } finally {
+        if (tabPage && tabPage !== _qimaPage) {
+          try {
+            await tabPage.close();
+          } catch {
+          }
+          _qimaLog(`\u{1F512} \u062A\u0645 \u0625\u063A\u0644\u0627\u0642 \u062A\u0627\u0628 \u0627\u0644\u0637\u0644\u0628 ${i + 1}`);
+        }
+      }
+    }
+    if (_qimaPage) {
+      try {
+        await _qimaPage.goto(QIMA_REQUESTS_URL, { waitUntil: "domcontentloaded", timeout: 3e4 });
+        _qimaLog("\u{1F519} \u062A\u0645 \u0627\u0644\u0639\u0648\u062F\u0629 \u0644\u0635\u0641\u062D\u0629 \u0627\u0644\u0637\u0644\u0628\u0627\u062A \u2014 \u0641\u064A \u0627\u0646\u062A\u0638\u0627\u0631 \u0627\u0644\u062F\u0648\u0631\u0629 \u0627\u0644\u0642\u0627\u062F\u0645\u0629");
+      } catch {
       }
     }
     _qimaState.status = "ready";
     _qimaLog(`\u{1F389} \u0627\u0643\u062A\u0645\u0644 \u2014 \u062A\u0645\u062A \u0645\u0639\u0627\u0644\u062C\u0629 ${_qimaState.openedCount} \u0645\u0646 ${assignedLinks.length} \u0637\u0644\u0628`);
+    _qimaLog(`\u23F1\uFE0F \u0633\u064A\u0628\u062D\u062B \u062A\u0644\u0642\u0627\u0626\u064A\u0627\u064B \u0643\u0644 5 \u062F\u0642\u0627\u0626\u0642...`);
     _scheduleAutoRestart();
   } catch (err) {
     _qimaState.status = "failed";
