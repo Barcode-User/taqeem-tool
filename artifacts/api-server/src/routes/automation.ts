@@ -1709,7 +1709,7 @@ type QimaState = {
   nextRunAt: string | null;
 };
 
-const QIMA_AUTO_INTERVAL_MS = 10 * 60 * 1000; // 10 دقائق
+const QIMA_AUTO_INTERVAL_MS = 5 * 60 * 1000; // 5 دقائق
 
 let _qimaState: QimaState = {
   status: "idle", logs: [], assignedRequests: [], openedCount: 0,
@@ -2062,7 +2062,7 @@ async function startQimaSession(): Promise<void> {
   if (_qimaState.status === "running") return;
   if (_qimaCleanup) { try { await _qimaCleanup(); } catch {} _qimaCleanup = null; }
 
-  _qimaState = { status: "running", logs: [], assignedRequests: [], openedCount: 0 };
+  _qimaState = { status: "running", logs: [], assignedRequests: [], openedCount: 0, autoRestart: true, nextRunAt: null };
   _qimaLog("🚀 Bot v4 [viewport:1920px | selector:role=row]");
   _qimaLog("بدء جلسة QIMA...");
 
@@ -2204,10 +2204,11 @@ async function startQimaSession(): Promise<void> {
     for (let i = 0; i < assignedLinks.length; i++) {
       const url = assignedLinks[i];
       _qimaLog(`🔗 معالجة طلب ${i + 1}/${assignedLinks.length}: ${url}`);
+      let tabPage: any = null;
       try {
         // إذا كان رابطاً في تاب موجود (context.pages()) استخدمه، وإلا افتح تاباً جديداً
-        const existingPage = context.pages().find(p => p.url() === url);
-        const tabPage = existingPage ?? await context.newPage();
+        const existingPage = context.pages().find((p: any) => p.url() === url);
+        tabPage = existingPage ?? await context.newPage();
         if (!existingPage) {
           await tabPage.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
         }
@@ -2216,11 +2217,26 @@ async function startQimaSession(): Promise<void> {
         await _processQimaRequest(tabPage, url);
       } catch (e: any) {
         _qimaLog(`⚠️ فشل معالجة الطلب ${i + 1}: ${e.message?.slice(0, 80)}`);
+      } finally {
+        // أغلق تاب الطلب بعد الانتهاء منه (ليس _qimaPage الرئيسي)
+        if (tabPage && tabPage !== _qimaPage) {
+          try { await tabPage.close(); } catch {}
+          _qimaLog(`🔒 تم إغلاق تاب الطلب ${i + 1}`);
+        }
       }
+    }
+
+    // العودة لصفحة الطلبات الرئيسية بعد الانتهاء من جميع الطلبات
+    if (_qimaPage) {
+      try {
+        await _qimaPage.goto(QIMA_REQUESTS_URL, { waitUntil: "domcontentloaded", timeout: 30000 });
+        _qimaLog("🔙 تم العودة لصفحة الطلبات — في انتظار الدورة القادمة");
+      } catch {}
     }
 
     _qimaState.status = "ready";
     _qimaLog(`🎉 اكتمل — تمت معالجة ${_qimaState.openedCount} من ${assignedLinks.length} طلب`);
+    _qimaLog(`⏱️ سيبحث تلقائياً كل 5 دقائق...`);
     _scheduleAutoRestart();
 
   } catch (err: any) {
