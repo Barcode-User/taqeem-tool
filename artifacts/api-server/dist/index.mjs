@@ -292565,7 +292565,7 @@ router2.post("/automation/qima/submissions/:id/retry", async (req, res) => {
   if (isNaN(id)) return res.status(400).json({ error: "\u0645\u0639\u0631\u0651\u0641 \u063A\u064A\u0631 \u0635\u0627\u0644\u062D" });
   const submission = await getQimaSubmissionById(id);
   if (!submission) return res.status(404).json({ error: "\u0627\u0644\u0633\u062C\u0644 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
-  const apiBaseUrl = submission.apiUrl || _loadDocumenQaimhConfig();
+  const apiBaseUrl = _loadDocumenQaimhConfig() || submission.apiUrl;
   if (!apiBaseUrl) return res.status(400).json({ error: "DocumenQaimh \u063A\u064A\u0631 \u0645\u064F\u0639\u0631\u064E\u0651\u0641 \u0641\u064A config.json" });
   let data;
   try {
