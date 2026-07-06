@@ -1760,11 +1760,14 @@ function _loadDocumenQaimhConfig(): string {
   try {
     const DATA_DIR = process.env.SQLITE_DATA_DIR ?? path.join(process.cwd(), "data");
     const cfgPath = path.join(DATA_DIR, "config.json");
-    if (!fs.existsSync(cfgPath)) return "";
+    _qimaLog(`📁 config.json path: ${cfgPath}`);
+    if (!fs.existsSync(cfgPath)) { _qimaLog("⚠️ config.json غير موجود"); return ""; }
     const text = fs.readFileSync(cfgPath, "utf8").replace(/^\uFEFF/, "").trim();
     const raw = JSON.parse(text);
-    return (raw.DocumenQaimh ?? "").trim();
-  } catch { return ""; }
+    const val = (raw.DocumenQaimh ?? "").trim();
+    _qimaLog(`📋 DocumenQaimh = ${val}`);
+    return val;
+  } catch (e: any) { _qimaLog(`❌ خطأ قراءة config: ${e.message}`); return ""; }
 }
 
 // ── استخراج رقم الطلب من URL ──────────────────────────────────────────────────
