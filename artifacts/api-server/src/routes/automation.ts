@@ -2106,7 +2106,7 @@ async function startQimaSession(): Promise<void> {
     } catch {
       _qimaLog("⚠️ لم يظهر الجدول — المحاولة على أي حال");
     }
-    await _qimaPage.waitForTimeout(2000);
+    await _qimaPage.waitForTimeout(2000).catch(() => {});
 
     // debug: عدد الصفوف ونموذج من النص
     const allRowCount = await _qimaPage.locator(ROW_SEL).count().catch(() => 0);
