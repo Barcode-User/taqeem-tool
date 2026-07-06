@@ -292371,7 +292371,8 @@ async function startQimaSession() {
     } catch {
       _qimaLog("\u26A0\uFE0F \u0644\u0645 \u064A\u0638\u0647\u0631 \u0627\u0644\u062C\u062F\u0648\u0644 \u2014 \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0629 \u0639\u0644\u0649 \u0623\u064A \u062D\u0627\u0644");
     }
-    await _qimaPage.waitForTimeout(2e3);
+    await _qimaPage.waitForTimeout(2e3).catch(() => {
+    });
     const allRowCount = await _qimaPage.locator(ROW_SEL).count().catch(() => 0);
     _qimaLog(`\u{1F52C} \u0635\u0641\u0648\u0641 \u0627\u0644\u062C\u062F\u0648\u0644: ${allRowCount}`);
     if (allRowCount > 0) {
