@@ -292249,7 +292249,15 @@ ${value}\r
               resolve({ success: true, message: `HTTP ${res.statusCode}: ${d.slice(0, 120)}` });
             }
           } else {
-            resolve({ success: false, message: `HTTP ${res.statusCode}: ${d.slice(0, 200)}` });
+            try {
+              const errObj = JSON.parse(d);
+              if (errObj.errors) {
+                const fields = Object.entries(errObj.errors).map(([k, v]) => `${k}: ${v.join(", ")}`).join(" | ");
+                _qimaLog(`\u{1F534} \u062D\u0642\u0648\u0644 \u062E\u0627\u0637\u0626\u0629: ${fields}`);
+              }
+            } catch {
+            }
+            resolve({ success: false, message: `HTTP ${res.statusCode}: ${d.slice(0, 500)}` });
           }
         });
       });
