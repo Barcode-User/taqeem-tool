@@ -2116,6 +2116,14 @@ async function startQimaSession(): Promise<void> {
       _qimaLog(`📝 نموذج أول صف: ${(sample ?? "").replace(/\s+/g, " ").trim().slice(0, 80)}`);
     }
 
+    // ── تشخيص: اطبع نص أول 5 صفوف لمعرفة الكلمات الفعلية ──────────────────
+    const totalRows = await _qimaPage.locator(ROW_SEL).count().catch(() => 0);
+    for (let di = 0; di < Math.min(5, totalRows); di++) {
+      const rowTxt = ((await _qimaPage.locator(ROW_SEL).nth(di).textContent().catch(() => "")) ?? "")
+        .replace(/\s+/g, " ").trim().slice(0, 120);
+      _qimaLog(`🔎 صف ${di + 1}: ${rowTxt}`);
+    }
+
     // ابحث عن الصفوف التي تحتوي "مسند" بـ Playwright Locator (يتعامل مع Angular)
     _qimaLog("🔍 البحث عن طلبات 'مسند تلقائيًا'...");
     const msnadLocator = _qimaPage.locator(ROW_SEL).filter({ hasText: "مسند" });
