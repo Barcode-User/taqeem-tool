@@ -292201,6 +292201,7 @@ async function _sendToDocumenQaimhApi(apiBaseUrl, data, licenseFile, licenseName
       `--${boundary}\r
 Content-Disposition: form-data; name="${fieldName}"; filename="${filename}"\r
 Content-Type: ${mime}\r
+Content-Transfer-Encoding: binary\r
 \r
 `
     ));
