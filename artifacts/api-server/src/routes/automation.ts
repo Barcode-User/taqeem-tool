@@ -1913,7 +1913,7 @@ async function _sendToDocumenQaimhApi(
   licenseFile: Buffer | null, licenseName: string,
   docFile: Buffer | null, docName: string,
 ): Promise<{ success: boolean; message: string }> {
-  const endpoint = apiBaseUrl.replace(/\/$/, "") + "/External/QaimhInformationApi";
+  const endpoint = apiBaseUrl.replace(/\/$/, "") + "/Documents/QaimhInformationApi";
   _qimaLog(`📤 إرسال إلى: ${endpoint}`);
 
   const boundary = "----QimaBoundary" + Date.now().toString(36);
