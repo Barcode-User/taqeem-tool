@@ -1976,7 +1976,17 @@ async function _sendToDocumenQaimhApi(
               resolve({ success: true, message: `HTTP ${res.statusCode}: ${d.slice(0, 120)}` });
             }
           } else {
-            resolve({ success: false, message: `HTTP ${res.statusCode}: ${d.slice(0, 200)}` });
+            // طباعة تفصيلية لخطأ التحقق
+            try {
+              const errObj = JSON.parse(d);
+              if (errObj.errors) {
+                const fields = Object.entries(errObj.errors)
+                  .map(([k, v]) => `${k}: ${(v as string[]).join(", ")}`)
+                  .join(" | ");
+                _qimaLog(`🔴 حقول خاطئة: ${fields}`);
+              }
+            } catch {}
+            resolve({ success: false, message: `HTTP ${res.statusCode}: ${d.slice(0, 500)}` });
           }
         });
       });
