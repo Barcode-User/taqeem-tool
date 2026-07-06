@@ -1927,7 +1927,11 @@ async function _sendToDocumenQaimhApi(
     if (!content || content.length === 0) return;
     const mime = filename.toLowerCase().endsWith(".pdf") ? "application/pdf" : "application/octet-stream";
     parts.push(Buffer.from(
-      `--${boundary}\r\nContent-Disposition: form-data; name="${fieldName}"; filename="${filename}"\r\nContent-Type: ${mime}\r\n\r\n`
+      `--${boundary}\r\n` +
+      `Content-Disposition: form-data; name="${fieldName}"; filename="${filename}"\r\n` +
+      `Content-Type: ${mime}\r\n` +
+      `Content-Transfer-Encoding: binary\r\n` +
+      `\r\n`
     ));
     parts.push(content);
     parts.push(Buffer.from("\r\n"));
