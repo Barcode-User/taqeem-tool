@@ -1939,12 +1939,15 @@ async function _sendToDocumenQaimhApi(
     ));
   };
 
-  if (licenseFile) addFile("certificatelisinc", licenseName || "license.pdf", licenseFile);
-  if (docFile) addFile("DocumentAqr", docName || "document.pdf", docFile);
-  // أرسل كل حقل بشكل مستقل حتى يعمل [FromForm] binding في ASP.NET Core
+  // الحقول النصية أولاً — ASP.NET Core يحتاج Model fields قبل IFormFile
   for (const [key, value] of Object.entries(data)) {
     addField(key, value ?? "");
   }
+  // ثم الملفات
+  _qimaLog(`📎 certificatelisinc: ${licenseFile ? licenseFile.length + " bytes (" + licenseName + ")" : "null"}`);
+  _qimaLog(`📎 DocumentAqr: ${docFile ? docFile.length + " bytes (" + docName + ")" : "null"}`);
+  if (licenseFile) addFile("certificatelisinc", licenseName || "license.pdf", licenseFile);
+  if (docFile) addFile("DocumentAqr", docName || "document.pdf", docFile);
   parts.push(Buffer.from(`--${boundary}--\r\n`));
 
   const body = Buffer.concat(parts);
