@@ -292183,7 +292183,8 @@ async function _downloadQimaFiles(page) {
   return result;
 }
 async function _sendToDocumenQaimhApi(apiBaseUrl, data, licenseFile, licenseName, docFile, docName) {
-  const endpoint = apiBaseUrl.replace(/\/$/, "") + "/Documents/QaimhInformationApi";
+  const base = apiBaseUrl.replace(/\/$/, "");
+  const endpoint = /\/api$/i.test(base) ? base + "/Documents/QaimhInformationApi" : base + "/api/Documents/QaimhInformationApi";
   _qimaLog(`\u{1F4E4} \u0625\u0631\u0633\u0627\u0644 \u0625\u0644\u0649: ${endpoint}`);
   const boundary = "----QimaBoundary" + Date.now().toString(36);
   const parts = [];
