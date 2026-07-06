@@ -292216,11 +292216,13 @@ ${value}\r
 `
     ));
   };
-  if (licenseFile) addFile("certificatelisinc", licenseName || "license.pdf", licenseFile);
-  if (docFile) addFile("DocumentAqr", docName || "document.pdf", docFile);
   for (const [key, value] of Object.entries(data)) {
     addField(key, value ?? "");
   }
+  _qimaLog(`\u{1F4CE} certificatelisinc: ${licenseFile ? licenseFile.length + " bytes (" + licenseName + ")" : "null"}`);
+  _qimaLog(`\u{1F4CE} DocumentAqr: ${docFile ? docFile.length + " bytes (" + docName + ")" : "null"}`);
+  if (licenseFile) addFile("certificatelisinc", licenseName || "license.pdf", licenseFile);
+  if (docFile) addFile("DocumentAqr", docName || "document.pdf", docFile);
   parts.push(Buffer.from(`--${boundary}--\r
 `));
   const body = Buffer.concat(parts);
