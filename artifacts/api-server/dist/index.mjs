@@ -292379,6 +292379,11 @@ async function startQimaSession() {
       const sample = await _qimaPage.locator(ROW_SEL).first().textContent().catch(() => "");
       _qimaLog(`\u{1F4DD} \u0646\u0645\u0648\u0630\u062C \u0623\u0648\u0644 \u0635\u0641: ${(sample ?? "").replace(/\s+/g, " ").trim().slice(0, 80)}`);
     }
+    const totalRows = await _qimaPage.locator(ROW_SEL).count().catch(() => 0);
+    for (let di = 0; di < Math.min(5, totalRows); di++) {
+      const rowTxt = (await _qimaPage.locator(ROW_SEL).nth(di).textContent().catch(() => "") ?? "").replace(/\s+/g, " ").trim().slice(0, 120);
+      _qimaLog(`\u{1F50E} \u0635\u0641 ${di + 1}: ${rowTxt}`);
+    }
     _qimaLog("\u{1F50D} \u0627\u0644\u0628\u062D\u062B \u0639\u0646 \u0637\u0644\u0628\u0627\u062A '\u0645\u0633\u0646\u062F \u062A\u0644\u0642\u0627\u0626\u064A\u064B\u0627'...");
     const msnadLocator = _qimaPage.locator(ROW_SEL).filter({ hasText: "\u0645\u0633\u0646\u062F" });
     const msnadCount = await msnadLocator.count().catch(() => 0);
