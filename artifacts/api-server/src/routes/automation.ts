@@ -2334,7 +2334,8 @@ router.post("/automation/qima/submissions/:id/retry", async (req, res) => {
   const submission = await getQimaSubmissionById(id);
   if (!submission) return res.status(404).json({ error: "السجل غير موجود" });
 
-  const apiBaseUrl = submission.apiUrl || _loadDocumenQaimhConfig();
+  // config.json له الأولوية دائماً على القيمة المخزّنة في DB
+  const apiBaseUrl = _loadDocumenQaimhConfig() || submission.apiUrl;
   if (!apiBaseUrl) return res.status(400).json({ error: "DocumenQaimh غير مُعرَّف في config.json" });
 
   let data: any;
