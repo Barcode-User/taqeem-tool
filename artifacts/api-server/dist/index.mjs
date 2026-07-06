@@ -292056,11 +292056,18 @@ function _loadDocumenQaimhConfig() {
   try {
     const DATA_DIR2 = process.env.SQLITE_DATA_DIR ?? path4.join(process.cwd(), "data");
     const cfgPath = path4.join(DATA_DIR2, "config.json");
-    if (!fs4.existsSync(cfgPath)) return "";
+    _qimaLog(`\u{1F4C1} config.json path: ${cfgPath}`);
+    if (!fs4.existsSync(cfgPath)) {
+      _qimaLog("\u26A0\uFE0F config.json \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F");
+      return "";
+    }
     const text = fs4.readFileSync(cfgPath, "utf8").replace(/^\uFEFF/, "").trim();
     const raw = JSON.parse(text);
-    return (raw.DocumenQaimh ?? "").trim();
-  } catch {
+    const val = (raw.DocumenQaimh ?? "").trim();
+    _qimaLog(`\u{1F4CB} DocumenQaimh = ${val}`);
+    return val;
+  } catch (e) {
+    _qimaLog(`\u274C \u062E\u0637\u0623 \u0642\u0631\u0627\u0621\u0629 config: ${e.message}`);
     return "";
   }
 }
