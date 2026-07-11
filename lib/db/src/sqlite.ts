@@ -396,6 +396,14 @@ export async function sqliteGetReportById(id: number): Promise<Report | null> {
   return row ? rowToReport(row) : null;
 }
 
+export async function sqliteGetReportByRequestNumber(requestNumber: string): Promise<Report | null> {
+  const db = getDb();
+  const row = db.prepare(
+    "SELECT * FROM Reports WHERE RequestNumber = ? OR TaqeemReportNumber = ? LIMIT 1"
+  ).get(requestNumber, requestNumber) as any;
+  return row ? rowToReport(row) : null;
+}
+
 export async function sqliteGetReportsByAutomationStatus(status: string): Promise<Report[]> {
   const db = getDb();
   const rows = db.prepare("SELECT * FROM Reports WHERE AutomationStatus = ? ORDER BY IsPriority DESC, CreatedAt ASC").all(status) as any[];
