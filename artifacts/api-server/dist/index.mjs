@@ -45313,6 +45313,14 @@ async function pgGetReportById(id) {
   const r = await pool.query("SELECT * FROM reports WHERE id = $1", [id]);
   return r.rows[0] ? rowToReport(r.rows[0]) : null;
 }
+async function pgGetReportByRequestNumber(requestNumber) {
+  const pool = await withTable();
+  const r = await pool.query(
+    "SELECT * FROM reports WHERE request_number = $1 OR taqeem_report_number = $1 LIMIT 1",
+    [requestNumber]
+  );
+  return r.rows[0] ? rowToReport(r.rows[0]) : null;
+}
 async function pgGetReportsByAutomationStatus(automationStatus) {
   const pool = await withTable();
   const r = await pool.query("SELECT id, report_number FROM reports WHERE automation_status = $1 ORDER BY is_priority DESC, created_at ASC", [automationStatus]);
@@ -45971,6 +45979,13 @@ async function sqliteGetReportById(id) {
   const row = db.prepare("SELECT * FROM Reports WHERE Id = ?").get(id);
   return row ? rowToReport2(row) : null;
 }
+async function sqliteGetReportByRequestNumber(requestNumber) {
+  const db = getDb();
+  const row = db.prepare(
+    "SELECT * FROM Reports WHERE RequestNumber = ? OR TaqeemReportNumber = ? LIMIT 1"
+  ).get(requestNumber, requestNumber);
+  return row ? rowToReport2(row) : null;
+}
 async function sqliteGetReportsByAutomationStatus(status) {
   const db = getDb();
   const rows = db.prepare("SELECT * FROM Reports WHERE AutomationStatus = ? ORDER BY IsPriority DESC, CreatedAt ASC").all(status);
@@ -46597,6 +46612,7 @@ __export(src_exports, {
   getQimaSubmissionById: () => getQimaSubmissionById,
   getReportAutomationStatus: () => getReportAutomationStatus,
   getReportById: () => getReportById,
+  getReportByRequestNumber: () => getReportByRequestNumber,
   getReportStats: () => getReportStats,
   getReportsByAutomationStatus: () => getReportsByAutomationStatus,
   hasPendingQueueDb: () => hasPendingQueueDb,
@@ -46616,7 +46632,7 @@ __export(src_exports, {
   updateQimaSubmissionStatus: () => updateQimaSubmissionStatus,
   updateReport: () => updateReport
 });
-var isPostgres, listReports, getReportById, getReportsByAutomationStatus, getReportAutomationStatus, insertReport, updateReport, deleteReport, getReportStats, hasPendingQueueDb, sqliteTogglePriority2, sqliteInsertDataSystem2, sqliteGetDataSystemById2, sqliteGetDataSystemByReportId2, sqliteListDataSystem2, sqliteUpdateDataSystemLinkedReport2, insertCertifiedReport, listCertifiedReports, insertQimaSubmission, updateQimaSubmissionStatus, listQimaSubmissions, getQimaSubmissionById;
+var isPostgres, listReports, getReportById, getReportByRequestNumber, getReportsByAutomationStatus, getReportAutomationStatus, insertReport, updateReport, deleteReport, getReportStats, hasPendingQueueDb, sqliteTogglePriority2, sqliteInsertDataSystem2, sqliteGetDataSystemById2, sqliteGetDataSystemByReportId2, sqliteListDataSystem2, sqliteUpdateDataSystemLinkedReport2, insertCertifiedReport, listCertifiedReports, insertQimaSubmission, updateQimaSubmissionStatus, listQimaSubmissions, getQimaSubmissionById;
 var init_src = __esm({
   "../../lib/db/src/index.ts"() {
     "use strict";
@@ -46632,6 +46648,7 @@ var init_src = __esm({
     }
     listReports = isPostgres ? pgListReports : sqliteListReports;
     getReportById = isPostgres ? pgGetReportById : sqliteGetReportById;
+    getReportByRequestNumber = isPostgres ? pgGetReportByRequestNumber : sqliteGetReportByRequestNumber;
     getReportsByAutomationStatus = isPostgres ? pgGetReportsByAutomationStatus : sqliteGetReportsByAutomationStatus;
     getReportAutomationStatus = isPostgres ? pgGetReportAutomationStatus : sqliteGetReportAutomationStatus;
     insertReport = isPostgres ? pgInsertReport : sqliteInsertReport;
@@ -292092,6 +292109,55 @@ function _extractFieldFromText(text, label) {
   return "";
 }
 async function _extractQimaRequestData(page, requestId) {
+  let dbReport = null;
+  try {
+    const { getReportByRequestNumber: getReportByRequestNumber2 } = await Promise.resolve().then(() => (init_src(), src_exports));
+    dbReport = await getReportByRequestNumber2(requestId);
+    if (dbReport) {
+      _qimaLog(`\u{1F4C2} \u0648\u064F\u062C\u062F \u062A\u0642\u0631\u064A\u0631 \u0641\u064A \u0642\u0627\u0639\u062F\u0629 \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A (id=${dbReport.id}) \u2014 \u0633\u064A\u064F\u0633\u062A\u062E\u062F\u0645 \u0628\u062F\u0644\u0627\u064B \u0645\u0646 \u0635\u0641\u062D\u0629 QIMA`);
+    } else {
+      _qimaLog("\u2139\uFE0F \u0644\u0627 \u064A\u0648\u062C\u062F \u062A\u0642\u0631\u064A\u0631 \u0645\u0637\u0627\u0628\u0642 \u0641\u064A \u0642\u0627\u0639\u062F\u0629 \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A \u2014 \u0633\u064A\u064F\u0633\u062A\u062E\u062F\u0645 \u0646\u0635 \u0635\u0641\u062D\u0629 QIMA");
+    }
+  } catch (e) {
+    _qimaLog(`\u26A0\uFE0F \u062E\u0637\u0623 \u0641\u064A \u0627\u0633\u062A\u0639\u0644\u0627\u0645 DB: ${e.message?.slice(0, 60)}`);
+  }
+  if (dbReport) {
+    const area2 = dbReport.landArea != null ? String(dbReport.landArea) : dbReport.buildingArea != null ? String(dbReport.buildingArea) : "";
+    return {
+      MessageID: requestId,
+      ClientName: dbReport.clientName ?? "",
+      BeneficiaryPhone: dbReport.clientPhone ?? "",
+      IDNumber: requestId,
+      ReferenceNumber: dbReport.reportNumber ?? requestId,
+      City: dbReport.city ?? "",
+      District: dbReport.district ?? "",
+      Region: dbReport.region ?? "",
+      Purpose: dbReport.valuationPurpose ?? "",
+      ReportType: dbReport.reportType ?? "",
+      EmailDate: "",
+      FullSubject: "",
+      SenderEmail: "",
+      ProjectCode: "PRJ25050940",
+      PropertyCode: dbReport.reportNumber ?? "",
+      PrimeryCode: requestId,
+      MainMessageID: "",
+      ForwarderEmail: "",
+      BankCode: "2486",
+      Age: dbReport.buildingAge ?? "",
+      PropArea: area2,
+      PlanNumber: dbReport.planNumber ?? "",
+      ItemNumber: dbReport.plotNumber ?? "",
+      Street: dbReport.street ?? "",
+      SakNo: dbReport.deedNumber ?? "",
+      ReceiveDate: "",
+      LicenceNo: dbReport.buildingPermitNumber ?? "",
+      Estateusedfor: dbReport.propertyUse ?? "",
+      OwnershipName: dbReport.ownerName ?? "",
+      OwnershipPhone: "",
+      Source: "Qimah",
+      Chanel: "Web"
+    };
+  }
   const rawText = await page.evaluate(
     () => document.body.innerText || ""
   ).catch(() => "");
