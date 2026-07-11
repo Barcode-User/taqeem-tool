@@ -1796,12 +1796,67 @@ function _extractFieldFromText(text: string, label: string): string {
 
 // ── استخراج بيانات الطلب من صفحة قيمة ────────────────────────────────────────
 async function _extractQimaRequestData(page: any, requestId: string): Promise<Record<string, string>> {
+  // ── محاولة قراءة البيانات من قاعدة البيانات أولاً ──────────────────────────
+  let dbReport: import("@workspace/db").Report | null = null;
+  try {
+    const { getReportByRequestNumber } = await import("@workspace/db");
+    dbReport = await getReportByRequestNumber(requestId);
+    if (dbReport) {
+      _qimaLog(`📂 وُجد تقرير في قاعدة البيانات (id=${dbReport.id}) — سيُستخدم بدلاً من صفحة QIMA`);
+    } else {
+      _qimaLog("ℹ️ لا يوجد تقرير مطابق في قاعدة البيانات — سيُستخدم نص صفحة QIMA");
+    }
+  } catch (e: any) {
+    _qimaLog(`⚠️ خطأ في استعلام DB: ${e.message?.slice(0, 60)}`);
+  }
+
+  // إذا وُجد تقرير في DB — استخدم بياناته
+  if (dbReport) {
+    const area = dbReport.landArea != null
+      ? String(dbReport.landArea)
+      : (dbReport.buildingArea != null ? String(dbReport.buildingArea) : "");
+    return {
+      MessageID: requestId,
+      ClientName: dbReport.clientName ?? "",
+      BeneficiaryPhone: dbReport.clientPhone ?? "",
+      IDNumber: requestId,
+      ReferenceNumber: dbReport.reportNumber ?? requestId,
+      City: dbReport.city ?? "",
+      District: dbReport.district ?? "",
+      Region: dbReport.region ?? "",
+      Purpose: dbReport.valuationPurpose ?? "",
+      ReportType: dbReport.reportType ?? "",
+      EmailDate: "",
+      FullSubject: "",
+      SenderEmail: "",
+      ProjectCode: "PRJ25050940",
+      PropertyCode: dbReport.reportNumber ?? "",
+      PrimeryCode: requestId,
+      MainMessageID: "",
+      ForwarderEmail: "",
+      BankCode: "2486",
+      Age: dbReport.buildingAge ?? "",
+      PropArea: area,
+      PlanNumber: dbReport.planNumber ?? "",
+      ItemNumber: dbReport.plotNumber ?? "",
+      Street: dbReport.street ?? "",
+      SakNo: dbReport.deedNumber ?? "",
+      ReceiveDate: "",
+      LicenceNo: dbReport.buildingPermitNumber ?? "",
+      Estateusedfor: dbReport.propertyUse ?? "",
+      OwnershipName: dbReport.ownerName ?? "",
+      OwnershipPhone: "",
+      Source: "Qimah",
+      Chanel: "Web",
+    };
+  }
+
+  // ── fallback: قراءة من نص صفحة QIMA ──────────────────────────────────────
   const rawText: string = await page.evaluate(
     () => (document.body as HTMLElement).innerText || ""
   ).catch(() => "");
 
   const f = (label: string) => _extractFieldFromText(rawText, label);
-  // تنظيف المساحة (إزالة "متر مربع")
   const areaRaw = f("المساحة");
   const area = areaRaw.replace(/\s*متر.*$/, "").trim();
 
