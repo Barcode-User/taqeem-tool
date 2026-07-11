@@ -26,6 +26,9 @@ export const listReports = isPostgres
 export const getReportById = isPostgres
   ? pg.pgGetReportById : sq.sqliteGetReportById;
 
+export const getReportByRequestNumber = isPostgres
+  ? pg.pgGetReportByRequestNumber : sq.sqliteGetReportByRequestNumber;
+
 export const getReportsByAutomationStatus = isPostgres
   ? pg.pgGetReportsByAutomationStatus : sq.sqliteGetReportsByAutomationStatus;
 
