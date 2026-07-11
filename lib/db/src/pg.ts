@@ -313,6 +313,15 @@ export async function pgGetReportById(id: number): Promise<Report | null> {
   return r.rows[0] ? rowToReport(r.rows[0]) : null;
 }
 
+export async function pgGetReportByRequestNumber(requestNumber: string): Promise<Report | null> {
+  const pool = await withTable();
+  const r = await pool.query(
+    "SELECT * FROM reports WHERE request_number = $1 OR taqeem_report_number = $1 LIMIT 1",
+    [requestNumber]
+  );
+  return r.rows[0] ? rowToReport(r.rows[0]) : null;
+}
+
 export async function pgGetReportsByAutomationStatus(automationStatus: string): Promise<Pick<Report, "id" | "reportNumber">[]> {
   const pool = await withTable();
   const r = await pool.query("SELECT id, report_number FROM reports WHERE automation_status = $1 ORDER BY is_priority DESC, created_at ASC", [automationStatus]);
