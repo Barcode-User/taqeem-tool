@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { FileText, Clock, CheckCircle2, Upload, AlertCircle, PlusCircle, Search, Filter, Database, Loader2, CircleDashed, Ban, RotateCcw, ListChecks, XCircle } from "lucide-react";
+import { FileText, Clock, CheckCircle2, Upload, AlertCircle, PlusCircle, Search, Filter, Database, Loader2, CircleDashed, Ban, RotateCcw, ListChecks, XCircle, Star } from "lucide-react";
 import { format } from "date-fns";
 import { arSA } from "date-fns/locale";
 import { Button } from "@/components/ui/button";
@@ -61,6 +61,7 @@ function FieldScore({ score }: { score: number | undefined }) {
 type DsEntry = {
   averageScore: number | null;
   fieldScores: Record<string, number> | null;
+  city: string | null;
 };
 
 export default function Dashboard() {
@@ -108,6 +109,46 @@ export default function Dashboard() {
   // ── تحديد متعدد ──────────────────────────────────────────────────────────
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [retrying, setRetrying] = useState(false);
+  const [togglingPriority, setTogglingPriority] = useState<Set<number>>(new Set());
+  const [priorityOverrides, setPriorityOverrides] = useState<Map<number, boolean>>(new Map());
+  const togglePriority = async (id: number, currentPriority: boolean, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const newVal = !currentPriority;
+    // optimistic update — يغيّر الزر فوراً قبل رد السيرفر
+    setPriorityOverrides(prev => new Map(prev).set(id, newVal));
+    setTogglingPriority(prev => new Set(prev).add(id));
+    try {
+      const resp = await fetch(`${apiBase}/api/reports/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isPriority: newVal }),
+      });
+      if (resp.ok) {
+        // نقرأ رد السيرفر — لو حفظ القيمة الجديدة نمسح الـ override، لو لا نبقيه
+        try {
+          const json = await resp.json();
+          if (!!(json.isPriority) === newVal) {
+            // السيرفر حفظ القيمة الصحيحة — نمسح الـ override ونعتمد على البيانات الحقيقية
+            setPriorityOverrides(prev => { const m = new Map(prev); m.delete(id); return m; });
+          }
+          // لو السيرفر لم يحفظ — نبقي الـ override كما هو (النجمة تبقى كما ضغط المستخدم)
+        } catch { /* نبقي الـ override */ }
+        refetchReports();
+        return;
+      }
+      // فشل — نُعيد القيمة الأصلية
+      setPriorityOverrides(prev => { const m = new Map(prev); m.delete(id); return m; });
+      let detail = `HTTP ${resp.status}`;
+      try { const j = await resp.json(); detail = j.error || detail; } catch { /* ignore */ }
+      toast({ variant: "destructive", title: "خطأ في تغيير الأولوية", description: detail });
+    } catch {
+      setPriorityOverrides(prev => { const m = new Map(prev); m.delete(id); return m; });
+      toast({ variant: "destructive", title: "خطأ في الاتصال" });
+    } finally {
+      setTogglingPriority(prev => { const s = new Set(prev); s.delete(id); return s; });
+    }
+  };
 
   useEffect(() => {
     fetch(`${apiBase}/api/datasystem`)
@@ -119,6 +160,7 @@ export default function Dashboard() {
             map[ds.linkedReportId] = {
               averageScore: ds.averageScore ?? null,
               fieldScores:  ds.fieldScores  ?? null,
+              city:         ds.city         ?? null,
             };
           }
         });
@@ -148,6 +190,14 @@ export default function Dashboard() {
     // all_total → matchesCard = true (الكل)
 
     return matchesSearch && matchesStatus && matchesCard;
+  });
+
+  // ترتيب: ذوو الأولوية أولاً (يراعي priorityOverrides المحلية + بيانات السيرفر)
+  const sortedFilteredReports = (filteredReports ?? []).slice().sort((a, b) => {
+    const aPri = priorityOverrides.has(a.id!) ? priorityOverrides.get(a.id!)! : !!(a as any).isPriority;
+    const bPri = priorityOverrides.has(b.id!) ? priorityOverrides.get(b.id!)! : !!(b as any).isPriority;
+    if (aPri === bPri) return 0;
+    return aPri ? 1 : -1;
   });
 
   // التقارير الظاهرة التي يمكن تحديدها (الفاشلة فقط)
@@ -399,6 +449,7 @@ export default function Dashboard() {
                     )}
                     <TableHead className="text-right">رقم التقرير</TableHead>
                     <TableHead className="text-right">اسم العميل</TableHead>
+                    <TableHead className="text-right">المدينة</TableHead>
                     <TableHead className="text-right">نوع العقار</TableHead>
                     <TableHead className="text-right">تاريخ التقرير</TableHead>
                     <TableHead className="text-right">الحالة</TableHead>
@@ -408,13 +459,15 @@ export default function Dashboard() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredReports.map((report) => {
+                  {sortedFilteredReports.map((report) => {
                     const ds          = dsMap[report.id!];
                     const hasDs       = ds !== undefined;
                     const fs          = ds?.fieldScores ?? null;
                     const avgScore    = ds?.averageScore ?? null;
                     const isFailed    = (report as any).automationStatus === "failed";
                     const isQrError   = (report as any).automationStatus === "qr_error";
+                    const isQueued    = (report as any).automationStatus === "queued";
+                    const isPriority  = priorityOverrides.has(report.id!) ? priorityOverrides.get(report.id!)! : !!(report as any).isPriority;
                     const isSelected  = selectedIds.has(report.id!);
 
                     return (
@@ -437,13 +490,32 @@ export default function Dashboard() {
 
                         {/* رقم التقرير */}
                         <TableCell className="font-medium">
-                          <Link href={`/reports/${report.id}`}>
-                            <div className={`py-1 hover:underline ${isQrError ? "text-red-600 font-bold" : "text-primary"}`}>
-                              {report.reportNumber || "—"}
-                              {isQrError && <span className="mr-1 text-xs">(خطأ QR)</span>}
+                          <div className="flex items-center gap-1.5">
+                            {/* زر النجمة — للتقارير في الطابور فقط */}
+                            {isQueued && (
+                              <button
+                                onClick={(e) => togglePriority(report.id!, isPriority, e)}
+                                disabled={togglingPriority.has(report.id!)}
+                                title={isPriority ? "إلغاء الأولوية" : "تعيين كأولوية"}
+                                className={`shrink-0 p-0.5 rounded transition-colors
+                                  ${isPriority
+                                    ? "text-amber-500 hover:text-amber-600"
+                                    : "text-muted-foreground/40 hover:text-amber-400"}
+                                  ${togglingPriority.has(report.id!) ? "animate-pulse" : ""}`}
+                              >
+                                <Star className={`h-4 w-4 ${isPriority ? "fill-amber-400" : ""}`} />
+                              </button>
+                            )}
+                            <div>
+                              <Link href={`/reports/${report.id}`}>
+                                <div className={`py-1 hover:underline ${isQrError ? "text-red-600 font-bold" : "text-primary"}`}>
+                                  {report.reportNumber || "—"}
+                                  {isQrError && <span className="mr-1 text-xs">(خطأ QR)</span>}
+                                </div>
+                              </Link>
+                              <FieldScore score={fs?.reportNumber} />
                             </div>
-                          </Link>
-                          <FieldScore score={fs?.reportNumber} />
+                          </div>
                         </TableCell>
 
                         {/* اسم العميل */}
@@ -452,6 +524,13 @@ export default function Dashboard() {
                             <div className="py-1">{report.clientName || "—"}</div>
                           </Link>
                           <FieldScore score={fs?.clientName} />
+                        </TableCell>
+
+                        {/* المدينة — من بيانات النظام */}
+                        <TableCell>
+                          <div className="py-1 text-sm">
+                            {ds?.city || "—"}
+                          </div>
                         </TableCell>
 
                         {/* نوع العقار */}
