@@ -292109,55 +292109,6 @@ function _extractFieldFromText(text, label) {
   return "";
 }
 async function _extractQimaRequestData(page, requestId) {
-  let dbReport = null;
-  try {
-    const { getReportByRequestNumber: getReportByRequestNumber2 } = await Promise.resolve().then(() => (init_src(), src_exports));
-    dbReport = await getReportByRequestNumber2(requestId);
-    if (dbReport) {
-      _qimaLog(`\u{1F4C2} \u0648\u064F\u062C\u062F \u062A\u0642\u0631\u064A\u0631 \u0641\u064A \u0642\u0627\u0639\u062F\u0629 \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A (id=${dbReport.id}) \u2014 \u0633\u064A\u064F\u0633\u062A\u062E\u062F\u0645 \u0628\u062F\u0644\u0627\u064B \u0645\u0646 \u0635\u0641\u062D\u0629 QIMA`);
-    } else {
-      _qimaLog("\u2139\uFE0F \u0644\u0627 \u064A\u0648\u062C\u062F \u062A\u0642\u0631\u064A\u0631 \u0645\u0637\u0627\u0628\u0642 \u0641\u064A \u0642\u0627\u0639\u062F\u0629 \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A \u2014 \u0633\u064A\u064F\u0633\u062A\u062E\u062F\u0645 \u0646\u0635 \u0635\u0641\u062D\u0629 QIMA");
-    }
-  } catch (e) {
-    _qimaLog(`\u26A0\uFE0F \u062E\u0637\u0623 \u0641\u064A \u0627\u0633\u062A\u0639\u0644\u0627\u0645 DB: ${e.message?.slice(0, 60)}`);
-  }
-  if (dbReport) {
-    const area2 = dbReport.landArea != null ? String(dbReport.landArea) : dbReport.buildingArea != null ? String(dbReport.buildingArea) : "";
-    return {
-      MessageID: requestId,
-      ClientName: dbReport.clientName ?? "",
-      BeneficiaryPhone: dbReport.clientPhone ?? "",
-      IDNumber: requestId,
-      ReferenceNumber: dbReport.reportNumber ?? requestId,
-      City: dbReport.city ?? "",
-      District: dbReport.district ?? "",
-      Region: dbReport.region ?? "",
-      Purpose: dbReport.valuationPurpose ?? "",
-      ReportType: dbReport.reportType ?? "",
-      EmailDate: "",
-      FullSubject: "",
-      SenderEmail: "",
-      ProjectCode: "PRJ25050940",
-      PropertyCode: dbReport.reportNumber ?? "",
-      PrimeryCode: requestId,
-      MainMessageID: "",
-      ForwarderEmail: "",
-      BankCode: "2486",
-      Age: dbReport.buildingAge ?? "",
-      PropArea: area2,
-      PlanNumber: dbReport.planNumber ?? "",
-      ItemNumber: dbReport.plotNumber ?? "",
-      Street: dbReport.street ?? "",
-      SakNo: dbReport.deedNumber ?? "",
-      ReceiveDate: "",
-      LicenceNo: dbReport.buildingPermitNumber ?? "",
-      Estateusedfor: dbReport.propertyUse ?? "",
-      OwnershipName: dbReport.ownerName ?? "",
-      OwnershipPhone: "",
-      Source: "Qimah",
-      Chanel: "Web"
-    };
-  }
   const rawText = await page.evaluate(
     () => document.body.innerText || ""
   ).catch(() => "");
@@ -300831,10 +300782,49 @@ var import_multer3 = __toESM(require_multer(), 1);
 init_src();
 import * as fs7 from "fs";
 import * as path8 from "path";
+import { execFile } from "child_process";
 init_taqeem_session_store();
 init_queue_processor();
 var UPLOADS_DIR5 = path8.join(process.cwd(), "uploads");
 if (!fs7.existsSync(UPLOADS_DIR5)) fs7.mkdirSync(UPLOADS_DIR5, { recursive: true });
+var MAX_PDF_BYTES = 19 * 1024 * 1024;
+async function compressPdfIfNeeded(filePath) {
+  const stat = fs7.statSync(filePath);
+  if (stat.size <= MAX_PDF_BYTES) return filePath;
+  console.log(`[datasystem] \u26A0\uFE0F \u062D\u062C\u0645 \u0627\u0644\u0645\u0644\u0641 ${(stat.size / 1024 / 1024).toFixed(1)} MB > 19 MB \u2014 \u062C\u0627\u0631\u064D \u0627\u0644\u0636\u063A\u0637...`);
+  const compressedPath = filePath.replace(/\.pdf$/i, "") + "_compressed.pdf";
+  const args = [
+    "-sDEVICE=pdfwrite",
+    "-dCompatibilityLevel=1.4",
+    "-dPDFSETTINGS=/ebook",
+    // جودة كتاب إلكتروني (72 dpi صور) — يقلل الحجم بشكل كبير
+    "-dNOPAUSE",
+    "-dQUIET",
+    "-dBATCH",
+    `-sOutputFile=${compressedPath}`,
+    filePath
+  ];
+  await new Promise((resolve, reject) => {
+    execFile("gs", args, (err, _stdout, stderr) => {
+      if (err) {
+        console.error("[datasystem] \u274C \u0641\u0634\u0644 \u0636\u063A\u0637 PDF:", stderr || err.message);
+        reject(err);
+      } else {
+        resolve();
+      }
+    });
+  });
+  const compStat = fs7.statSync(compressedPath);
+  console.log(`[datasystem] \u2705 \u0628\u0639\u062F \u0627\u0644\u0636\u063A\u0637: ${(compStat.size / 1024 / 1024).toFixed(1)} MB`);
+  if (compStat.size >= stat.size) {
+    console.log("[datasystem] \u2139\uFE0F \u0627\u0644\u0645\u0644\u0641 \u0627\u0644\u0645\u0636\u063A\u0648\u0637 \u0623\u0643\u0628\u0631 \u2014 \u0633\u064A\u064F\u0633\u062A\u062E\u062F\u0645 \u0627\u0644\u0623\u0635\u0644\u064A");
+    fs7.unlinkSync(compressedPath);
+    return filePath;
+  }
+  fs7.unlinkSync(filePath);
+  fs7.renameSync(compressedPath, filePath);
+  return filePath;
+}
 var storage = import_multer3.default.diskStorage({
   destination: (_req, _file, cb) => cb(null, UPLOADS_DIR5),
   filename: (_req, file, cb) => {
@@ -301191,6 +301181,11 @@ router4.post("/datasystem/upload", (req, res, next) => {
       }
       filePath = file.path;
       originalName = file.originalname;
+    }
+    try {
+      filePath = await compressPdfIfNeeded(filePath);
+    } catch (compErr) {
+      console.warn("[datasystem] \u26A0\uFE0F \u0641\u0634\u0644 \u0627\u0644\u0636\u063A\u0637 \u2014 \u0633\u064A\u064F\u0633\u062A\u062E\u062F\u0645 \u0627\u0644\u0645\u0644\u0641 \u0627\u0644\u0623\u0635\u0644\u064A:", compErr.message);
     }
     console.log(`[datasystem] STEP-1: extractFields`);
     const dsData = extractFields(body, filePath);
