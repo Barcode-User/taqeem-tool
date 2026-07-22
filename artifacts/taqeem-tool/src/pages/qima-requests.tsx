@@ -169,23 +169,24 @@ export default function QimaRequestsPage() {
   };
 
   return (
-    <div className="space-y-6" dir="rtl">
+    <div className="space-y-3" dir="rtl">
 
       {/* بطاقة التحكم */}
       <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between flex-wrap gap-3">
-            <div className="flex items-center gap-3">
-              <div className={`h-9 w-9 rounded-full flex items-center justify-center ${
+        <CardContent className="p-3">
+          {/* الصف الأول: الحالة + الأزرار */}
+          <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+            <div className="flex items-center gap-2">
+              <div className={`h-7 w-7 rounded-full flex items-center justify-center shrink-0 ${
                 isRunning ? "bg-blue-100" : isReady ? "bg-green-100" : isFailed ? "bg-red-100" : "bg-slate-100"
               }`}>
-                {isRunning ? <Loader2 className="h-5 w-5 text-blue-600 animate-spin" />
-                  : isReady  ? <CheckCircle2 className="h-5 w-5 text-green-600" />
-                  : isFailed ? <AlertCircle className="h-5 w-5 text-red-500" />
-                  : <PlayCircle className="h-5 w-5 text-slate-500" />}
+                {isRunning ? <Loader2 className="h-4 w-4 text-blue-600 animate-spin" />
+                  : isReady  ? <CheckCircle2 className="h-4 w-4 text-green-600" />
+                  : isFailed ? <AlertCircle className="h-4 w-4 text-red-500" />
+                  : <PlayCircle className="h-4 w-4 text-slate-500" />}
               </div>
               <div>
-                <CardTitle className="text-base">فتح الطلبات المسندة تلقائياً</CardTitle>
+                <p className="text-sm font-semibold leading-none">فتح الطلبات المسندة تلقائياً</p>
                 <p className="text-xs text-muted-foreground mt-0.5">
                   {isRunning
                     ? "الروبوت يعمل — جارٍ البحث وفتح الطلبات..."
@@ -197,109 +198,94 @@ export default function QimaRequestsPage() {
                 </p>
               </div>
             </div>
-            <div className="flex gap-2 flex-wrap">
+            <div className="flex gap-1.5 flex-wrap">
               {isRunning && (
                 <Button variant="outline" size="sm" onClick={handleStop}
-                  className="gap-2 text-red-600 border-red-200 hover:bg-red-50">
-                  <StopCircle className="h-4 w-4" /> إيقاف
+                  className="gap-1.5 text-red-600 border-red-200 hover:bg-red-50 h-7 text-xs">
+                  <StopCircle className="h-3.5 w-3.5" /> إيقاف
                 </Button>
               )}
               {!isRunning && (
-                <Button onClick={handleStart} disabled={loading} className="gap-2 bg-violet-600 hover:bg-violet-700">
+                <Button size="sm" onClick={handleStart} disabled={loading}
+                  className="gap-1.5 bg-violet-600 hover:bg-violet-700 h-7 text-xs">
                   {loading
-                    ? <><Loader2 className="h-4 w-4 animate-spin" /> جارٍ التشغيل...</>
-                    : <><PlayCircle className="h-4 w-4" /> ابدأ</>}
+                    ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> جارٍ التشغيل...</>
+                    : <><PlayCircle className="h-3.5 w-3.5" /> ابدأ</>}
                 </Button>
               )}
-              <Button variant="outline" size="sm" onClick={fetchStatus} className="gap-2">
-                <RefreshCw className="h-4 w-4" />
+              <Button variant="outline" size="sm" onClick={fetchStatus} className="h-7 w-7 p-0">
+                <RefreshCw className="h-3.5 w-3.5" />
               </Button>
             </div>
           </div>
-        </CardHeader>
 
-        {/* شريط التشغيل التلقائي */}
-        <CardContent className="pt-0">
-          <div className={`rounded-lg border p-3 flex items-center justify-between gap-3 transition-colors ${
-            state.autoRestart
-              ? "bg-violet-50 border-violet-200"
-              : "bg-slate-50 border-slate-200"
+          {/* شريط التشغيل التلقائي */}
+          <div className={`rounded border px-3 py-2 flex items-center justify-between gap-2 ${
+            state.autoRestart ? "bg-violet-50 border-violet-200" : "bg-slate-50 border-slate-200"
           }`}>
-            <div className="flex items-center gap-2 min-w-0">
+            <div className="flex items-center gap-1.5 min-w-0">
               {state.autoRestart
-                ? <Timer className="h-4 w-4 text-violet-600 shrink-0" />
-                : <TimerOff className="h-4 w-4 text-slate-400 shrink-0" />}
-              <div className="min-w-0">
-                <p className={`text-sm font-medium ${state.autoRestart ? "text-violet-800" : "text-slate-600"}`}>
-                  التشغيل التلقائي كل 10 دقائق
-                </p>
+                ? <Timer className="h-3.5 w-3.5 text-violet-600 shrink-0" />
+                : <TimerOff className="h-3.5 w-3.5 text-slate-400 shrink-0" />}
+              <p className={`text-xs font-medium ${state.autoRestart ? "text-violet-800" : "text-slate-600"}`}>
+                التشغيل التلقائي كل 10 دقائق
                 {state.autoRestart && state.nextRunAt && (
-                  <p className="text-xs text-violet-600 mt-0.5">
-                    التشغيل القادم خلال: <span className="font-mono font-bold">{countdown}</span>
-                  </p>
+                  <span className="mr-2 text-violet-600">
+                    — القادم خلال: <span className="font-mono font-bold">{countdown}</span>
+                  </span>
                 )}
-                {!state.autoRestart && (
-                  <p className="text-xs text-slate-400 mt-0.5">موقوف — شغّله ليعيد البحث تلقائياً</p>
-                )}
-              </div>
+              </p>
             </div>
-            <Button
-              size="sm"
+            <Button size="sm"
               variant={state.autoRestart ? "default" : "outline"}
               onClick={handleToggleAuto}
               disabled={autoToggling || isRunning}
-              className={`shrink-0 gap-1.5 ${state.autoRestart ? "bg-violet-600 hover:bg-violet-700" : ""}`}
+              className={`shrink-0 gap-1 h-6 text-xs px-2 ${state.autoRestart ? "bg-violet-600 hover:bg-violet-700" : ""}`}
             >
               {autoToggling
-                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ? <Loader2 className="h-3 w-3 animate-spin" />
                 : state.autoRestart
-                ? <><TimerOff className="h-3.5 w-3.5" /> إيقاف</>
-                : <><Timer className="h-3.5 w-3.5" /> تفعيل</>}
+                ? <><TimerOff className="h-3 w-3" /> إيقاف</>
+                : <><Timer className="h-3 w-3" /> تفعيل</>}
             </Button>
           </div>
-        </CardContent>
 
-        {/* الطلبات المكتشفة */}
-        {state.assignedRequests.length > 0 && (
-          <CardContent className="pt-0">
-            <div className="rounded-lg bg-violet-50 border border-violet-200 p-3">
-              <p className="text-sm font-medium text-violet-800 mb-2">
-                الطلبات المسندة تلقائياً ({state.assignedRequests.length}):
+          {/* الطلبات المكتشفة */}
+          {state.assignedRequests.length > 0 && (
+            <div className="rounded bg-violet-50 border border-violet-200 px-3 py-2 mt-2">
+              <p className="text-xs font-medium text-violet-800 mb-1">
+                الطلبات المسندة ({state.assignedRequests.length}):
               </p>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-1.5">
                 {state.assignedRequests.map((url, i) => {
                   const match = url.match(/\/(\d+)/);
                   const id = match ? match[1] : `طلب ${i + 1}`;
                   return (
                     <a key={i} href={url} target="_blank" rel="noopener noreferrer"
-                      className="text-xs bg-white border border-violet-300 rounded px-2 py-1 text-violet-700 hover:bg-violet-100 transition-colors">
+                      className="text-xs bg-white border border-violet-300 rounded px-2 py-0.5 text-violet-700 hover:bg-violet-100 transition-colors">
                       #{id}
                     </a>
                   );
                 })}
               </div>
             </div>
-          </CardContent>
-        )}
+          )}
 
-        {/* رسالة خطأ */}
-        {isFailed && state.error && (
-          <CardContent className="pt-0">
-            <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 p-3 text-sm">
+          {/* رسالة خطأ */}
+          {isFailed && state.error && (
+            <div className="rounded bg-red-50 border border-red-200 text-red-700 px-3 py-2 text-xs mt-2">
               {state.error}
             </div>
-          </CardContent>
-        )}
+          )}
+        </CardContent>
       </Card>
 
       {/* سجل العمليات */}
       {state.logs.length > 0 && (
         <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">سجل العمليات</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="bg-slate-950 rounded-lg p-4 h-64 overflow-y-auto font-mono text-xs text-green-400 space-y-1">
+          <CardContent className="p-3">
+            <p className="text-xs font-medium text-muted-foreground mb-2">سجل العمليات</p>
+            <div className="bg-slate-950 rounded p-3 h-36 overflow-y-auto font-mono text-xs text-green-400 space-y-0.5">
               {state.logs.map((log, i) => {
                 const parts = log.match(/^\[(.+?)\] (.+)$/);
                 const time = parts ? new Date(parts[1]).toLocaleTimeString("ar-SA") : "";
