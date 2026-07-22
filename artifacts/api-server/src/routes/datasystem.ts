@@ -8,6 +8,7 @@ import { Router, type IRouter } from "express";
 import multer from "multer";
 import * as fs from "fs";
 import * as path from "path";
+import { execFile } from "child_process";
 import {
   sqliteInsertDataSystem,
   sqliteGetDataSystemById,
@@ -25,6 +26,59 @@ import { processQueue } from "../automation/queue-processor.js";
 
 const UPLOADS_DIR = path.join(process.cwd(), "uploads");
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
+const MAX_PDF_BYTES = 19 * 1024 * 1024; // 19 MB
+
+/**
+ * يضغط ملف PDF باستخدام Ghostscript إذا تجاوز حجمه MAX_PDF_BYTES.
+ * يُعيد مسار الملف النهائي (المضغوط أو الأصلي).
+ */
+async function compressPdfIfNeeded(filePath: string): Promise<string> {
+  const stat = fs.statSync(filePath);
+  if (stat.size <= MAX_PDF_BYTES) return filePath; // أصغر من الحد — لا حاجة
+
+  console.log(`[datasystem] ⚠️ حجم الملف ${(stat.size / 1024 / 1024).toFixed(1)} MB > 19 MB — جارٍ الضغط...`);
+
+  const compressedPath = filePath.replace(/\.pdf$/i, "") + "_compressed.pdf";
+
+  // ghostscript: ضغط متوسط يحافظ على القابلية للقراءة
+  const args = [
+    "-sDEVICE=pdfwrite",
+    "-dCompatibilityLevel=1.4",
+    "-dPDFSETTINGS=/ebook",   // جودة كتاب إلكتروني (72 dpi صور) — يقلل الحجم بشكل كبير
+    "-dNOPAUSE",
+    "-dQUIET",
+    "-dBATCH",
+    `-sOutputFile=${compressedPath}`,
+    filePath,
+  ];
+
+  await new Promise<void>((resolve, reject) => {
+    execFile("gs", args, (err, _stdout, stderr) => {
+      if (err) {
+        console.error("[datasystem] ❌ فشل ضغط PDF:", stderr || err.message);
+        reject(err);
+      } else {
+        resolve();
+      }
+    });
+  });
+
+  const compStat = fs.statSync(compressedPath);
+  console.log(`[datasystem] ✅ بعد الضغط: ${(compStat.size / 1024 / 1024).toFixed(1)} MB`);
+
+  // إذا كان الملف المضغوط أكبر (نادر) — احتفظ بالأصلي
+  if (compStat.size >= stat.size) {
+    console.log("[datasystem] ℹ️ الملف المضغوط أكبر — سيُستخدم الأصلي");
+    fs.unlinkSync(compressedPath);
+    return filePath;
+  }
+
+  // استبدل الأصلي بالمضغوط
+  fs.unlinkSync(filePath);
+  fs.renameSync(compressedPath, filePath);
+  return filePath;
+}
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
@@ -414,6 +468,13 @@ router.post("/datasystem/upload", (req, res, next) => {
       }
       filePath = file.path;
       originalName = file.originalname;
+    }
+
+    // ── ضغط الملف إذا تجاوز 19 MB ─────────────────────────────────────────
+    try {
+      filePath = await compressPdfIfNeeded(filePath);
+    } catch (compErr: any) {
+      console.warn("[datasystem] ⚠️ فشل الضغط — سيُستخدم الملف الأصلي:", compErr.message);
     }
 
     // ── 1: حفظ بيانات الشاشة في datasystem ────────────────────────────────
